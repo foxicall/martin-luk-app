@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'support/mock_preferences.dart';
 import 'package:martin_luk_app/app_controller.dart';
 import 'package:martin_luk_app/models/portfolio_position.dart';
 import 'package:martin_luk_app/models/stock_candidate.dart';
@@ -11,7 +11,9 @@ import 'package:martin_luk_app/services/candidate_repository.dart';
 
 class FailingQuotes implements PortfolioRepository {
   @override
-  Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols) async {
+  Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols, {
+    bool forceRefresh = false,
+  }) async {
     throw StateError('行情服務無法連線');
   }
   @override
@@ -21,7 +23,9 @@ class FailingQuotes implements PortfolioRepository {
 class DeferredQuotes implements PortfolioRepository {
   final response = Completer<PortfolioQuoteSnapshot>();
   @override
-  Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols) => response.future;
+  Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols, {
+    bool forceRefresh = false,
+  }) => response.future;
   @override
   void close() {}
 }
@@ -31,7 +35,7 @@ PortfolioPosition unknown({double entry = 100, double stop = 98}) => PortfolioPo
   entryPrice: entry, shares: 50, initialStop: stop);
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(seedMockPreferences);
 
   test('demo seeds both markets; unknown symbol never gets invented latest quotes', () async {
     final controller = AppController();

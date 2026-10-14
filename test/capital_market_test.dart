@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'support/mock_preferences.dart';
 
 import 'package:martin_luk_app/app_controller.dart';
 import 'package:martin_luk_app/main.dart';
@@ -33,7 +33,7 @@ Finder _settingsCapital(String label) => find.byWidgetPredicate(
     );
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(seedMockPreferences);
 
   test('native account defaults size USD and TWD risk independently', () async {
     final controller = AppController();

@@ -14,6 +14,8 @@ class _UnavailableApiRepository implements CandidateRepository {
   Future<CandidateSnapshot> fetch(
     StockMarket market, {
     required double adrThreshold,
+    bool forceRefresh = false,
+    bool refreshQuotesOnly = false,
   }) async {
     throw const RepositoryException('測試：離線環境無法連線 API');
   }
@@ -25,6 +27,8 @@ void main() {
   const savedLiveSettings = AppSettings(
     useMockData: false,
     apiBaseUrl: 'https://api.example.test',
+    dataProvider: 'backend',
+    autoRefreshEnabled: false,
   );
 
   setUp(() {

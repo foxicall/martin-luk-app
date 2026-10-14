@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'support/mock_preferences.dart';
 import 'package:martin_luk_app/app_controller.dart';
 import 'package:martin_luk_app/main.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(seedMockPreferences);
 
   testWidgets('390px portfolio shows targets and supports live scenario editing', (tester) async {
     tester.view.physicalSize = const Size(390, 844);

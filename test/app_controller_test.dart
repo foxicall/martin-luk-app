@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'support/mock_preferences.dart';
 import 'package:martin_luk_app/app_controller.dart';
 import 'package:martin_luk_app/models/stock_candidate.dart';
 import 'package:martin_luk_app/services/candidate_repository.dart';
@@ -10,7 +10,11 @@ class DeferredRepository implements CandidateRepository {
   final requests = <StockMarket, Completer<CandidateSnapshot>>{};
 
   @override
-  Future<CandidateSnapshot> fetch(StockMarket market, {required double adrThreshold}) {
+  Future<CandidateSnapshot> fetch(StockMarket market, {
+    required double adrThreshold,
+    bool forceRefresh = false,
+    bool refreshQuotesOnly = false,
+  }) {
     final request = Completer<CandidateSnapshot>();
     requests[market] = request;
     return request.future;
@@ -19,13 +23,17 @@ class DeferredRepository implements CandidateRepository {
 
 class FailingRepository implements CandidateRepository {
   @override
-  Future<CandidateSnapshot> fetch(StockMarket market, {required double adrThreshold}) async {
+  Future<CandidateSnapshot> fetch(StockMarket market, {
+    required double adrThreshold,
+    bool forceRefresh = false,
+    bool refreshQuotesOnly = false,
+  }) async {
     throw const RepositoryException('測試：API 不可用');
   }
 }
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(seedMockPreferences);
 
   test('mock market pages, threshold, sorts and distinct currency equities', () async {
     final controller = AppController();

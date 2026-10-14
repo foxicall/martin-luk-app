@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'support/mock_preferences.dart';
 import 'package:martin_luk_app/app_controller.dart';
 import 'package:martin_luk_app/main.dart';
 import 'package:martin_luk_app/screens/calculator_screen.dart';
@@ -8,7 +8,7 @@ import 'package:martin_luk_app/models/stock_candidate.dart';
 import 'package:martin_luk_app/services/candidate_repository.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(seedMockPreferences);
 
   testWidgets('dashboard switches market and opens persisted settings', (tester) async {
     final controller = AppController();

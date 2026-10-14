@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'support/mock_preferences.dart';
 
 import 'package:martin_luk_app/app_controller.dart';
 import 'package:martin_luk_app/main.dart';
@@ -8,7 +8,7 @@ import 'package:martin_luk_app/models/stock_candidate.dart';
 import 'package:martin_luk_app/screens/calculator_screen.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(seedMockPreferences);
 
   testWidgets('Chinese cross-market search opens the matching native-currency calculator', (tester) async {
     final controller = AppController();
@@ -66,7 +66,7 @@ void main() {
     expect(tester.widget<TextFormField>(cost).controller!.text, isEmpty);
     expect(tester.widget<TextFormField>(stop).controller!.text, isEmpty);
     final market = find.byType(DropdownButtonFormField<StockMarket>);
-    expect(tester.widget<DropdownButtonFormField<StockMarket>>(market).initialValue, StockMarket.us);
+    expect(tester.state<FormFieldState<StockMarket>>(market).value, StockMarket.us);
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
     expect(controller.portfolioPositions.any((row) => row.symbol == 'BRK-B'), isFalse);
@@ -94,7 +94,7 @@ void main() {
     await tester.pump();
     expect(tester.widget<TextFormField>(symbol).controller!.text, 'TSLA');
     final market = find.byType(DropdownButtonFormField<StockMarket>);
-    expect(tester.widget<DropdownButtonFormField<StockMarket>>(market).initialValue, StockMarket.us);
+    expect(tester.state<FormFieldState<StockMarket>>(market).value, StockMarket.us);
     final name = find.widgetWithText(TextFormField, '名稱（選填）');
     expect(tester.widget<TextFormField>(name).controller!.text, '特斯拉');
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField, '買進成本價')).controller!.text, isEmpty);
