@@ -6,6 +6,8 @@ class AppSettings {
     this.useMockData = AppConfig.useMockData,
     this.darkMode = true,
     this.apiBaseUrl = AppConfig.apiBaseUrl,
+    this.dataProvider = 'direct',
+    this.autoRefreshEnabled = true,
     this.twAdrThreshold = 3.5,
     this.usAdrThreshold = 5.0,
     this.twEquity = 1000000,
@@ -16,6 +18,9 @@ class AppSettings {
   final bool useMockData;
   final bool darkMode;
   final String apiBaseUrl;
+  /// Direct Yahoo HTTPS requires no backend URL. Backend is an explicit opt-in.
+  final String dataProvider;
+  final bool autoRefreshEnabled;
   final double twAdrThreshold;
   final double usAdrThreshold;
   final double twEquity;
@@ -26,6 +31,8 @@ class AppSettings {
     bool? useMockData,
     bool? darkMode,
     String? apiBaseUrl,
+    String? dataProvider,
+    bool? autoRefreshEnabled,
     double? twAdrThreshold,
     double? usAdrThreshold,
     double? twEquity,
@@ -36,6 +43,8 @@ class AppSettings {
         useMockData: useMockData ?? this.useMockData,
         darkMode: darkMode ?? this.darkMode,
         apiBaseUrl: apiBaseUrl ?? this.apiBaseUrl,
+        dataProvider: dataProvider ?? this.dataProvider,
+        autoRefreshEnabled: autoRefreshEnabled ?? this.autoRefreshEnabled,
         twAdrThreshold: twAdrThreshold ?? this.twAdrThreshold,
         usAdrThreshold: usAdrThreshold ?? this.usAdrThreshold,
         twEquity: twEquity ?? this.twEquity,
@@ -44,9 +53,12 @@ class AppSettings {
       );
 
   Map<String, dynamic> toJson() => {
+        'schema_version': 2,
         'use_mock_data': useMockData,
         'dark_mode': darkMode,
         'api_base_url': apiBaseUrl,
+        'data_provider': dataProvider,
+        'auto_refresh_enabled': autoRefreshEnabled,
         'tw_adr_threshold': twAdrThreshold,
         'us_adr_threshold': usAdrThreshold,
         'tw_equity': twEquity,
@@ -64,12 +76,24 @@ class AppSettings {
     bool flag(String key, bool fallback) =>
         json[key] is bool ? json[key] as bool : fallback;
     const defaults = AppSettings();
+    // Installed demonstration builds saved use_mock_data=true without a
+    // version marker. Migrate once to production while retaining account data.
+    // Version 2 preserves an explicit subsequent choice of demonstration mode.
+    final migrated = json['schema_version'] is int &&
+        (json['schema_version'] as int) >= 2;
+    final provider = json['data_provider'];
     return AppSettings(
-      useMockData: flag('use_mock_data', defaults.useMockData),
+      useMockData: migrated
+          ? flag('use_mock_data', defaults.useMockData)
+          : defaults.useMockData,
       darkMode: flag('dark_mode', defaults.darkMode),
       apiBaseUrl: json['api_base_url'] is String
           ? json['api_base_url'] as String
           : defaults.apiBaseUrl,
+      dataProvider: migrated && ['direct', 'backend'].contains(provider)
+          ? provider as String
+          : defaults.dataProvider,
+      autoRefreshEnabled: flag('auto_refresh_enabled', true),
       twAdrThreshold: positive('tw_adr_threshold', defaults.twAdrThreshold),
       usAdrThreshold: positive('us_adr_threshold', defaults.usAdrThreshold),
       twEquity: positive('tw_equity', defaults.twEquity),

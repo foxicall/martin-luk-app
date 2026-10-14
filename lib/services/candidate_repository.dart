@@ -14,6 +14,10 @@ class CandidateSnapshot {
     required this.universeCount,
     required this.stale,
     List<String> missingSymbols = const [],
+    this.evaluatedCount,
+    this.universeIsComplete = true,
+    this.universeAsOf,
+    this.scanCompletedAt,
   })  : candidates = List<StockCandidate>.unmodifiable(candidates),
         warnings = List<String>.unmodifiable(warnings),
         missingSymbols = List<String>.unmodifiable(missingSymbols);
@@ -25,6 +29,10 @@ class CandidateSnapshot {
   final int universeCount;
   final bool stale;
   final List<String> missingSymbols;
+  final int? evaluatedCount;
+  final bool universeIsComplete;
+  final DateTime? universeAsOf;
+  final DateTime? scanCompletedAt;
 
   DateTime get generatedAt => fetchedAt;
   bool get isStale => stale;
@@ -34,6 +42,8 @@ abstract interface class CandidateRepository {
   Future<CandidateSnapshot> fetch(
     StockMarket market, {
     required double adrThreshold,
+    bool forceRefresh = false,
+    bool refreshQuotesOnly = false,
   });
 }
 
@@ -59,6 +69,8 @@ class RealCandidateRepository implements CandidateRepository {
   Future<CandidateSnapshot> fetch(
     StockMarket market, {
     required double adrThreshold,
+    bool forceRefresh = false,
+    bool refreshQuotesOnly = false,
   }) async {
     _validateThreshold(adrThreshold);
     final endpoint = _baseUri.replace(
@@ -112,6 +124,9 @@ CandidateSnapshot _parseSnapshot(Map<String, dynamic> json, StockMarket market) 
       warnings.any((warning) => warning is! String) || rows is! List) {
     throw const FormatException('來源、股票池數量、快取狀態或候選清單格式無效。');
   }
+  if (RegExp(r'mock|demo|fictit|假|虛構|示範|離線', caseSensitive: false).hasMatch(source)) {
+    throw const FormatException('正式掃描 API 回傳了示範來源，已拒絕載入。');
+  }
   final candidates = <StockCandidate>[];
   final seenSymbols = <String>{};
   for (final row in rows) {
@@ -139,6 +154,10 @@ CandidateSnapshot _parseSnapshot(Map<String, dynamic> json, StockMarket market) 
     source: source,
     universeCount: count,
     stale: stale,
+    evaluatedCount: json['evaluated_count'] is int ? json['evaluated_count'] as int : null,
+    universeIsComplete: json['universe_is_complete'] != false,
+    universeAsOf: json['universe_as_of'] == null ? null : parseApiTimestamp(json['universe_as_of'], 'universe_as_of'),
+    scanCompletedAt: parseApiTimestamp(json['generated_at'], 'generated_at'),
     missingSymbols: missing == null ? const [] : (missing as List).cast<String>(),
   );
 }
@@ -165,6 +184,8 @@ class MockCandidateRepository implements CandidateRepository {
   Future<CandidateSnapshot> fetch(
     StockMarket market, {
     required double adrThreshold,
+    bool forceRefresh = false,
+    bool refreshQuotesOnly = false,
   }) async {
     _validateThreshold(adrThreshold);
     final candidates = _mockCandidates(market)
@@ -179,6 +200,8 @@ class MockCandidateRepository implements CandidateRepository {
       ],
       source: '離線示範',
       universeCount: 8,
+      evaluatedCount: 8,
+      universeIsComplete: false,
       stale: false,
     );
   }

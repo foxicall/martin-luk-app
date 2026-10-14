@@ -35,7 +35,8 @@ class PortfolioDiagnosis {
 /// Advisory only: never places an order or changes a holding's share count.
 class ExitAdvisoryEngine {
   static PortfolioDiagnosis evaluate(PortfolioPosition holding,
-      PortfolioQuote quote, double equity, {double euphoriaPercent = 20}) {
+      PortfolioQuote quote, double equity, {
+      double euphoriaPercent = 20, bool observe = true}) {
     if (!equity.isFinite || equity <= 0 || !euphoriaPercent.isFinite ||
         euphoriaPercent < 15 || euphoriaPercent > 20 || holding.key != quote.key) {
       throw ArgumentError('市場、帳戶淨值或正乖離門檻無效。');
@@ -52,12 +53,13 @@ class ExitAdvisoryEngine {
     if (ratio.compareTo(_Decimal.integer(3)) < 0 && currentR >= 3) {
       currentR = 2.9999999999999996;
     }
-    bool reached(int threshold) => ratio.compareTo(_Decimal.integer(threshold)) >= 0 ||
+    bool reached(int threshold) => (observe && ratio.compareTo(_Decimal.integer(threshold)) >= 0) ||
         holding.peakR >= threshold;
-    final peak = math.max(holding.peakR, currentR);
-    final stop = math.max(holding.trailingStop,
-        math.max(holding.initialStop, reached(2) ? holding.entryPrice : holding.initialStop));
-    final observed = holding.withObservation(peak, stop);
+    final peak = observe ? math.max(holding.peakR, currentR) : holding.peakR;
+    final stop = observe ? math.max(holding.trailingStop,
+        math.max(holding.initialStop, reached(2) ? holding.entryPrice : holding.initialStop))
+        : holding.trailingStop;
+    final observed = observe ? holding.withObservation(peak, stop) : holding;
     final selectedEma = holding.mainUptrend && reached(3) ? holding.trailingEma : 9;
     final boundary = switch (selectedEma) {
       21 => quote.ema21, 50 => quote.ema50, _ => quote.ema9,

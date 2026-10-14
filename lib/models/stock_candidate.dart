@@ -36,6 +36,7 @@ class StockCandidate {
     this.stopSource = 'day_low',
     this.dayLow,
     this.entryBarLow,
+    this.ema9, this.ema21, this.ema50, this.quotePrice,
   })  : triggerPrice = triggerPrice ?? entryPrice,
         patterns = List<String>.unmodifiable(patterns),
         notes = List<String>.unmodifiable(notes),
@@ -64,7 +65,7 @@ class StockCandidate {
     if (stopSource != null && !['day_low', 'entry_bar_low'].contains(stopSource)) {
       throw const FormatException('未知初始停損來源。');
     }
-    for (final value in [confirmationPrice, dayLow, entryBarLow]) {
+    for (final value in [confirmationPrice, dayLow, entryBarLow, ema9, ema21, ema50, quotePrice]) {
       if (value != null && (!value.isFinite || value <= 0)) {
         throw const FormatException('確認價及實際低點必須為有限正數。');
       }
@@ -111,6 +112,7 @@ class StockCandidate {
   final String? stopSource;
   final double? dayLow;
   final double? entryBarLow;
+  final double? ema9, ema21, ema50, quotePrice;
 
   bool get isConfirmed => status == 'confirmed';
   double? get riskPerShare => stopPrice == null ? null : entryPrice - stopPrice!;
@@ -169,6 +171,10 @@ class StockCandidate {
           : 'day_low',
       dayLow: json['day_low'] == null ? null : _number(json, 'day_low'),
       entryBarLow: json['entry_bar_low'] == null ? null : _number(json, 'entry_bar_low'),
+      ema9: json['ema9'] == null ? null : _number(json, 'ema9'),
+      ema21: json['ema21'] == null ? null : _number(json, 'ema21'),
+      ema50: json['ema50'] == null ? null : _number(json, 'ema50'),
+      quotePrice: json['quote_price'] == null ? null : _number(json, 'quote_price'),
     );
   }
 
@@ -197,6 +203,7 @@ class StockCandidate {
         'day_low': dayLow,
         'entry_bar_low': entryBarLow,
         'risk_per_share': riskPerShare,
+        'ema9': ema9, 'ema21': ema21, 'ema50': ema50, 'quote_price': quotePrice,
       };
 }
 

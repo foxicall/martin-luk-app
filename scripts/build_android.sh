@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install Flutter and Android SDK first, then run from any working directory.
-# Example: ./scripts/build_android.sh --split-per-abi
+# Connected release by default. Example: ./scripts/build_android.sh --split-per-abi
+# For an explicit demonstration build, pass --dart-define=USE_MOCK_DATA=true.
 set -euo pipefail
 project_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$project_dir"
@@ -13,5 +14,6 @@ python3 scripts/prepare_android.py
 flutter pub get
 flutter analyze
 flutter test
-flutter build apk --release --dart-define=USE_MOCK_DATA=true "$@"
+flutter build apk --release --dart-define=USE_MOCK_DATA=false \
+  --android-skip-build-dependency-validation "$@"
 printf 'APK output directory: %s/build/app/outputs/flutter-apk/\n' "$project_dir"

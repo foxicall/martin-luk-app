@@ -25,6 +25,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _twEquity;
   late final TextEditingController _usEquity;
   late bool _useMockData;
+  late String _dataProvider;
+  late bool _autoRefreshEnabled;
   late bool _darkMode;
   late bool _remindersEnabled;
   bool _saving = false;
@@ -39,6 +41,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _twEquity = TextEditingController(text: _number(settings.twEquity));
     _usEquity = TextEditingController(text: _number(settings.usEquity));
     _useMockData = settings.useMockData;
+    _dataProvider = settings.dataProvider;
+    _autoRefreshEnabled = settings.autoRefreshEnabled;
     _darkMode = settings.darkMode;
     _remindersEnabled = settings.remindersEnabled;
   }
@@ -88,7 +92,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String? _validateApiUrl(String? text) {
     final value = (text ?? '').trim();
-    if (_useMockData && value.isEmpty) return null;
+    // Direct Yahoo mode works on Android without a backend URL. Validate the
+    // optional relay only when it is the selected production data provider.
+    if (_useMockData || _dataProvider != 'backend') return null;
     final uri = Uri.tryParse(value);
     if (uri == null ||
         !uri.hasAuthority ||
@@ -108,6 +114,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final AppSettings previous = widget.controller.settings;
     final next = previous.copyWith(
       useMockData: _useMockData,
+      dataProvider: _dataProvider,
+      autoRefreshEnabled: _autoRefreshEnabled,
       darkMode: _darkMode,
       apiBaseUrl: _apiUrl.text.trim(),
       twAdrThreshold: double.parse(_twAdr.text.trim()),
@@ -223,7 +231,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     setState(() => _useMockData = value),
                           ),
                           const SizedBox(height: 12),
+                          DropdownButtonFormField<String>(
+                            key: const ValueKey('settings-data-provider'),
+                            value: _dataProvider,
+                            decoration: const InputDecoration(
+                              labelText: '正式行情來源',
+                              border: OutlineInputBorder(),
+                            ),
+                            items: const [
+                              DropdownMenuItem(value: 'direct', child: Text('Yahoo Finance · 手機直接連線')),
+                              DropdownMenuItem(value: 'backend', child: Text('Python API · 自訂中繼')),
+                            ],
+                            onChanged: _saving || _useMockData ? null : (value) {
+                              if (value != null) setState(() => _dataProvider = value);
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          Text(_useMockData
+                              ? '示範模式需明確開啟；連線失敗不會自動切換到假資料。'
+                              : _dataProvider == 'direct'
+                                  ? 'Android 直接取得 Yahoo 日 K 與最新可用報價，並在裝置上計算 ADR、EMA 與動能。行情可能延遲。'
+                                  : '經您的 Python API 取得行情與掃描結果。'),
+                          if (_dataProvider == 'backend') ...[
+                          const SizedBox(height: 12),
                           TextFormField(
+                            key: const ValueKey('settings-backend-url'),
                             controller: _apiUrl,
                             enabled: !_saving,
                             keyboardType: TextInputType.url,
@@ -238,6 +270,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               border: const OutlineInputBorder(),
                             ),
                             validator: _validateApiUrl,
+                          ),
+                          ],
+                          const SizedBox(height: 8),
+                          SwitchListTile.adaptive(
+                            key: const ValueKey('settings-auto-refresh'),
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('前台自動更新'),
+                            subtitle: const Text(
+                              'App 開啟時每 60 秒更新最新可用報價與持股診斷；背景暫停。下拉更新會強制重新請求。',
+                            ),
+                            value: _autoRefreshEnabled,
+                            onChanged: _saving ? null : (value) =>
+                                setState(() => _autoRefreshEnabled = value),
                           ),
                           const SizedBox(height: 8),
                           SwitchListTile.adaptive(

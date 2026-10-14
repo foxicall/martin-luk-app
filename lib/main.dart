@@ -18,19 +18,31 @@ class MartinLukApp extends StatefulWidget {
   State<MartinLukApp> createState() => _MartinLukAppState();
 }
 
-class _MartinLukAppState extends State<MartinLukApp> {
+class _MartinLukAppState extends State<MartinLukApp> with WidgetsBindingObserver {
   late final AppController _controller;
   int _selectedPage = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = widget.controller ?? AppController();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _controller.setForeground(lifecycle == null || lifecycle == AppLifecycleState.resumed);
     if (widget.controller == null) _controller.initialize();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Inactive, hidden and paused all stop the timer. This is foreground
+    // monitoring rather than Android background work or unattended trading.
+    _controller.setForeground(state == AppLifecycleState.resumed);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.setForeground(false);
     if (widget.controller == null) _controller.dispose();
     super.dispose();
   }

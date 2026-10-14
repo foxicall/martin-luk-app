@@ -81,6 +81,7 @@ class PortfolioQuote {
     required this.ema50, required this.lastClose, required this.closeConfirmed,
     required this.quoteTimestamp, required this.closeTimestamp,
     required this.source, required this.isLargeLiquid,
+    this.isCached = false, this.isStale = false, this.cacheWarning, this.fetchedAt,
   }) {
     if (!(market == StockMarket.tw ? RegExp(r'^\d{4}\.TW$') :
             RegExp(r'^[A-Z][A-Z0-9-]{0,14}$')).hasMatch(symbol) ||
@@ -106,6 +107,10 @@ class PortfolioQuote {
   final DateTime? closeTimestamp;
   final String source;
   final bool isLargeLiquid;
+  final bool isCached;
+  final bool isStale;
+  final String? cacheWarning;
+  final DateTime? fetchedAt;
   String get key => '${market.name}:$symbol';
 
   Map<String, dynamic> toJson() => {
@@ -115,6 +120,8 @@ class PortfolioQuote {
     'quote_timestamp': quoteTimestamp.toUtc().toIso8601String(),
     'close_timestamp': closeTimestamp?.toUtc().toIso8601String(),
     'source': source, 'is_large_liquid': isLargeLiquid,
+    'is_cached': isCached, 'is_stale': isStale, 'cache_warning': cacheWarning,
+    'fetched_at': fetchedAt?.toUtc().toIso8601String(),
   };
 
   factory PortfolioQuote.fromJson(Map<String, dynamic> json) {
@@ -133,6 +140,9 @@ class PortfolioQuote {
       closeTimestamp: json['close_timestamp'] == null ? null :
           parseApiTimestamp(json['close_timestamp'], 'close_timestamp'),
       source: _text(json, 'source'), isLargeLiquid: large,
+      isCached: json['is_cached'] == true, isStale: json['is_stale'] == true,
+      cacheWarning: json['cache_warning'] is String ? json['cache_warning'] as String : null,
+      fetchedAt: json['fetched_at'] == null ? null : parseApiTimestamp(json['fetched_at'], 'fetched_at'),
     );
   }
 }

@@ -3,10 +3,10 @@ import 'package:flutter/foundation.dart';
 /// USE_MOCK_DATA 可透過 --dart-define 設定，設定頁也能於執行時切換。
 abstract final class AppConfig {
   static const bool useMockData =
-      bool.fromEnvironment('USE_MOCK_DATA', defaultValue: true);
+      bool.fromEnvironment('USE_MOCK_DATA', defaultValue: false);
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:8000',
+    defaultValue: '',
   );
 
   /// Explicit browser preview links start in mock mode even if this browser

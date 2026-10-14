@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../models/stock_candidate.dart';
 import '../services/strategy_engine.dart';
@@ -13,11 +14,15 @@ class CalculatorScreen extends StatefulWidget {
     required this.candidate,
     required this.initialEquity,
     this.onEquityChanged,
+    this.dataSource,
+    this.isCached = false,
   });
 
   final StockCandidate candidate;
   final double initialEquity;
   final ValueChanged<double>? onEquityChanged;
+  final String? dataSource;
+  final bool isCached;
 
   @override
   State<CalculatorScreen> createState() => _CalculatorScreenState();
@@ -28,7 +33,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   PositionPlan? _plan;
   String? _inputError;
 
-  bool get _eligible => widget.candidate.hasValidStopRange;
+  bool get _eligible => widget.candidate.hasValidStopRange && !widget.isCached;
 
   String get _currency => widget.candidate.market.currencySymbol;
 
@@ -135,6 +140,11 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _buildStockHeader(context),
+                if (widget.isCached) ...[
+                  const SizedBox(height: 12),
+                  _notice(context, '顯示上次快取',
+                      '目前為原始時間的快取行情與型態；請回到推薦頁下拉更新後再評估進場。'),
+                ],
                 const SizedBox(height: 20),
                 LayoutBuilder(
                   builder: (context, constraints) {
@@ -218,6 +228,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               _metric(context, 'ADR · 20 日', '${stock.adrPercent.toStringAsFixed(2)}%'),
               _metric(context, 'RS 強度', stock.rsScore.toStringAsFixed(1)),
               _metric(context, 'RS 排名', '#${stock.rsRank}'),
+              if (stock.quotePrice != null)
+                _metric(context, '最新可用市價', _money(stock.quotePrice!)),
               _metric(context, '${stock.triggerType ?? '條件'} 觸發價', _money(stock.triggerPrice)),
               if (stock.confirmationPrice != null)
                 _metric(context, '突破確認價', _money(stock.confirmationPrice!)),
@@ -283,8 +295,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             if (!_eligible)
               _notice(
                 context,
-                '等待進場確認',
-                '此標的尚無有效突破或實際停損；當日低點風險須 ≤5%，'
+                widget.isCached ? '快取行情待更新' : '等待進場確認',
+                widget.isCached
+                    ? '請取得最新行情與型態確認後再計算建議買進股數。'
+                    : '此標的尚無有效突破或實際停損；當日低點風險須 ≤5%，'
                     '超過時才採 1.5%–3% 的分鐘 K 低點。'
                     '確認進場 K 棒與停損後才會提供買進股數。',
               ),
@@ -396,11 +410,19 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 ),
             ],
             const Divider(height: 28),
-            _dataRow(context, '行情時間', _date(stock.dataTimestamp)),
+            if (stock.ema9 != null)
+              _dataRow(context, '日線 9 EMA', _money(stock.ema9!)),
+            if (stock.ema21 != null)
+              _dataRow(context, '日線 21 EMA', _money(stock.ema21!)),
+            if (stock.ema50 != null)
+              _dataRow(context, '日線 50 EMA', _money(stock.ema50!)),
+            if (widget.dataSource != null)
+              _dataRow(context, '行情來源', widget.dataSource!),
+            _dataRow(context, '資料更新時間', _date(stock.dataTimestamp)),
             _dataRow(context, '訊號時間',
                 stock.signalTimestamp == null ? '尚未確認' : _date(stock.signalTimestamp!)),
             const SizedBox(height: 8),
-            Text('時間依裝置時區顯示。進場前請確認最新報價與訊號有效性。',
+            Text('時間以台北 UTC+08 顯示。最新可用市價與 PDH／ORH 觸發價分別列示；進場前請確認報價與訊號有效性。',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colors.onSurfaceVariant,
                       height: 1.5,
@@ -484,10 +506,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       );
 
   String _date(DateTime time) {
-    final local = time.toLocal();
-    String two(int value) => value.toString().padLeft(2, '0');
-    return '${local.year}/${two(local.month)}/${two(local.day)} '
-        '${two(local.hour)}:${two(local.minute)}';
+    final taipei = time.toUtc().add(const Duration(hours: 8));
+    return '${DateFormat('yyyy-MM-dd HH:mm:ss').format(taipei)} · 台北 UTC+08';
   }
 
   String _number(double value) {

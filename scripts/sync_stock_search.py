@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Embed the shared search dictionary/engine into both self-contained previews.
+"""Embed the shared search dictionary/engine into all self-contained previews.
 
 Run after editing stocks_master.json or stock_search.js. --check checks committed
 HTML without rewriting it, so CI catches stale/offline dictionary copies.
@@ -15,7 +15,11 @@ import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PREVIEWS = (ROOT / "preview/index.html", ROOT / "standalone_preview.html")
+PREVIEWS = (
+    ROOT / "preview/index.html",
+    ROOT / "standalone_preview.html",
+    ROOT / "preview/standalone_preview.html",
+)
 
 
 def validate_records(records: object) -> list[dict[str, object]]:
@@ -82,7 +86,7 @@ def main() -> None:
             if not args.check:
                 path.write_text(source, encoding="utf-8")
         counts = Counter(item["market"] for item in records)
-        print(f"Stock metadata {'verified' if args.check else 'embedded'}: US={counts['US']}, TW={counts['TW']}; both previews share the exact engine and dictionary.")
+        print(f"Stock metadata {'verified' if args.check else 'embedded'}: US={counts['US']}, TW={counts['TW']}; all {len(PREVIEWS)} entries share the exact engine and dictionary.")
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
         parser.exit(1, f"Search metadata verification failed: {error}\n")
 

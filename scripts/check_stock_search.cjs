@@ -54,7 +54,7 @@ engine.setStocksMaster(records);
 eq(engine.searchStock('輝達')[0].symbol,'NVDA','Convenience searchStock uses the configured in-memory index');
 for (const market of ['US','TW']) ok(records.filter(item=>item.market===market).length>=100, `${market} offline coverage at least 100 genuine records`);
 const jsSource = fs.readFileSync(path.join(root,'stock_search.js'),'utf8').trim();
-for (const filename of ['standalone_preview.html','preview/index.html']) {
+for (const filename of ['standalone_preview.html','preview/index.html','preview/standalone_preview.html']) {
   const html=fs.readFileSync(path.join(root,filename),'utf8');
   const block=id=>{const match=html.match(new RegExp(`<script\\b[^>]*\\bid="${id}"[^>]*>([\\s\\S]*?)<\\/script>`)); assert.ok(match, `Missing ${id} in ${filename}`); return match[1].trim();};
   eq(JSON.parse(block('stocks-master')), records, `${filename} embeds the full canonical dictionary`);

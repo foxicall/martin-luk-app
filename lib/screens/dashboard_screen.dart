@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../app_controller.dart';
 import '../models/stock_candidate.dart';
@@ -25,6 +26,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _finding = false;
   int _selectionVersion = 0;
 
+  bool _requiresRefresh(StockCandidate stock) {
+    if (controller.settings.useMockData) return false;
+    if (controller.snapshot?.stale ?? false) return true;
+    // The live engine accepts intraday quotes up to 15 minutes old. Apply the
+    // same limit to retained cards outside the small foreground quote batch;
+    // updating the batch's global timestamp cannot renew every card's quote.
+    final age = DateTime.now().toUtc().difference(stock.dataTimestamp.toUtc());
+    return age.isNegative || age > const Duration(minutes: 15);
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: controller,
@@ -43,14 +54,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
               actions: [
                 IconButton(
                   tooltip: '重新評估',
-                  onPressed: controller.loading ? null : controller.refresh,
+                  onPressed: controller.loading
+                      ? null : () => controller.refresh(forceRefresh: true),
                   icon: const Icon(Icons.refresh_rounded),
                 ),
                 const SizedBox(width: 8),
               ],
             ),
             body: RefreshIndicator(
-              onRefresh: controller.refresh,
+              onRefresh: () => controller.refresh(forceRefresh: true),
               child: Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 1200),
@@ -224,7 +236,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ? controller.settings.twAdrThreshold
         : controller.settings.usAdrThreshold;
     final confirmed = snapshot?.candidates
-            .where((stock) => stock.isConfirmed && stock.adrPercent >= threshold)
+            .where((stock) => stock.isConfirmed && !_requiresRefresh(stock) &&
+                stock.adrPercent >= threshold)
             .length ??
         0;
     return Container(
@@ -259,7 +272,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  controller.settings.useMockData ? 'OFFLINE MOCK · 離線示範' : 'API · 掃描引擎',
+                  controller.settings.useMockData ? 'OFFLINE MOCK · 離線示範'
+                      : controller.settings.dataProvider == 'direct'
+                          ? 'YAHOO · 連網行情' : 'API · 掃描引擎',
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
@@ -276,6 +291,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             runSpacing: 16,
             children: [
               _summary(context, '股票池', snapshot?.universeCount.toString() ?? '—'),
+              if (snapshot?.evaluatedCount != null)
+                _summary(context, '已評估', '${snapshot!.evaluatedCount}'),
               _summary(context, '目前符合 ADR', '${controller.filteredCount}'),
               _summary(context, '已確認型態', '$confirmed'),
               _summary(context, 'ADR 門檻', '${threshold.toStringAsFixed(1)}%'),
@@ -288,10 +305,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       color: colors.onPrimaryContainer,
                     )),
             const SizedBox(height: 4),
-            Text('評估時間：${_date(snapshot.fetchedAt)} · 裝置時區',
+            Text('資料更新時間：${_date(snapshot.fetchedAt)}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colors.onPrimaryContainer,
                     )),
+            if (snapshot.scanCompletedAt != null &&
+                snapshot.scanCompletedAt != snapshot.fetchedAt)
+              Text('完整掃描時間：${_date(snapshot.scanCompletedAt!)}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onPrimaryContainer,
+                  )),
+            if (!snapshot.universeIsComplete)
+              Text('目前使用本機股票清單；尚未確認完整最新上市成分。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onPrimaryContainer,
+                  )),
+            if (snapshot.universeAsOf != null)
+              Text('股票池時間：${_date(snapshot.universeAsOf!)}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onPrimaryContainer,
+                  )),
           ] else
             Text('尚未取得評估快照',
                 style: TextStyle(color: colors.onPrimaryContainer)),
@@ -302,6 +335,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       color: colors.onPrimaryContainer,
                       fontWeight: FontWeight.w600,
                     )),
+          ],
+          if (!controller.settings.useMockData) ...[
+            const SizedBox(height: 8),
+            Text(controller.autoRefreshActive
+                ? '前台每 60 秒更新報價 · 下拉可立即更新'
+                : '自動更新暫停 · 下拉可立即更新',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.onPrimaryContainer,
+                )),
           ],
         ],
       ),
@@ -320,7 +362,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           controller.error!,
           error: true,
           action: TextButton.icon(
-            onPressed: controller.loading ? null : controller.refresh,
+            onPressed: controller.loading
+                ? null : () => controller.refresh(forceRefresh: true),
             icon: const Icon(Icons.refresh, size: 18),
             label: const Text('重試'),
           ),
@@ -330,7 +373,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (snapshot?.stale ?? false) {
       widgets.add(Padding(
         padding: const EdgeInsets.only(top: 12),
-        child: _warning(context, '資料已過期', '目前顯示快取結果；重新整理並確認最新行情後再評估進場。'),
+        child: _warning(context, '顯示上次快取',
+            '資料更新時間仍保留原始時間；請重新整理並確認最新行情後再評估進場。'),
       ));
     }
     if (snapshot != null) {
@@ -401,6 +445,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   stock: stocks[row * columns + column],
                                   equity: controller.equityFor(
                                       stocks[row * columns + column].market),
+                                  isCached: _requiresRefresh(
+                                      stocks[row * columns + column]),
                                   onTap: () => _openStock(
                                       context, stocks[row * columns + column]),
                                 )
@@ -418,11 +464,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
 
   void _openStock(BuildContext context, StockCandidate stock) {
+    final sourceAtOpen = controller.snapshot?.source;
     Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => CalculatorScreen(
-        candidate: stock,
-        initialEquity: controller.equityFor(stock.market),
-        onEquityChanged: (equity) => controller.setEquity(stock.market, equity),
+      builder: (_) => AnimatedBuilder(
+        animation: controller,
+        builder: (context, _) {
+          StockCandidate? latest;
+          final snapshot = controller.snapshot;
+          for (final item in snapshot?.candidates ?? const <StockCandidate>[]) {
+            if (item.market == stock.market && item.symbol == stock.symbol) {
+              latest = item;
+              break;
+            }
+          }
+          // Polling also updates the open detail screen. If a new scan no
+          // longer contains the symbol, retain its last data as a snapshot.
+          return CalculatorScreen(
+            candidate: latest ?? stock,
+            initialEquity: controller.equityFor(stock.market),
+            dataSource: latest == null ? sourceAtOpen : snapshot?.source,
+            isCached: latest == null || _requiresRefresh(latest),
+            onEquityChanged: (equity) => controller.setEquity(stock.market, equity),
+          );
+        },
       ),
     ));
   }
@@ -514,10 +578,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   String _date(DateTime time) {
-    final local = time.toLocal();
-    String two(int value) => value.toString().padLeft(2, '0');
-    return '${local.year}/${two(local.month)}/${two(local.day)} '
-        '${two(local.hour)}:${two(local.minute)}';
+    // Taiwan has no daylight-saving offset. Display one explicit time zone
+    // across both markets rather than silently changing with device settings.
+    final taipei = time.toUtc().add(const Duration(hours: 8));
+    return '${DateFormat('yyyy-MM-dd HH:mm:ss').format(taipei)} · 台北 UTC+08';
   }
 }
 
@@ -527,13 +591,16 @@ class _RecommendationCard extends StatelessWidget {
     required this.stock,
     required this.equity,
     required this.onTap,
+    required this.isCached,
   });
 
   final StockCandidate stock;
   final double equity;
   final VoidCallback onTap;
+  final bool isCached;
 
   PositionPlan? get _plan {
+    if (isCached) return null;
     try {
       return StrategyEngine.calculate(stock, equity);
     } catch (_) {
@@ -576,6 +643,23 @@ class _RecommendationCard extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.onSurfaceVariant,
                       )),
+              if (stock.quotePrice != null) ...[
+                const SizedBox(height: 8),
+                Text('最新可用市價 ${stock.market.currencySymbol}${stock.quotePrice!.toStringAsFixed(2)}',
+                    style: Theme.of(context).textTheme.bodyMedium),
+              ],
+              const SizedBox(height: 6),
+              Text('行情時間：${_date(stock.dataTimestamp)}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  )),
+              if (isCached) Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text('保留行情 · 待更新確認',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.error,
+                    )),
+              ),
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -601,10 +685,11 @@ class _RecommendationCard extends StatelessWidget {
                 runSpacing: 6,
                 children: [
                   _patternBadge(context,
-                      plan != null ? '已確認' : '觀察',
+                      isCached ? '快取觀察' : plan != null ? '已確認' : '觀察',
                       plan != null ? Icons.verified_outlined : Icons.visibility_outlined),
                   for (final pattern in stock.patterns.take(3))
-                    _patternBadge(context, pattern, _patternIcon(pattern)),
+                    _patternBadge(context, isCached ? '上次：$pattern' : pattern,
+                        _patternIcon(pattern)),
                   if (stock.patterns.length > 3)
                     _patternBadge(context, '+${stock.patterns.length - 3}', Icons.more_horiz),
                 ],
@@ -636,7 +721,8 @@ class _RecommendationCard extends StatelessWidget {
                   if (stock.riskPerShare != null)
                     Text('1R ${stock.market.currencySymbol}${stock.riskPerShare!.toStringAsFixed(2)}',
                         style: Theme.of(context).textTheme.bodySmall),
-                  Text(plan == null ? '部位待確認' : '建議部位 ${plan.positionPercent.toStringAsFixed(2)}%',
+                  Text(isCached ? '部位待更新' : plan == null
+                      ? '部位待確認' : '建議部位 ${plan.positionPercent.toStringAsFixed(2)}%',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: colors.primary,
                             fontWeight: FontWeight.w700,
@@ -666,6 +752,11 @@ class _RecommendationCard extends StatelessWidget {
                   ?.copyWith(fontWeight: FontWeight.w700)),
         ],
       );
+
+  String _date(DateTime value) {
+    final taipei = value.toUtc().add(const Duration(hours: 8));
+    return '${DateFormat('yyyy-MM-dd HH:mm:ss').format(taipei)} · 台北 UTC+08';
+  }
 
   Widget _patternBadge(BuildContext context, String label, IconData icon) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),

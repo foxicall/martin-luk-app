@@ -65,6 +65,16 @@ REQUIRED_FILES = (
     "scripts/refresh_stock_metadata.py",
     "test/stock_search_service_test.dart", "test/stock_search_widget_test.dart",
     "test/stock_search_integration_test.dart",
+    "preview/standalone_preview.html", "run_preview.bat", "WINDOWS_UPDATE_GUIDE.md",
+    "PRODUCTION_GUIDE.md", "lib/models/market_data.dart",
+    "lib/services/market_data_api.dart", "lib/services/live_strategy_engine.dart",
+    "lib/services/live_candidate_repository.dart", "lib/services/live_portfolio_repository.dart",
+    "lib/services/stock_universe_service.dart",
+    "test/market_data_api_test.dart", "test/live_strategy_engine_test.dart",
+    "test/live_repositories_test.dart", "test/stock_universe_service_test.dart",
+    "test/production_controller_test.dart", "test/production_lifecycle_test.dart",
+    "test/production_ui_test.dart", "test/live_http_smoke_test.dart",
+    "test/live_risk_helpers_test.dart", "test/support/mock_preferences.dart",
     "assets/fonts/MartinPreviewSans.otf", "assets/fonts/OFL.txt",
     "android/settings.gradle", "android/build.gradle", "android/gradle.properties",
     "android/app/build.gradle", "android/gradlew", "android/gradlew.bat",
@@ -171,6 +181,17 @@ def validate_contents(files: dict[str, bytes]) -> None:
     require(not re.search(r"@import\b|url\s*\(\s*['\"]?(?!data:|#)", offline_css, re.I), "單檔預覽 CSS 有外部資源")
     require(not re.search(r"\b(?:fetch|XMLHttpRequest|WebSocket|EventSource)\s*\(|sendBeacon\s*\(|localhost|127\.0\.0\.1", standalone),
             "單檔預覽不得含任何 API 呼叫或本機伺服器網址")
+    require(files["preview/standalone_preview.html"] == files["standalone_preview.html"],
+            "Windows 指定預覽與原單檔預覽內容不一致")
+    batch = files["run_preview.bat"].decode("utf-8")
+    require('start "" "%~dp0preview\\standalone_preview.html"' in batch,
+            "Windows 批次檔未指向指定相對預覽路徑")
+    config = files["lib/app_config.dart"].decode("utf-8")
+    require("bool.fromEnvironment('USE_MOCK_DATA', defaultValue: false)" in config,
+            "App 正式連網預設尚未關閉 Mock")
+    live_engine = files["lib/services/live_strategy_engine.dart"].decode("utf-8")
+    for method in ("calculatePositionSize", "calculateExitTargets"):
+        require(method in live_engine, f"缺少指定風控函式：{method}")
 
     # Search is an identity index, not a quote source. Ensure both offline
     # documents contain the same complete dictionary/algorithm as Flutter.
@@ -189,7 +210,8 @@ def validate_contents(files: dict[str, bytes]) -> None:
                 f"{market} 股票字典來源記錄與筆數不一致")
     require(coverage.get("total") == len(metadata), "股票字典來源總筆數不一致")
     search_engine = files["stock_search.js"].decode("utf-8").strip()
-    for title, document in (("preview/index.html", preview), ("standalone_preview.html", standalone)):
+    for title, document in (("preview/index.html", preview), ("standalone_preview.html", standalone),
+                            ("preview/standalone_preview.html", files["preview/standalone_preview.html"].decode("utf-8"))):
         blocks: dict[str, str] = {}
         for identifier in ("stocks-master", "stock-search-core"):
             match = re.search(rf'<script\b[^>]*\bid="{identifier}"[^>]*>([\s\S]*?)</script>', document)
@@ -204,7 +226,8 @@ def validate_contents(files: dict[str, bytes]) -> None:
         "actions/setup-java@v4", "distribution: temurin", "java-version: '17'",
         "subosito/flutter-action@v2", "channel: stable", "scripts/prepare_android.py",
         "flutter pub get", "flutter analyze", "flutter test", "flutter build apk --release",
-        "USE_MOCK_DATA=true", "actions/upload-artifact@v4",
+        "USE_MOCK_DATA=false", "--android-skip-build-dependency-validation",
+        "martin-luk-production-apk", "actions/upload-artifact@v4",
         "build/app/outputs/flutter-apk/app-release.apk", "retention-days: 14",
     ):
         require(marker in workflow, f"Actions 工作流缺少：{marker}")

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../app_controller.dart';
 import '../models/portfolio_position.dart';
@@ -22,6 +23,10 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   double? _threshold;
   AppController get controller => widget.controller;
   String _price(double value) => value.toStringAsFixed(2);
+  String _date(DateTime value) {
+    final taipei = value.toUtc().add(const Duration(hours: 8));
+    return '${DateFormat('yyyy-MM-dd HH:mm:ss').format(taipei)} · 台北 UTC+08';
+  }
 
   @override
   void initState() {
@@ -220,6 +225,9 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
           itemBuilder: (_) => [const PopupMenuItem(value: 'edit', child: Text('編輯持股')),
             if (controller.settings.useMockData) const PopupMenuItem(value: 'quote', child: Text('調整示範行情')),
             const PopupMenuItem(value: 'delete', child: Text('刪除持股'))])]),
+        if (!controller.settings.useMockData && holding.id.startsWith('demo-'))
+          const Padding(padding: EdgeInsets.only(top: 8),
+            child: Text('先前示範庫存，請確認成本與股數或刪除。')),
         const SizedBox(height: 8),
         Wrap(spacing: 12, children: [
           _metric('目前市價', quote == null ? '尚無行情' : _price(quote.currentPrice)),
@@ -227,7 +235,17 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
           _metric('初始硬停損', _price(holding.initialStop)),
           _metric('目前浮動硬停損', _price(diagnosis?.position.trailingStop ?? holding.trailingStop)),
         ]),
-        if (error != null) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(error)),
+        if (quote != null && (quote.isCached || quote.isStale ||
+            controller.isPortfolioQuoteCached(holding.key)))
+          Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(
+            quote.cacheWarning ?? '顯示上次快取行情；報價時間維持原值，請更新後再評估操作。',
+            style: TextStyle(color: Theme.of(context).colorScheme.error))),
+        if (error != null) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, children: [Text(error),
+          TextButton.icon(onPressed: _busy || controller.portfolioLoading ? null
+            : () => _run(() => controller.refreshPortfolio(forceRefresh: true)),
+            icon: const Icon(Icons.refresh), label: const Text('重試行情')),
+        ])),
         if (diagnosis != null && quote != null) ...[
           const Divider(),
           Text(diagnosis.label, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
@@ -252,10 +270,10 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
             backgroundColor: diagnosis.currentR >= target.key ? color.withValues(alpha: 0.14) : null,
           )).toList()),
           Text('每日均線：9=${_price(quote.ema9)} · 21=${_price(quote.ema21)} · 50=${_price(quote.ema50)}'),
-          Text(quote.closeConfirmed ? '已確認日收盤 ${_price(quote.lastClose!)} · ${quote.closeTimestamp!.toLocal()}'
+          Text(quote.closeConfirmed ? '已確認日收盤 ${_price(quote.lastClose!)} · ${_date(quote.closeTimestamp!)}'
               : '收盤尚未確認；市價低於均線不觸發每日出場'),
           const SizedBox(height: 6),
-          Text('${quote.source}\n報價時間：${quote.quoteTimestamp.toLocal()}', style: Theme.of(context).textTheme.bodySmall),
+          Text('${quote.source}\n資料更新時間：${_date(quote.quoteTimestamp)}', style: Theme.of(context).textTheme.bodySmall),
         ],
         if (controller.settings.useMockData) Padding(padding: const EdgeInsets.only(top: 8),
           child: OutlinedButton.icon(onPressed: _busy ? null : () => _editQuote(holding),
@@ -271,11 +289,11 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
     final missing = holdings.where((p) => !controller.portfolioQuotes.containsKey(p.key)).length;
     return Scaffold(appBar: AppBar(title: const Text('我的持股庫存'), actions: [
       IconButton(tooltip: '更新行情', onPressed: controller.portfolioLoading || _busy ? null :
-        () => _run(controller.refreshPortfolio), icon: const Icon(Icons.refresh)),
+        () => _run(() => controller.refreshPortfolio(forceRefresh: true)), icon: const Icon(Icons.refresh)),
     ]), floatingActionButton: FloatingActionButton.extended(
       onPressed: _busy || controller.portfolioLoading ? null : () => _editHolding(),
       icon: const Icon(Icons.add), label: const Text('新增持股')),
-      body: RefreshIndicator(onRefresh: controller.refreshPortfolio, child: ListView(
+      body: RefreshIndicator(onRefresh: () => controller.refreshPortfolio(forceRefresh: true), child: ListView(
         physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
         children: [Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 760),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -285,7 +303,16 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
             ], selected: {_market}, onSelectionChanged: (values) => setState(() => _market = values.first)),
             const SizedBox(height: 12),
             Text(controller.settings.useMockData ? '離線假行情情境；範例持股與報價均為虛構。'
-              : 'API 市場行情；取得失敗時顯示錯誤，不切換為假資料。'),
+              : controller.settings.dataProvider == 'direct'
+                  ? 'Yahoo Finance 最新可用行情 · 裝置上計算每日 EMA 與持股 R 倍數。'
+                  : 'Python API 最新可用市場行情。'),
+            if (!controller.settings.useMockData) ...[
+              Text(controller.autoRefreshActive
+                  ? '前台每 60 秒自動更新；下拉可立即重新取得報價。'
+                  : '自動更新暫停；下拉可立即重新取得報價。'),
+              if (controller.portfolioUpdatedAt != null)
+                Text('最近取得行情：${_date(controller.portfolioUpdatedAt!)}'),
+            ],
             const Text('庫存只儲存在此裝置，不連接券商。各市場以自身帳戶淨值計算，不合併 USD／TWD。'),
             const SizedBox(height: 12),
             Text('帳戶淨值 ${_market.currencySymbol}${_price(controller.equityFor(_market))}'),

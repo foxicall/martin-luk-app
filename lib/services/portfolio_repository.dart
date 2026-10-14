@@ -16,7 +16,7 @@ class PortfolioQuoteSnapshot {
 }
 
 abstract interface class PortfolioRepository {
-  Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols);
+  Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols, {bool forceRefresh = false});
   void close();
 }
 
@@ -34,7 +34,7 @@ class RealPortfolioRepository implements PortfolioRepository {
   final bool _ownsClient;
 
   @override
-  Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols) async {
+  Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols, {bool forceRefresh = false}) async {
     final quotes = <String, PortfolioQuote>{};
     final errors = <String, String>{};
     final sources = <String>{};
@@ -117,7 +117,7 @@ bool _isDemoSource(String value) =>
 /// Fixed fictitious daily snapshots. Unknown symbols require manual demo input.
 class MockPortfolioRepository implements PortfolioRepository {
   @override
-  Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols) async {
+  Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols, {bool forceRefresh = false}) async {
     final known = {for (final quote in mockPortfolioQuotes()) quote.key: quote};
     final quotes = <String, PortfolioQuote>{};
     final errors = <String, String>{};
