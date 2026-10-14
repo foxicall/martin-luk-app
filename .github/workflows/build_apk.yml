@@ -1,21 +1,27 @@
-name: Build verified market scan APK
+name: Build APK from source
+
 'on':
   push:
     branches: [main, master, fix/refresh-live-gate-20261014]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Locate Flutter project
         id: project
         shell: bash
@@ -30,15 +36,11 @@ jobs:
             exit 1
           fi
 
-    
-        
-      - name: Upload complete updated source files
-        uses: actions/upload-artifact@v4
-        with:
-          name: martin-luk-market-scan-updated-source
-          path: ${{ steps.project.outputs.path }}/build/market-scan-updated-source.zip
-          if-no-files-found: error
-          retention-days: 14
+      - name: Initialize verification log
+        working-directory: ${{ steps.project.outputs.path }}
+        run: |
+          mkdir -p test_logs
+          printf '%s\n' 'CI started; live market verification has not run yet.' > test_logs/verification.log
 
       - uses: actions/setup-python@v5
         with:
@@ -89,10 +91,12 @@ jobs:
 
       - name: Analyze and test
         working-directory: ${{ steps.project.outputs.path }}
+        shell: bash
         run: |
-          flutter pub get
-          flutter analyze
-          flutter test
+          set -euo pipefail
+          flutter pub get 2>&1 | tee -a test_logs/verification.log
+          flutter analyze 2>&1 | tee -a test_logs/verification.log
+          flutter test 2>&1 | tee -a test_logs/verification.log
 
       - name: Verify fresh live recommendation gate
         id: live-scan
@@ -101,21 +105,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build
-          flutter test test/integration_scan_test.dart --dart-define=RUN_LIVE_SCAN_TEST=true --timeout=60s --dart-define=USE_MOCK_DATA=false 2>&1 | tee build/live-scan.log
+          flutter test test/integration_scan_test.dart --dart-define=RUN_LIVE_SCAN_TEST=true --timeout=60s --dart-define=USE_MOCK_DATA=false 2>&1 | tee -a test_logs/verification.log
           test -s build/live-scan-evidence.json
 
       - name: Upload live scan evidence
-        if: ${{ always() && (steps.live-scan.outcome == 'success' || steps.live-scan.outcome == 'failure') }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: martin-luk-live-scan-evidence
-          path: |
-            ${{ steps.project.outputs.path }}/build/live-scan-evidence.json
-            ${{ steps.project.outputs.path }}/build/live-scan.log
-          if-no-files-found: error
+          path: '**/test_logs/verification.log'
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Build Production Release APK
+        if: ${{ success() && steps.live-scan.outcome == 'success' }}
         working-directory: ${{ steps.project.outputs.path }}
         run: flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
 
@@ -123,20 +126,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: martin-luk-app-release
-          path: '**/build/app/outputs/flutter-apk/app-release.apk'
+          path: '**/build/app/outputs/flutter-apk/*.apk'
           if-no-files-found: error
           retention-days: 7
-
-      - name: Build Web preview
-        working-directory: ${{ steps.project.outputs.path }}
-        run: |
-          flutter build web --release --no-web-resources-cdn --dart-define=USE_MOCK_DATA=false
-          cp web/phone_preview.html build/web/phone_preview.html
-
-      - name: Upload Web preview
-        uses: actions/upload-artifact@v4
-        with:
-          name: martin-luk-production-web
-          path: ${{ steps.project.outputs.path }}/build/web/
-          if-no-files-found: error
-          retention-days: 14
