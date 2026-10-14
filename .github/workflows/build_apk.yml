@@ -30,10 +30,10 @@ jobs:
             exit 1
           fi
 
-      - name: Apply verified market scan updates
+      - name: Apply 10-second market scan fix
         working-directory: ${{ steps.project.outputs.path }}
-        run: python3 scripts/apply_market_scan_fix.py --project . --zip build/market-scan-updated-source.zip
-
+        run: python3 scripts/apply_market_scan_timeout_fix.py --project . --zip build/market-scan-updated-source.zip
+        
       - name: Upload complete updated source files
         uses: actions/upload-artifact@v4
         with:
