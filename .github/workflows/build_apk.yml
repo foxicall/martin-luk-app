@@ -1,16 +1,16 @@
-name: Build Android APK
+name: Build Android APK with Verification Gate
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, fix/refresh-live-gate-20261014 ]
   workflow_dispatch:
 
 jobs:
-  build:
+  verify-and-build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 檢出專案程式碼
+      - name: 檢出專案代碼
         uses: actions/checkout@v4
 
       - name: 設定 Java 環境 (JDK 17)
@@ -24,40 +24,52 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: 自動定位專案根目錄
+      - name: 定位專案目錄
         id: locate-project
         run: |
           PUBSPEC_PATH=$(find . -name "pubspec.yaml" | head -n 1)
           if [ -z "$PUBSPEC_PATH" ]; then
-            echo "::error::找不到 pubspec.yaml！"
+            echo "::error::找不到 pubspec.yaml"
             exit 1
           fi
           PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
-          echo "找到專案目錄: $PROJECT_DIR"
           echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
 
-      - name: 自動升級 Gradle Wrapper 版本以滿足 Flutter 需求
+      - name: 自動升級 Gradle Wrapper
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
         run: |
           WRAPPER_FILE="android/gradle/wrapper/gradle-wrapper.properties"
           if [ -f "$WRAPPER_FILE" ]; then
-            echo "更新 gradle-wrapper.properties 至 8.14..."
             sed -i 's/gradle-.*-all.zip/gradle-8.14-all.zip/g' "$WRAPPER_FILE"
             sed -i 's/gradle-.*-bin.zip/gradle-8.14-bin.zip/g' "$WRAPPER_FILE"
-            cat "$WRAPPER_FILE"
           fi
 
-      - name: 下載專案套件 (flutter pub get)
+      - name: 下載依賴套件
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
         run: flutter pub get
 
-      - name: 編譯 Release APK
+      - name: 執行真實連網與策略推薦門禁測試
+        id: run-gate-test
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
         run: |
-          # 加入忽略版本檢查旗標以確保順利建置
-          flutter build apk --release --android-skip-build-dependency-validation
+          mkdir -p test_logs
+          echo "開始執行真實連線驗證測試..."
+          flutter test test/integration_scan_test.dart --timeout=90s 2>&1 | tee test_logs/verification.log
 
-      - name: 上傳 APK 成品供下載
+      - name: 保存實測紀錄 (不論成功失敗均保留)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: martin-luk-live-scan-evidence
+          path: '**/test_logs/verification.log'
+          retention-days: 7
+
+      - name: 編譯正式版 Release APK (僅在門禁測試通過後執行)
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        run: |
+          flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+
+      - name: 上傳 APK 成品
         uses: actions/upload-artifact@v4
         with:
           name: martin-luk-app-release
