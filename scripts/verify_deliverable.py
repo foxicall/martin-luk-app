@@ -231,6 +231,11 @@ def validate_contents(files: dict[str, bytes]) -> None:
         "build/app/outputs/flutter-apk/app-release.apk", "retention-days: 14",
     ):
         require(marker in workflow, f"Actions 工作流缺少：{marker}")
+    android_app = files["android/app/build.gradle"].decode("utf-8")
+    require(bool(re.search(r"\bcompileSdk\s*=\s*36\b", android_app)),
+            "Android compileSdk 必須符合 shared_preferences_android 的 API 36 要求")
+    require("platforms;android-36" in workflow and "build-tools;36.0.0" in workflow,
+            "Actions 未安裝 Android SDK 36／Build Tools 36.0.0")
 
     pubspec = files["pubspec.yaml"].decode("utf-8")
     require(bool(re.search(r"^\s*-\s*stocks_master\.json\s*$", pubspec, re.M)),

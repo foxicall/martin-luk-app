@@ -144,8 +144,8 @@ if [[ "${MARTIN_ACCEPT_ANDROID_LICENSES:-0}" == 1 ]]; then
 else
   sdkmanager "${sdkmanager_proxy_args[@]}" --sdk_root="$ANDROID_HOME" --licenses
 fi
-sdkmanager "${sdkmanager_proxy_args[@]}" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-35" \
-  "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
+sdkmanager "${sdkmanager_proxy_args[@]}" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-36" \
+  "build-tools;36.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
 flutter config --android-sdk "$ANDROID_HOME"
 flutter precache --android
 python3 "$project_dir/scripts/prepare_android.py"
