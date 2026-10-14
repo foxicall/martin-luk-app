@@ -61,14 +61,18 @@ jobs:
           set -euo pipefail
           flutter pub get 2>&1 | tee -a test_logs/verification.log
 
-      - name: Verify fresh live recommendation gate
+            - name: Verify fresh live recommendation gate
         id: live-scan
         working-directory: ${{ steps.project.outputs.path }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! -f test/integration_scan_test.dart ]]; then
+            printf '%s\n' 'Missing test/integration_scan_test.dart; commit this file to the selected branch.' | tee -a test_logs/verification.log
+            exit 1
+          fi
           mkdir -p build
-          flutter test test/integration_scan_test.dart --dart-define=RUN_LIVE_SCAN_TEST=true --timeout=60s --dart-define=USE_MOCK_DATA=false 2>&1 | tee -a test_logs/verification.log
+          flutter test test/integration_scan_test.dart --dart-define=RUN_LIVE_SCAN_TEST=true --timeout=60s --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
           test -s build/live-scan-evidence.json
 
       - name: Upload live scan evidence
