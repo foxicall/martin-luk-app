@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>390 × 844 Flutter 手機預覽</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #020617; color: #e2e8f0; font-family: system-ui, sans-serif; }
+    header { margin: 24px auto; padding: 0 20px; text-align: center; }
+    h1 { margin: 0 0 8px; font-size: 20px; }
+    p { margin: 8px 0; color: #94a3b8; font-size: 14px; }
+    a { color: #5eead4; }
+    .stage { display: flex; justify-content: center; padding: 0 16px 28px; }
+    .phone { width: 414px; height: 868px; flex: none; border: 12px solid #1e293b;
+      border-radius: 40px; overflow: hidden; box-shadow: 0 20px 70px #0008; }
+    iframe { display: block; width: 390px; height: 844px; border: 0; background: #0f172a; }
+    @media (max-width: 450px) {
+      header { display: none; }
+      .stage { padding: 0; }
+      .phone { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
+      iframe { width: 100%; height: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Martin Luk · Flutter 手機預覽</h1>
+    <p>桌面 iframe 視窗為 390 × 844 CSS 像素；窄螢幕自動填滿視窗。</p>
+    <p><a id="direct" href="index.html?preview=mock" target="_blank" rel="noopener">直接開啟 Flutter App</a> · 在 App 設定中切換深色模式、ADR 門檻與資料來源</p>
+  </header>
+  <main class="stage">
+    <div class="phone">
+      <iframe id="app" src="index.html?preview=mock" title="Flutter 動能觀察 App" allow="clipboard-write"></iframe>
+    </div>
+  </main>
+  <script>
+    // ?mode=live leaves initial mode to Flutter's compiled/persisted settings.
+    if (new URLSearchParams(location.search).get("mode") === "live") {
+      document.getElementById("app").src = "index.html";
+      document.getElementById("direct").href = "index.html";
+    }
+  </script>
+</body>
+</html>

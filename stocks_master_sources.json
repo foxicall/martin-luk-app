@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-10-13",
+  "coverage": {
+    "total": 793,
+    "us": 509,
+    "us_sp500_snapshot": 503,
+    "us_additional_major": 6,
+    "tw": 284
+  },
+  "additional_us_symbols": [
+    "TSM",
+    "SHOP",
+    "NET",
+    "RBLX",
+    "ZM",
+    "OKTA"
+  ],
+  "sources": {
+    "us": {
+      "url": "https://github.com/datasets/s-and-p-500-companies/blob/main/data/constituents.csv",
+      "blob_sha": "728fd5f099dcd362e0f381ccf4806cd0603ff854",
+      "upstream": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+      "license": "ODC-PDDL-1.0",
+      "description": "503 security records read from an external S&P 500 dataset snapshot, plus the named major-US additions. Multiple share classes mean security count differs from company count."
+    },
+    "tw": {
+      "description": "Manually curated metadata for 284 known TWSE ordinary-stock identities. This is a common-stock search seed, not an official complete/current TWSE listing snapshot.",
+      "refresh_source": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
+    },
+    "names_and_aliases": {
+      "description": "Manually curated common Chinese/English company names, short codes, and aliases are merged with public company identity facts."
+    }
+  },
+  "field_policy": {
+    "name_zh": "Chinese common name when curated; otherwise the source English name is a transparent display fallback.",
+    "name_full_zh": "Empty string when a complete legal Chinese name has not been verified; never invent a translation.",
+    "name_en": "Known English company name, or the public source Security label. Some source labels are short names rather than complete legal names.",
+    "quotes": "This file has no prices, indicators, current membership guarantee, or generated trading signals."
+  },
+  "refresh": "python scripts/refresh_stock_metadata.py --market all; then regenerate embedded HTML search assets with the project synchronization script.",
+  "caveat": "Metadata supports offline identification only. Constituents, tickers and company names can change; use the refresh command in a network-enabled environment before relying on current universe coverage."
+}

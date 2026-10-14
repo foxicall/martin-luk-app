@@ -1,0 +1,19 @@
+{
+  "name": "Martin Luk 動能觀察",
+  "short_name": "Martin Luk",
+  "description": "台股與美股動能觀察及風險部位計算機",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "icons/Icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
