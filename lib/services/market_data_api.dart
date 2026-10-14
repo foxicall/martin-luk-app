@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -7,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/market_data.dart';
 import '../models/stock_candidate.dart';
-import 'network_request.dart';
 
 class MarketDataException implements Exception {
   const MarketDataException(this.message, {this.statusCode});
@@ -19,9 +19,10 @@ class MarketDataException implements Exception {
   String toString() => message;
 }
 
-/// Direct HTTPS Yahoo chart transport, independent of a privately hosted
-/// backend. Public endpoints may throttle, delay quotes or change without
-/// notice. No request failure is ever substituted with fictitious prices.
+/// Yahoo 行情服務。
+///
+/// HTTP、取消、限流、重試與快取皆位於本檔案。
+/// 連線失敗不會替換為 Mock 行情。
 class MarketDataApi {
   MarketDataApi({
     http.Client? client,
@@ -29,19 +30,26 @@ class MarketDataApi {
     Future<SharedPreferences> Function()? preferencesLoader,
     DateTime Function()? now,
     Future<void> Function(Duration)? delay,
-    this.requestTimeout = NetworkRequest.maximumTimeout,
-    this.storageTimeout = NetworkRequest.storageTimeout,
-  }) : _network = NetworkRequest(
-         client: client,
-         timeout: requestTimeout,
-       ),
+    this.requestTimeout = defaultTimeout,
+    this.storageTimeout = defaultStorageTimeout,
+  }) : _client = client ?? http.Client(),
+       _ownsClient = client == null,
        _preferences = preferences,
        _preferencesLoader =
            preferencesLoader ?? SharedPreferences.getInstance,
        _now = now ?? DateTime.now,
        _delay = delay ?? Future<void>.delayed {
+    if (requestTimeout <= Duration.zero ||
+        requestTimeout > defaultTimeout) {
+      throw ArgumentError.value(
+        requestTimeout,
+        'requestTimeout',
+        'HTTP 逾時必須大於零且不得超過 8 秒。',
+      );
+    }
+
     if (storageTimeout <= Duration.zero ||
-        storageTimeout > NetworkRequest.storageTimeout) {
+        storageTimeout > defaultStorageTimeout) {
       throw ArgumentError.value(
         storageTimeout,
         'storageTimeout',
@@ -50,9 +58,22 @@ class MarketDataApi {
     }
   }
 
-  final NetworkRequest _network;
+  static const Duration defaultTimeout = Duration(seconds: 8);
+  static const Duration defaultStorageTimeout = Duration(seconds: 2);
+  static const int maximumConcurrentRequests = 5;
+
+  // 所有行情服務實例共用名額，包括推薦與持股行情。
+  static final _requestSlots = _YahooRequestSlots(
+    maximumConcurrentRequests,
+  );
+
+  final http.Client _client;
+  final bool _ownsClient;
+  final Set<_YahooPendingRequest> _activeRequests = {};
+
   SharedPreferences? _preferences;
   Future<SharedPreferences?>? _preferencesFuture;
+
   final Future<SharedPreferences> Function() _preferencesLoader;
   final DateTime Function() _now;
   final Future<void> Function(Duration) _delay;
@@ -114,8 +135,8 @@ class MarketDataApi {
         forceRefresh: forceRefresh,
       );
 
-  /// Intraday transport failures leave valid daily observations available,
-  /// but carry an explicit error so callers cannot confirm a breakout.
+  /// 分鐘行情失敗時保留日 K，但明確傳遞錯誤。
+  /// 缺少分鐘資料時，策略不得虛構開盤突破訊號。
   Future<ChartBundle> fetchBundle(
     String symbol,
     StockMarket market, {
@@ -133,13 +154,15 @@ class MarketDataApi {
     }
 
     try {
+      final intraday = await fetchIntraday(
+        symbol,
+        market,
+        forceRefresh: forceRefresh,
+      );
+
       return ChartBundle(
         daily: daily,
-        intraday: await fetchIntraday(
-          symbol,
-          market,
-          forceRefresh: forceRefresh,
-        ),
+        intraday: intraday,
       );
     } catch (error) {
       return ChartBundle(
@@ -163,7 +186,8 @@ class MarketDataApi {
     final canonical = canonicalSymbol(symbol, market);
     final key = '${market.name}:$canonical:$interval:$range';
 
-    // Acquire the in-flight slot before awaiting storage.
+    // 相同股票與週期共用進行中的請求。
+    // 在等待快取之前取得同步槽，避免儲存服務卡住時重複請求。
     final pending = _pending[key];
     if (pending != null) {
       return pending;
@@ -183,7 +207,7 @@ class MarketDataApi {
     try {
       return await future;
     } finally {
-      // An older request cannot clear a newer operation's slot.
+      // 遲到的舊操作不能清除新操作的同步槽。
       if (identical(_pending[key], future)) {
         _pending.remove(key);
       }
@@ -270,67 +294,8 @@ class MarketDataApi {
         },
       );
 
-      http.Response? response;
-
-      // HTTP, Retry-After and one retry share the same request budget.
-      final elapsed = Stopwatch()..start();
-
-      for (var attempt = 0; attempt < 2; attempt++) {
-        final remaining = requestTimeout - elapsed.elapsed;
-
-        if (remaining <= Duration.zero) {
-          throw TimeoutException(
-            'Yahoo 重試超過請求期限。',
-            requestTimeout,
-          );
-        }
-
-        response = await _network.get(
-          uri,
-          timeout: remaining,
-          headers: const {
-            'Accept': 'application/json',
-          },
-        );
-
-        if (response.statusCode != 429) {
-          break;
-        }
-
-        final header = response.headers['retry-after'];
-        final wait =
-            int.tryParse(header ?? '') ?? (header == null ? 1 : 30);
-
-        if (attempt == 1 || wait > 3) {
-          _rateLimitedUntil = _now().toUtc().add(
-            Duration(
-              seconds: math.max(1, math.min(wait, 300)),
-            ),
-          );
-          break;
-        }
-
-        final delayBudget = requestTimeout - elapsed.elapsed;
-
-        if (delayBudget <= Duration.zero) {
-          throw TimeoutException(
-            'Yahoo 重試超過請求期限。',
-            requestTimeout,
-          );
-        }
-
-        await _delay(
-          Duration(seconds: math.max(1, wait)),
-        ).timeout(delayBudget);
-      }
-
-      final received = response;
-
-      if (received == null) {
-        throw const MarketDataException(
-          'Yahoo 行情未回傳 HTTP 回應。',
-        );
-      }
+      // 明確非空：方法只會回傳 Response 或拋出例外。
+      final http.Response received = await _getWithRetry(uri);
 
       if (received.statusCode != 200) {
         throw MarketDataException(
@@ -372,8 +337,8 @@ class MarketDataApi {
 
       return chart;
     } catch (error) {
-      // TimeoutException, ClientException and native socket errors all reach
-      // this catch. Preserve a genuine dated cache; never generate mock data.
+      // 捕獲逾時、ClientException 與原生 SocketException。
+      // 真實快取保留原始時間，並標記過期。
       if (cached != null) {
         try {
           return _parse(
@@ -407,12 +372,151 @@ class MarketDataApi {
         );
       }
 
-      // A generic catch also handles SocketException without importing
-      // dart:io into this Web-compatible production service.
+      // 不引用 dart:io，維持 Flutter Web 相容。
       throw MarketDataException(
         'Yahoo 行情解析或連線失敗：$error',
       );
     }
+  }
+
+  Future<http.Response> _getWithRetry(Uri uri) async {
+    // 排隊、下載本文、429 等待與重試共用同一網路期限。
+    final elapsed = Stopwatch()..start();
+
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final remaining = requestTimeout - elapsed.elapsed;
+
+      if (remaining <= Duration.zero) {
+        throw TimeoutException(
+          'Yahoo 重試超過請求期限。',
+          requestTimeout,
+        );
+      }
+
+      // 每次回應使用不可為空的區域變數。
+      final http.Response response = await _sendWithTimeout(
+        uri,
+        remaining,
+      );
+
+      if (response.statusCode != 429) {
+        return response;
+      }
+
+      final String? header = response.headers['retry-after'];
+      final wait =
+          int.tryParse(header ?? '') ?? (header == null ? 1 : 30);
+
+      // 長 Retry-After 不阻塞 UI，也不繼續轟炸供應商。
+      if (attempt == 1 || wait > 3) {
+        _rateLimitedUntil = _now().toUtc().add(
+          Duration(
+            seconds: math.max(1, math.min(wait, 300)),
+          ),
+        );
+
+        return response;
+      }
+
+      final delayBudget = requestTimeout - elapsed.elapsed;
+
+      if (delayBudget <= Duration.zero) {
+        throw TimeoutException(
+          'Yahoo 重試超過請求期限。',
+          requestTimeout,
+        );
+      }
+
+      await _delay(
+        Duration(seconds: math.max(1, wait)),
+      ).timeout(delayBudget);
+
+      if (_closed) {
+        throw StateError('行情服務已關閉。');
+      }
+    }
+
+    throw const MarketDataException(
+      'Yahoo 行情重試次數已達上限。',
+    );
+  }
+
+  Future<http.Response> _sendWithTimeout(
+    Uri uri,
+    Duration timeout,
+  ) async {
+    if (_closed) {
+      throw StateError('行情服務已關閉。');
+    }
+
+    final pending = _YahooPendingRequest(
+      _requestSlots.acquire(),
+    );
+
+    _activeRequests.add(pending);
+    var succeeded = false;
+
+    try {
+      // 期限包含等待名額、連線、標頭及完整回應本文。
+      final http.Response response =
+          await Future.any<http.Response>([
+        _sendWhenReady(uri, pending),
+        pending.abort.future.then<http.Response>(
+          (_) => throw http.RequestAbortedException(uri),
+        ),
+      ]).timeout(
+        timeout,
+        onTimeout: () {
+          pending.cancel();
+
+          throw TimeoutException(
+            'Yahoo HTTP 請求超過期限。',
+            timeout,
+          );
+        },
+      );
+
+      if (_closed) {
+        throw StateError('行情服務已關閉。');
+      }
+
+      succeeded = true;
+      return response;
+    } finally {
+      _activeRequests.remove(pending);
+
+      if (!succeeded) {
+        pending.cancel();
+      }
+
+      pending.slot.release();
+    }
+  }
+
+  Future<http.Response> _sendWhenReady(
+    Uri uri,
+    _YahooPendingRequest pending,
+  ) async {
+    await pending.slot.ready;
+
+    if (_closed ||
+        pending.abort.isCompleted ||
+        !pending.slot.isActive) {
+      throw http.RequestAbortedException(uri);
+    }
+
+    final request = http.AbortableRequest(
+      'GET',
+      uri,
+      abortTrigger: pending.abort.future,
+    );
+
+    request.headers['Accept'] = 'application/json';
+
+    // Response.fromStream 會等待完整本文，納入外層 timeout。
+    return _client.send(request).then<http.Response>(
+      http.Response.fromStream,
+    );
   }
 
   MarketChart _parse(
@@ -427,7 +531,8 @@ class MarketDataApi {
   }) {
     final chart = document['chart'];
 
-    if (chart is! Map<String, dynamic> || chart['error'] != null) {
+    if (chart is! Map<String, dynamic> ||
+        chart['error'] != null) {
       throw const FormatException(
         'Yahoo 未提供有效行情，可能代碼不存在或供應商拒絕請求。',
       );
@@ -503,7 +608,7 @@ class MarketDataApi {
       final close = _positive((values['close'] as List)[index]);
       final volume = (values['volume'] as List)[index];
 
-      // Null OHLCV rows represent unavailable data, not zero-price candles.
+      // 缺漏 K 棒不填成零，也不以前值補成假行情。
       if (time == null ||
           open == null ||
           high == null ||
@@ -579,6 +684,7 @@ class MarketDataApi {
 
     DateTime? sessionStart;
     DateTime? sessionEnd;
+
     final periods = meta['currentTradingPeriod'];
 
     if (periods is Map<String, dynamic> &&
@@ -625,6 +731,7 @@ class MarketDataApi {
     }
 
     final pending = _preferencesFuture;
+
     if (pending != null) {
       return pending;
     }
@@ -640,7 +747,7 @@ class MarketDataApi {
 
         return preferences;
       } catch (_) {
-        // An unavailable preferences plugin does not disable HTTP.
+        // 儲存不可用時仍可使用 HTTP 與記憶體快取。
         return null;
       }
     }();
@@ -695,8 +802,9 @@ class MarketDataApi {
             ?.remove('$_prefix$key')
             .timeout(storageTimeout);
       } catch (_) {
-        // Broken persistence cannot block a live request.
+        // 快取刪除失敗不阻塞新行情。
       }
+
       return null;
     }
   }
@@ -724,7 +832,7 @@ class MarketDataApi {
           )
           .timeout(storageTimeout);
     } catch (_) {
-      // Cache write failure does not discard a successful live response.
+      // 寫入快取失敗不丟棄已成功取得的行情。
     }
   }
 
@@ -736,13 +844,112 @@ class MarketDataApi {
           ?.remove('$_prefix$key')
           .timeout(storageTimeout);
     } catch (_) {
-      // Removal is best effort.
+      // 最佳努力清理。
     }
   }
 
   void close() {
+    if (_closed) {
+      return;
+    }
+
     _closed = true;
-    _network.close();
+
+    for (final pending in _activeRequests) {
+      pending.cancel();
+    }
+
+    _activeRequests.clear();
+
+    // 外部注入的 Client 由呼叫者管理。
+    if (_ownsClient) {
+      _client.close();
+    }
+  }
+}
+
+/// 本檔案私有的請求取消狀態。
+class _YahooPendingRequest {
+  _YahooPendingRequest(this.slot);
+
+  final _YahooRequestSlot slot;
+  final abort = Completer<void>();
+
+  void cancel() {
+    if (!abort.isCompleted) {
+      abort.complete();
+    }
+
+    slot.release();
+  }
+}
+
+/// FIFO 名額池，取消時立即移除等待項目。
+class _YahooRequestSlots {
+  _YahooRequestSlots(this.limit);
+
+  final int limit;
+  int _used = 0;
+
+  final Queue<_YahooRequestSlot> _queue = Queue<_YahooRequestSlot>();
+
+  _YahooRequestSlot acquire() {
+    final slot = _YahooRequestSlot(this);
+    _queue.addLast(slot);
+    _drain();
+    return slot;
+  }
+
+  void _release(_YahooRequestSlot slot) {
+    if (slot._released) {
+      return;
+    }
+
+    slot._released = true;
+
+    if (slot._granted) {
+      _used--;
+    } else {
+      _queue.remove(slot);
+    }
+
+    // 喚醒已取消的等待者；它不會再送出 HTTP。
+    if (!slot._ready.isCompleted) {
+      slot._ready.complete();
+    }
+
+    _drain();
+  }
+
+  void _drain() {
+    while (_used < limit && _queue.isNotEmpty) {
+      final slot = _queue.removeFirst();
+
+      if (slot._released) {
+        continue;
+      }
+
+      slot._granted = true;
+      _used++;
+      slot._ready.complete();
+    }
+  }
+}
+
+class _YahooRequestSlot {
+  _YahooRequestSlot(this._pool);
+
+  final _YahooRequestSlots _pool;
+  final _ready = Completer<void>();
+
+  bool _granted = false;
+  bool _released = false;
+
+  Future<void> get ready => _ready.future;
+  bool get isActive => _granted && !_released;
+
+  void release() {
+    _pool._release(this);
   }
 }
 
@@ -753,7 +960,7 @@ class _CachedChart {
   final DateTime fetchedAt;
 }
 
-/// Normalize Yahoo class-share spelling and the TWSE suffix.
+/// 正規化 Yahoo 美股類別股及台股 .TW 代碼。
 String canonicalSymbol(String raw, StockMarket market) {
   var symbol = raw.trim().toUpperCase();
 
