@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 檢出專案代碼
+      - name: 檢出專案程式碼
         uses: actions/checkout@v4
 
       - name: 設定 Java 環境 (JDK 17)
@@ -24,15 +24,30 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: 下載專案依賴
+      - name: 自動定位專案根目錄
+        id: locate-project
+        run: |
+          # 尋找 pubspec.yaml 所在的目錄
+          PUBSPEC_PATH=$(find . -name "pubspec.yaml" | head -n 1)
+          if [ -z "$PUBSPEC_PATH" ]; then
+            echo "::error::在整個儲存庫中完全找不到 pubspec.yaml！請確認是否漏傳該檔案。"
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
+          echo "找到專案目錄位於: $PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
+
+      - name: 下載專案套件 (flutter pub get)
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
         run: flutter pub get
 
       - name: 編譯 Release APK
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
         run: flutter build apk --release
 
       - name: 上傳 APK 成品供下載
         uses: actions/upload-artifact@v4
         with:
           name: martin-luk-app-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: '**/build/app/outputs/flutter-apk/app-release.apk'
           retention-days: 7
