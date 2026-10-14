@@ -282,7 +282,7 @@ class AppController extends ChangeNotifier {
         return _activeScanFuture!.then<void>((_) {
           final currentKey = '${_portfolioSource(_settings)}:${_market.name}:'
               '${_market == StockMarket.tw ? _settings.twAdrThreshold : _settings.usAdrThreshold}';
-          if (_disposed || currentKey != key) return;
+          if (_disposed || currentKey != key) return null;
           return refresh(forceRefresh: true, refreshQuotesOnly: refreshQuotesOnly);
         });
       }
@@ -617,7 +617,7 @@ class AppController extends ChangeNotifier {
         _activePortfolioFuture != null) {
       if (forceRefresh && !_activePortfolioForce) {
         return _activePortfolioFuture!.then<void>((_) {
-          if (_disposed || _portfolioSource(_settings) != source) return;
+          if (_disposed || _portfolioSource(_settings) != source) return null;
           return refreshPortfolio(forceRefresh: true);
         });
       }
