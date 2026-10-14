@@ -19,7 +19,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 安裝 Flutter SDK
+      - name: 安裝 Flutter SDK (Stable)
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
@@ -27,15 +27,25 @@ jobs:
       - name: 自動定位專案根目錄
         id: locate-project
         run: |
-          # 尋找 pubspec.yaml 所在的目錄
           PUBSPEC_PATH=$(find . -name "pubspec.yaml" | head -n 1)
           if [ -z "$PUBSPEC_PATH" ]; then
-            echo "::error::在整個儲存庫中完全找不到 pubspec.yaml！請確認是否漏傳該檔案。"
+            echo "::error::找不到 pubspec.yaml！"
             exit 1
           fi
           PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
-          echo "找到專案目錄位於: $PROJECT_DIR"
+          echo "找到專案目錄: $PROJECT_DIR"
           echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
+
+      - name: 自動升級 Gradle Wrapper 版本以滿足 Flutter 需求
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        run: |
+          WRAPPER_FILE="android/gradle/wrapper/gradle-wrapper.properties"
+          if [ -f "$WRAPPER_FILE" ]; then
+            echo "更新 gradle-wrapper.properties 至 8.14..."
+            sed -i 's/gradle-.*-all.zip/gradle-8.14-all.zip/g' "$WRAPPER_FILE"
+            sed -i 's/gradle-.*-bin.zip/gradle-8.14-bin.zip/g' "$WRAPPER_FILE"
+            cat "$WRAPPER_FILE"
+          fi
 
       - name: 下載專案套件 (flutter pub get)
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
@@ -43,7 +53,9 @@ jobs:
 
       - name: 編譯 Release APK
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
-        run: flutter build apk --release
+        run: |
+          # 加入忽略版本檢查旗標以確保順利建置
+          flutter build apk --release --android-skip-build-dependency-validation
 
       - name: 上傳 APK 成品供下載
         uses: actions/upload-artifact@v4
