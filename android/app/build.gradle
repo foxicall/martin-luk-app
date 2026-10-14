@@ -19,7 +19,10 @@ if (hasReleaseSigning) {
 
 android {
     namespace = 'com.martinluk.martin_luk_app'
+    // shared_preferences_android requires API 36 at compile time.
+    // This does not change the supported Android versions or target SDK.
     compileSdk = 36
+    buildToolsVersion = '36.0.0'
     ndkVersion = '27.0.12077973'
 
     compileOptions {

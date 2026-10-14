@@ -279,12 +279,13 @@ class AppController extends ChangeNotifier {
       if (forceRefresh && !_activeScanForce) {
         // A pull during a TTL-based poll must still force a network refresh.
         // Queue it after the current work rather than overlap both requests.
-       return _activeScanFuture!.then<void>((_) async {
-          if (_disposed || currentKey != key) {
-            return;
-          }
+        return _activeScanFuture!.then<void>((_) async {
+          final currentKey = '${_portfolioSource(_settings)}:${_market.name}:'
+              '${_market == StockMarket.tw ? _settings.twAdrThreshold : _settings.usAdrThreshold}';
+          if (_disposed || currentKey != key) return;
           await refresh(forceRefresh: true, refreshQuotesOnly: refreshQuotesOnly);
         });
+      }
       return _activeScanFuture!;
     }
     final future = _refresh(forceRefresh: forceRefresh, refreshQuotesOnly: refreshQuotesOnly);
@@ -615,11 +616,13 @@ class AppController extends ChangeNotifier {
         _activePortfolioVersion == _portfolioRequestVersion &&
         _activePortfolioFuture != null) {
       if (forceRefresh && !_activePortfolioForce) {
-        return _activePortfolioFuture!.then<void>((_) {
-         if (_disposed || _portfolioSource(_settings) != source) return;
-if (_disposed || _portfolioSource(_settings) != source) {
-          return;
-        }
+        return _activePortfolioFuture!.then<void>((_) async {
+          if (_disposed || _portfolioSource(_settings) != source) return;
+          await refreshPortfolio(forceRefresh: true);
+        });
+      }
+      return _activePortfolioFuture!;
+    }
     final future = _refreshPortfolio(forceRefresh: forceRefresh);
     _activePortfolioSource = source;
     _activePortfolioVersion = _portfolioRequestVersion;

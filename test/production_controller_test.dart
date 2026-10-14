@@ -39,6 +39,7 @@ class _Quotes implements PortfolioRepository {
   bool fail = false;
   bool cached = false;
   double price = 101;
+  Completer<PortfolioQuoteSnapshot>? deferred;
   DateTime timestamp = DateTime.utc(2026, 10, 14, 15);
   int closes = 0;
 
@@ -47,6 +48,7 @@ class _Quotes implements PortfolioRepository {
       {bool forceRefresh = false}) async {
     calls.add(forceRefresh);
     if (fail) throw StateError('HTTP 503 行情測試失敗');
+    if (deferred != null) return deferred!.future;
     return PortfolioQuoteSnapshot(quotes: {
       for (final symbol in symbols) symbol: PortfolioQuote(
         symbol: symbol, name: symbol, market: market,
@@ -279,6 +281,48 @@ void main() {
     expect(controller.polling, isFalse);
     expect(scans.calls.length, 3);
     expect(scans.calls.last.force, isTrue);
+  });
+
+  test('queued forced scan resolves without starting HTTP after disposal', () async {
+    final scans = _Scans();
+    final controller = AppController(repositoryFactory: (_) => scans);
+    var disposed = false;
+    addTearDown(() { if (!disposed) controller.dispose(); });
+    await controller.initialize(initializeReminders: false);
+    scans.deferred = Completer<CandidateSnapshot>();
+    final before = scans.calls.length;
+    final running = controller.refresh(forceRefresh: false);
+    final queued = controller.refresh(forceRefresh: true);
+    expect(scans.calls.length, before + 1);
+    controller.dispose();
+    disposed = true;
+    scans.deferred!.complete(_snapshot(StockMarket.tw));
+    await running;
+    await queued;
+    expect(scans.calls.length, before + 1);
+  });
+
+  test('queued forced holding refresh resolves without HTTP after disposal', () async {
+    SharedPreferences.setMockInitialValues(_stored(holdings: [_holding()]));
+    final quotes = _Quotes();
+    final controller = AppController(repositoryFactory: (_) => _Scans(),
+        portfolioRepositoryFactory: (_) => quotes);
+    var disposed = false;
+    addTearDown(() { if (!disposed) controller.dispose(); });
+    await controller.initialize(initializeReminders: false);
+    quotes.deferred = Completer<PortfolioQuoteSnapshot>();
+    final before = quotes.calls.length;
+    final running = controller.refreshPortfolio(forceRefresh: false);
+    final queued = controller.refreshPortfolio(forceRefresh: true);
+    expect(quotes.calls.length, before + 1);
+    controller.dispose();
+    disposed = true;
+    quotes.deferred!.complete(PortfolioQuoteSnapshot(quotes: {}, errors: {},
+        source: 'Yahoo Finance fixture'));
+    await running;
+    await queued;
+    expect(quotes.calls.length, before + 1);
+    expect(quotes.closes, 1);
   });
 
   test('explicit disabled auto-refresh and mock mode never start polling', () async {
