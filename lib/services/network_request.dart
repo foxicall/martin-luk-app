@@ -3,30 +3,42 @@ import 'dart:collection';
 
 import 'package:http/http.dart' as http;
 
-/// Deadline includes permit queueing, headers and the full response body.
-/// Closing this wrapper does not close an injected, caller-owned client.
+/// 期限涵蓋排隊、連線、回應標頭及完整本文。
+/// 逾時會中止請求；finally 確保釋放並行名額。
 class NetworkRequest {
   NetworkRequest({
     http.Client? client,
-    this.timeout = maximumTimeout,
-  }) : _client = client ?? http.Client(),
-       _ownsClient = client == null {
+    this.timeout = defaultTimeout,
+  })  : _client = client ?? http.Client(),
+        _ownsClient = client == null {
     validateTimeout(timeout);
   }
 
-  static const maximumTimeout = Duration(seconds: 8);
-  static const storageTimeout = Duration(seconds: 2);
+  static const defaultTimeout = Duration(seconds: 8);
+  static const maximumTimeout = Duration(seconds: 10);
+  static const storageTimeout = Duration(seconds: 5);
+
+  // 一般本機快取維持較短期限；需要時可明確指定至 5 秒。
+  static const defaultStorageTimeout = Duration(seconds: 2);
   static const maximumConcurrentRequests = 5;
 
-  static final _permits = _HttpPermitPool(
-    maximumConcurrentRequests,
-  );
+  static const Map<String, String> requestHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+
+  static final _permits =
+      _HttpPermitPool(maximumConcurrentRequests);
 
   final http.Client _client;
   final bool _ownsClient;
   final Duration timeout;
-  final Set<_PendingRequest> _active = {};
 
+  final Map<String, String> defaultHeaders = requestHeaders;
+  final Set<_PendingRequest> _active = {};
   bool _closed = false;
 
   static void validateTimeout(Duration value) {
@@ -34,14 +46,14 @@ class NetworkRequest {
       throw ArgumentError.value(
         value,
         'requestTimeout',
-        'HTTP 逾時必須大於零且不得超過 8 秒。',
+        'HTTP 逾時必須大於零且不得超過 10 秒。',
       );
     }
   }
 
   Future<http.Response> get(
     Uri uri, {
-    Map<String, String> headers = const {},
+    Map<String, String>? headers,
     Duration? timeout,
   }) async {
     if (_closed) {
@@ -51,16 +63,13 @@ class NetworkRequest {
     final deadline = timeout ?? this.timeout;
     validateTimeout(deadline);
 
-    final pending = _PendingRequest(
-      _permits.acquire(),
-    );
-
+    final pending = _PendingRequest(_permits.acquire());
     _active.add(pending);
     var succeeded = false;
 
     try {
       final response = await Future.any<http.Response>([
-        _sendWhenPermitted(uri, headers, pending),
+        _sendWhenPermitted(uri, headers ?? const {}, pending),
         pending.abort.future.then<http.Response>(
           (_) => throw http.RequestAbortedException(uri),
         ),
@@ -68,10 +77,7 @@ class NetworkRequest {
         deadline,
         onTimeout: () {
           pending.cancel();
-          throw TimeoutException(
-            'HTTP 請求超過期限。',
-            deadline,
-          );
+          throw TimeoutException('HTTP 請求超過期限。', deadline);
         },
       );
 
@@ -84,7 +90,6 @@ class NetworkRequest {
     } finally {
       _active.remove(pending);
 
-      // Keep a successful pooled connection usable.
       if (!succeeded) {
         pending.cancel();
       }
@@ -114,24 +119,23 @@ class NetworkRequest {
 
     request.headers.addAll(headers);
 
-    return _client.send(request).then<http.Response>(
-      http.Response.fromStream,
-    );
+    // 強制保留標準瀏覽器標頭，也保留其他自訂標頭。
+    request.headers.addAll(requestHeaders);
+
+    final streamedResponse = await _client.send(request);
+    return http.Response.fromStream(streamedResponse);
   }
 
   void close() {
-    if (_closed) {
-      return;
-    }
-
+    if (_closed) return;
     _closed = true;
 
     for (final pending in _active) {
       pending.cancel();
     }
-
     _active.clear();
 
+    // 注入的 Client 由呼叫者負責關閉。
     if (_ownsClient) {
       _client.close();
     }
@@ -148,12 +152,11 @@ class _PendingRequest {
     if (!abort.isCompleted) {
       abort.complete();
     }
-
     permit.release();
   }
 }
 
-/// FIFO pool shared across NetworkRequest instances in the same isolate.
+/// 同一 Dart isolate 中的所有實例共用 FIFO 名額池。
 class _HttpPermitPool {
   _HttpPermitPool(this.limit);
 
@@ -169,10 +172,7 @@ class _HttpPermitPool {
   }
 
   void _release(_HttpPermit permit) {
-    if (permit._released) {
-      return;
-    }
-
+    if (permit._released) return;
     permit._released = true;
 
     if (permit._granted) {
@@ -181,7 +181,7 @@ class _HttpPermitPool {
       _queue.remove(permit);
     }
 
-    // Wake cancelled queue entries so their observed futures terminate.
+    // 被取消的排隊請求也必須醒來並結束。
     if (!permit._ready.isCompleted) {
       permit._ready.complete();
     }
@@ -192,10 +192,7 @@ class _HttpPermitPool {
   void _drain() {
     while (_used < limit && _queue.isNotEmpty) {
       final permit = _queue.removeFirst();
-
-      if (permit._released) {
-        continue;
-      }
+      if (permit._released) continue;
 
       permit._granted = true;
       _used++;
@@ -214,10 +211,7 @@ class _HttpPermit {
   bool _released = false;
 
   Future<void> get ready => _ready.future;
-
   bool get isActive => _granted && !_released;
 
-  void release() {
-    _pool._release(this);
-  }
+  void release() => _pool._release(this);
 }
