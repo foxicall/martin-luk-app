@@ -1,0 +1,6 @@
+# Copy to key.properties and replace values for production signing.
+# Keep key.properties and private keystores outside version control.
+storeFile=../upload-keystore.jks
+storePassword=REPLACE_ME
+keyAlias=upload
+keyPassword=REPLACE_ME

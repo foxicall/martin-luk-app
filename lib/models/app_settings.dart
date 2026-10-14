@@ -1,0 +1,80 @@
+import '../app_config.dart';
+
+/// 本金依市場計價，台幣和美元分開保存，不進行隱含匯率換算。
+class AppSettings {
+  const AppSettings({
+    this.useMockData = AppConfig.useMockData,
+    this.darkMode = true,
+    this.apiBaseUrl = AppConfig.apiBaseUrl,
+    this.twAdrThreshold = 3.5,
+    this.usAdrThreshold = 5.0,
+    this.twEquity = 1000000,
+    this.usEquity = 50000,
+    this.remindersEnabled = false,
+  });
+
+  final bool useMockData;
+  final bool darkMode;
+  final String apiBaseUrl;
+  final double twAdrThreshold;
+  final double usAdrThreshold;
+  final double twEquity;
+  final double usEquity;
+  final bool remindersEnabled;
+
+  AppSettings copyWith({
+    bool? useMockData,
+    bool? darkMode,
+    String? apiBaseUrl,
+    double? twAdrThreshold,
+    double? usAdrThreshold,
+    double? twEquity,
+    double? usEquity,
+    bool? remindersEnabled,
+  }) =>
+      AppSettings(
+        useMockData: useMockData ?? this.useMockData,
+        darkMode: darkMode ?? this.darkMode,
+        apiBaseUrl: apiBaseUrl ?? this.apiBaseUrl,
+        twAdrThreshold: twAdrThreshold ?? this.twAdrThreshold,
+        usAdrThreshold: usAdrThreshold ?? this.usAdrThreshold,
+        twEquity: twEquity ?? this.twEquity,
+        usEquity: usEquity ?? this.usEquity,
+        remindersEnabled: remindersEnabled ?? this.remindersEnabled,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'use_mock_data': useMockData,
+        'dark_mode': darkMode,
+        'api_base_url': apiBaseUrl,
+        'tw_adr_threshold': twAdrThreshold,
+        'us_adr_threshold': usAdrThreshold,
+        'tw_equity': twEquity,
+        'us_equity': usEquity,
+        'reminders_enabled': remindersEnabled,
+      };
+
+  factory AppSettings.fromJson(Map<String, dynamic> json) {
+    double positive(String key, double fallback) {
+      final value = json[key];
+      if (value is! num || !value.isFinite || value <= 0) return fallback;
+      return value.toDouble();
+    }
+
+    bool flag(String key, bool fallback) =>
+        json[key] is bool ? json[key] as bool : fallback;
+    const defaults = AppSettings();
+    return AppSettings(
+      useMockData: flag('use_mock_data', defaults.useMockData),
+      darkMode: flag('dark_mode', defaults.darkMode),
+      apiBaseUrl: json['api_base_url'] is String
+          ? json['api_base_url'] as String
+          : defaults.apiBaseUrl,
+      twAdrThreshold: positive('tw_adr_threshold', defaults.twAdrThreshold),
+      usAdrThreshold: positive('us_adr_threshold', defaults.usAdrThreshold),
+      twEquity: positive('tw_equity', defaults.twEquity),
+      usEquity: positive('us_equity', defaults.usEquity),
+      remindersEnabled: flag('reminders_enabled', false),
+    );
+  }
+}
