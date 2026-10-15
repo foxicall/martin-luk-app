@@ -85,6 +85,7 @@ AppController _controller(_Repository repository, {
       scanUpdateTimeout: timeout, backendScanWaitTimeout: waitTimeout,
     );
 
+// Polling test fixture v2: dispose foreground timers inside widget callbacks.
 // Foreground resumption schedules Timer(Duration.zero), an event timer.
 // In testWidgets, pump() without a duration only flushes microtasks: it does
 // NOT elapse fake timers. Use pump(Duration.zero) after setForeground(true)
@@ -185,26 +186,36 @@ void main() {
     _seed(autoRefresh: true);
     final repository = _Repository();
     final controller = _controller(repository);
-    addTearDown(controller.dispose);
-    await tester.runAsync(() => controller.initialize(initializeReminders: false));
-    repository.reply = (_) async => throw const RepositoryException('HTTP 503 upstream unavailable');
-    controller.setForeground(true);
-    await tester.pump(Duration.zero);
-    await tester.pump();
-    expect(controller.loading, isFalse);
+    // Flutter verifies pending timers before package-level addTearDown.
+    // Release this foreground controller before the widget callback returns,
+    // including when an assertion fails; leave no periodic/status/deadline timer.
+    try {
+      await tester.runAsync(() => controller.initialize(initializeReminders: false));
+      repository.reply = (_) async => throw const RepositoryException('HTTP 503 upstream unavailable');
+      controller.setForeground(true);
+      await tester.pump(Duration.zero);
+      await tester.pump();
+      expect(controller.loading, isFalse);
+      expect(controller.waitingForBackendScan, isFalse);
+      expect(controller.backendScanStatus!.isFailed, isTrue);
+      expect(controller.error, contains('503'));
+      final calls = repository.calls.length;
+      await tester.pump(const Duration(minutes: 1));
+      expect(repository.calls.length, calls);
+      repository.reply = (_) async => _completed();
+      final retry = controller.refresh();
+      await tester.pump();
+      await retry;
+      expect(controller.error, isNull);
+      expect(controller.snapshot!.isFallback, isFalse);
+      expect(controller.backendScanStatus!.status, 'completed');
+    } finally {
+      controller.dispose();
+    }
+    expect(controller.autoRefreshActive, isFalse);
+    expect(controller.backendStatusPollingActive, isFalse);
     expect(controller.waitingForBackendScan, isFalse);
-    expect(controller.backendScanStatus!.isFailed, isTrue);
-    expect(controller.error, contains('503'));
-    final calls = repository.calls.length;
-    await tester.pump(const Duration(minutes: 1));
-    expect(repository.calls.length, calls);
-    repository.reply = (_) async => _completed();
-    final retry = controller.refresh();
-    await tester.pump();
-    await retry;
-    expect(controller.error, isNull);
-    expect(controller.snapshot!.isFallback, isFalse);
-    expect(controller.backendScanStatus!.status, 'completed');
+    expect(controller.loading, isFalse);
   });
 
   testWidgets('bounded status timeout releases loading and ignores its late reply', (tester) async {
@@ -256,23 +267,33 @@ void main() {
     _seed(autoRefresh: true);
     final repository = _Repository();
     final controller = _controller(repository);
-    addTearDown(controller.dispose);
-    await tester.runAsync(() => controller.initialize(initializeReminders: false));
-    controller.setForeground(true);
-    await tester.pump(Duration.zero);
-    await tester.pump();
-    controller.cancelMarketEvaluation();
-    expect(controller.waitingForBackendScan, isFalse);
+    // Flutter verifies pending timers before package-level addTearDown.
+    // Release this foreground controller before the widget callback returns,
+    // including when an assertion fails; leave no periodic/status/deadline timer.
+    try {
+      await tester.runAsync(() => controller.initialize(initializeReminders: false));
+      controller.setForeground(true);
+      await tester.pump(Duration.zero);
+      await tester.pump();
+      controller.cancelMarketEvaluation();
+      expect(controller.waitingForBackendScan, isFalse);
+      expect(controller.backendStatusPollingActive, isFalse);
+      expect(controller.backendScanStatus!.isRunning, isTrue);
+      final calls = repository.calls.length;
+      await tester.pump(const Duration(minutes: 1));
+      expect(repository.calls.length, calls);
+      final retry = controller.refresh();
+      await tester.pump();
+      await retry;
+      expect(controller.waitingForBackendScan, isTrue);
+      expect(controller.backendStatusPollingActive, isTrue);
+    } finally {
+      controller.dispose();
+    }
+    expect(controller.autoRefreshActive, isFalse);
     expect(controller.backendStatusPollingActive, isFalse);
-    expect(controller.backendScanStatus!.isRunning, isTrue);
-    final calls = repository.calls.length;
-    await tester.pump(const Duration(minutes: 1));
-    expect(repository.calls.length, calls);
-    final retry = controller.refresh();
-    await tester.pump();
-    await retry;
-    expect(controller.waitingForBackendScan, isTrue);
-    expect(controller.backendStatusPollingActive, isTrue);
+    expect(controller.waitingForBackendScan, isFalse);
+    expect(controller.loading, isFalse);
   });
 
   testWidgets('market switch rejects an old pending reply and keeps the new market', (tester) async {
