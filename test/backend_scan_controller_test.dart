@@ -85,6 +85,13 @@ AppController _controller(_Repository repository, {
       scanUpdateTimeout: timeout, backendScanWaitTimeout: waitTimeout,
     );
 
+// Foreground resumption schedules Timer(Duration.zero), an event timer.
+// In testWidgets, pump() without a duration only flushes microtasks: it does
+// NOT elapse fake timers. Use pump(Duration.zero) after setForeground(true)
+// so requests actually start before testing timeout, cancellation or disposal.
+// Keep initialization inside runAsync for SharedPreferences platform setup;
+// lifecycle changes and timer advancement stay in the widget test's fake zone.
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(_seed);
@@ -132,14 +139,17 @@ void main() {
     addTearDown(controller.dispose);
     await tester.runAsync(() => controller.initialize(initializeReminders: false));
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     await tester.pump();
     expect(repository.calls.length, 2);
     expect(repository.calls.last.force, isFalse);
     expect(repository.calls.last.quotesOnly, isTrue);
     expect(controller.backendScanStatus!.completedCount, 5);
     expect(controller.loading, isFalse);
-    await tester.pump(const Duration(seconds: 3));
+    // No polling before the advertised three-second retry interval.
+    await tester.pump(const Duration(milliseconds: 2999));
+    expect(repository.calls.length, 2);
+    await tester.pump(const Duration(milliseconds: 1));
     await tester.pump();
     expect(repository.calls.length, 3);
     expect(controller.waitingForBackendScan, isFalse);
@@ -158,7 +168,7 @@ void main() {
     await tester.runAsync(() => controller.initialize(initializeReminders: false));
     repository.reply = (_) => delayed.future;
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     expect(repository.calls.length, 2);
     expect(controller.loading, isTrue);
     final joined = controller.refresh(forceRefresh: false, refreshQuotesOnly: true);
@@ -179,7 +189,7 @@ void main() {
     await tester.runAsync(() => controller.initialize(initializeReminders: false));
     repository.reply = (_) async => throw const RepositoryException('HTTP 503 upstream unavailable');
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     await tester.pump();
     expect(controller.loading, isFalse);
     expect(controller.waitingForBackendScan, isFalse);
@@ -205,7 +215,7 @@ void main() {
     final delayed = Completer<CandidateSnapshot>();
     repository.reply = (_) => delayed.future;
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     await tester.pump(const Duration(milliseconds: 25));
     expect(controller.loading, isFalse);
     expect(controller.waitingForBackendScan, isFalse);
@@ -225,7 +235,7 @@ void main() {
     final delayed = Completer<CandidateSnapshot>();
     repository.reply = (_) => delayed.future;
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     controller.setForeground(false);
     delayed.complete(_completed());
     await tester.pump(const Duration(seconds: 10));
@@ -235,7 +245,7 @@ void main() {
     expect(repository.calls.length, 2);
     repository.reply = (_) async => _completed();
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     await tester.pump();
     expect(repository.calls.length, 3);
     expect(controller.snapshot!.isFallback, isFalse);
@@ -249,7 +259,7 @@ void main() {
     addTearDown(controller.dispose);
     await tester.runAsync(() => controller.initialize(initializeReminders: false));
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     await tester.pump();
     controller.cancelMarketEvaluation();
     expect(controller.waitingForBackendScan, isFalse);
@@ -274,7 +284,7 @@ void main() {
     repository.reply = (call) => call.market == StockMarket.tw
         ? oldReply.future : Future.value(_completed(market: StockMarket.us));
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     final switched = controller.setMarket(StockMarket.us);
     await tester.pump();
     await switched;
@@ -294,7 +304,7 @@ void main() {
     final oldReply = Completer<CandidateSnapshot>();
     repository.reply = (_) => oldReply.future;
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     repository.reply = (_) async => CandidateSnapshot(
       candidates: const [], fetchedAt: _quoteTime, warnings: const [],
       source: 'Yahoo Finance direct', universeCount: 900,
@@ -320,7 +330,7 @@ void main() {
     final oldReply = Completer<CandidateSnapshot>();
     repository.reply = (_) => oldReply.future;
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     repository.reply = (_) async => _pending(job: 'new-threshold');
     await tester.runAsync(() => controller.updateSettings(
         controller.settings.copyWith(twAdrThreshold: 4)));
@@ -340,7 +350,7 @@ void main() {
     addTearDown(controller.dispose);
     await tester.runAsync(() => controller.initialize(initializeReminders: false));
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
     await tester.pump(const Duration(milliseconds: 25));
     expect(controller.waitingForBackendScan, isFalse);
     expect(controller.loading, isFalse);
@@ -351,16 +361,34 @@ void main() {
   testWidgets('dispose prevents late HTTP callbacks and clears status timers', (tester) async {
     final repository = _Repository();
     final controller = _controller(repository);
+    var disposed = false;
+    addTearDown(() {
+      if (!disposed) controller.dispose();
+    });
+    var notifications = 0;
+    controller.addListener(() => notifications++);
     await tester.runAsync(() => controller.initialize(initializeReminders: false));
     final delayed = Completer<CandidateSnapshot>();
     repository.reply = (_) => delayed.future;
     controller.setForeground(true);
-    await tester.pump();
+    await tester.pump(Duration.zero);
+    // Prove the delayed request really started and its error handler is
+    // attached before completing it with an error after disposal.
+    expect(repository.calls.length, 2);
+    expect(controller.loading, isTrue);
+    expect(controller.waitingForBackendScan, isTrue);
     controller.dispose();
+    disposed = true;
+    final notificationsAtDispose = notifications;
+    expect(controller.backendStatusPollingActive, isFalse);
+    expect(controller.autoRefreshActive, isFalse);
+    expect(controller.waitingForBackendScan, isFalse);
+    expect(controller.loading, isFalse);
     delayed.completeError(StateError('late disposed failure must be consumed'));
     await tester.pump(const Duration(seconds: 10));
     expect(tester.takeException(), isNull);
     expect(repository.calls.length, 2);
+    expect(notifications, notificationsAtDispose);
   });
 
   testWidgets('dashboard shows nonblocking progress instead of no snapshot text', (tester) async {
