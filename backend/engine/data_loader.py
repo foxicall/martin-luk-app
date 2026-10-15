@@ -25,13 +25,8 @@ try:
     import requests
 except ImportError:
     requests = None  # type: ignore[assignment]
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    BeautifulSoup = None  # type: ignore[assignment,misc]
-
-# Offline demo API startup does not need the optional web-scraping packages.
-# A live UniverseProvider refuses to run without them with an explicit error.
+# Offline demo startup does not need requests. Listed-universe parsers only use
+# Python's standard library; a live provider reports a missing HTTP dependency.
 _RequestException = requests.RequestException if requests is not None else ConnectionError
 
 from .market_calendar import ExchangeSessionCalendar, NonTradingDayError
@@ -91,49 +86,78 @@ def _retry(operation: Callable[[], T], attempts: int, delay: float) -> T:
 
 
 class UniverseProvider:
-    """最新 S&P 500 / TWSE 普通股名單；離線模式只讀公開來源快取。"""
+    """TWSE＋TPEx / Nasdaq＋NYSE＋NYSE American 的公開普通股名錄。
 
-    US_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    日內共用 24 小時快取；schema 2＋scope 防止舊 S&P 500 快取被誤認為
+    完整市場。每個來源獨立容錯，部分結果必須附上不完整標記與警告。
+    """
+
+    US_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
+    US_OTHER_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
     TW_URL = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
+    TW_OTC_URL = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"
+    CACHE_SCHEMA_VERSION = 2
 
     def __init__(
         self,
         cache_dir: str | Path,
         ttl_hours: float = 24,
-        timeout: float = 25,
-        retries: int = 3,
+        timeout: float = 8,
+        retries: int = 2,
     ) -> None:
         if ttl_hours <= 0 or timeout <= 0 or retries < 1:
             raise ValueError("ttl_hours、timeout 與 retries 必須大於零。")
-        if requests is None or BeautifulSoup is None:
-            raise DataSourceError("即時股票池需要 requests 與 beautifulsoup4；請安裝 backend/requirements.txt。")
+        if requests is None:
+            raise DataSourceError("即時股票池需要 requests；請安裝 backend/requirements.txt。")
         self.cache_dir = Path(cache_dir)
         self.ttl = pd.Timedelta(hours=ttl_hours)
-        self.timeout = timeout
+        # Each actual HTTP attempt is bounded even when a caller supplies 25s.
+        self.timeout = min(timeout, 8.0)
         self.retries = retries
         self.warnings: list[str] = []
         self.sources: dict[Market, str] = {}
+        self.captured_at: dict[Market, pd.Timestamp] = {}
+        self.statistics: dict[Market, dict[str, Any]] = {}
+        self.coverage_complete: dict[Market, bool] = {}
+        self.coverage_warnings: dict[Market, list[str]] = {}
+        self._download_metadata: dict[Market, dict[str, Any]] = {}
+        self._cache_metadata: dict[Market, dict[str, Any]] = {}
         self.session = requests.Session()
-        self.session.headers.update(
-            {"User-Agent": "MomentumRecommender/1.0 public research data"}
-        )
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/plain,text/html,application/json;q=0.9,*/*;q=0.8",
+        })
 
     def _path(self, market: Market) -> Path:
         return self.cache_dir / f"universe_{market.value}.json"
 
     def _read_cache(self, market: Market) -> tuple[list[Stock], pd.Timestamp, str]:
+        from .listed_universe import SCOPES
+
         path = self._path(market)
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError("快取根節點必須為 JSON object")
-            if payload.get("schema_version") != 1 or payload.get("market") != market.value:
-                raise ValueError("版本或市場識別不符")
+            if (payload.get("schema_version") != self.CACHE_SCHEMA_VERSION
+                    or payload.get("market") != market.value
+                    or payload.get("scope") != SCOPES[market]):
+                raise ValueError("股票池版本、市場或範圍不符；舊 S&P 500／僅上市快取必須重新下載")
             captured = _aware(payload["captured_at"], "captured_at")
             source = payload["source"]
             if not isinstance(source, str) or not source:
                 raise ValueError("缺少來源")
-            stocks = []
+            statistics = payload["statistics"]
+            complete = payload["coverage_complete"]
+            warnings = payload["coverage_warnings"]
+            if (not isinstance(statistics, dict) or not isinstance(complete, bool)
+                    or not isinstance(warnings, list)
+                    or not all(isinstance(item, str) for item in warnings)):
+                raise ValueError("缺少來源覆蓋率／分類中繼資料")
+            stocks: list[Stock] = []
             for row in payload["stocks"]:
                 if not isinstance(row, dict):
                     raise ValueError("股票欄位必須為 JSON object")
@@ -141,82 +165,112 @@ class UniverseProvider:
                     raise ValueError("股票代碼或名稱缺失")
                 if not isinstance(row.get("sector", ""), str) or not isinstance(row.get("large_liquid", False), bool):
                     raise ValueError("股票欄位型別錯誤")
+                if market is Market.TW and not re.fullmatch(r"\d{4}\.TW(?:O)?", row["symbol"]):
+                    raise ValueError("台灣代碼缺少正確 .TW／.TWO 後綴")
                 stocks.append(Stock(
-                    symbol=row["symbol"], name=row["name"],
-                    sector=row.get("sector", ""), market=market,
-                    large_liquid=row.get("large_liquid", False),
+                    symbol=row["symbol"], name=row["name"], sector=row.get("sector", ""),
+                    market=market, large_liquid=row.get("large_liquid", False),
                 ))
             if not stocks or len({stock.symbol for stock in stocks}) != len(stocks):
                 raise ValueError("股票名單為空或代碼重複")
+            self._cache_metadata[market] = {
+                "statistics": statistics, "coverage_complete": complete,
+                "coverage_warnings": warnings,
+            }
             return stocks, captured, source
         except FileNotFoundError:
             raise
         except (OSError, ValueError, TypeError, KeyError) as exc:
-            raise CacheError(f"股票池快取損毀 {path}: {exc}") from exc
+            raise CacheError(f"股票池快取不可使用 {path}: {exc}") from exc
 
     def _get_html(self, url: str, *, taiwan: bool = False) -> str:
         def request() -> str:
             response = self.session.get(url, timeout=self.timeout)
             response.raise_for_status()
-            # TWSE ISIN 傳統頁面為 Big5；明確解碼避免 requests 誤判。
-            if taiwan:
-                response.encoding = "big5"
-            else:
-                response.encoding = "utf-8"
+            response.encoding = "big5" if taiwan else "utf-8"
             return response.text
-        return _retry(request, self.retries, 0.75)
+        return _retry(request, self.retries, 0.15)
+
+    def _fetch_sources(self, market: Market) -> list[Stock]:
+        from .listed_universe import (
+            SCOPES, US_CLASSIFICATION_WARNING, parse_nasdaq_directory, parse_tw_isin,
+        )
+
+        configurations = (
+            [("Nasdaq", self.US_URL, "nasdaq"), ("NYSE／NYSE American", self.US_OTHER_URL, "other")]
+            if market is Market.US else
+            [("TWSE", self.TW_URL, "listed"), ("TPEx", self.TW_OTC_URL, "otc")]
+        )
+        stocks_by_symbol: dict[str, Stock] = {}
+        source_stats: dict[str, dict[str, Any]] = {}
+        source_status: dict[str, dict[str, Any]] = {}
+        successful_urls: list[str] = []
+        warnings: list[str] = []
+        failures: list[str] = []
+        unknown_count = 0
+        duplicate_count = 0
+        for label, url, parser_mode in configurations:
+            try:
+                text = self._get_html(url, taiwan=market is Market.TW)
+                parsed = (parse_nasdaq_directory(text, source=parser_mode)
+                          if market is Market.US else parse_tw_isin(text, listing=parser_mode))
+                source_stats[label] = parsed.statistics
+                source_status[label] = {"ok": True, "url": url, "count": len(parsed.stocks)}
+                successful_urls.append(url)
+                unknown_count += parsed.statistics.get("unknown_security_type", 0)
+                for stock in parsed.stocks:
+                    if stock.symbol in stocks_by_symbol:
+                        duplicate_count += 1
+                    else:
+                        stocks_by_symbol[stock.symbol] = stock
+            except (DataSourceError, _RequestException, OSError, ValueError) as exc:
+                message = f"{market.value}: {label} 名錄失敗 ({exc})；本次股票池不完整。"
+                source_status[label] = {"ok": False, "url": url, "error": str(exc)}
+                warnings.append(message)
+                failures.append(message)
+        if not stocks_by_symbol:
+            raise DataSourceError("；".join(failures) or "公開名錄沒有可確認的普通股。")
+        if market is Market.US:
+            warnings.append(US_CLASSIFICATION_WARNING)
+            if unknown_count:
+                warnings.append(f"us: 名稱無法確認為普通股的 {unknown_count} 檔已保守排除；請勿視為全市場核證清單。")
+        metadata = {
+            "source": " + ".join(successful_urls),
+            "statistics": {
+                "scope": SCOPES[market], "sources": source_status,
+                "source_statistics": source_stats, "included": len(stocks_by_symbol),
+                "source_count": len(successful_urls), "expected_source_count": 2,
+                "unknown_security_type": unknown_count, "cross_source_duplicates": duplicate_count,
+                "classification_method": ("conservative_security_name_patterns" if market is Market.US
+                                          else "ISIN_CFI_ES_and_four_digit_code"),
+                "classification_verified": market is Market.TW,
+            },
+            # Full source delivery is not a claim of verified security taxonomy.
+            "coverage_complete": len(successful_urls) == 2 and unknown_count == 0,
+            "coverage_warnings": warnings,
+        }
+        self._download_metadata[market] = metadata
+        self.warnings.extend(warnings)
+        return sorted(stocks_by_symbol.values(), key=lambda stock: stock.symbol)
 
     def _fetch_us(self) -> list[Stock]:
-        soup = BeautifulSoup(self._get_html(self.US_URL), "lxml")
-        table = soup.find("table", id="constituents")
-        if table is None:
-            raise DataSourceError("Wikipedia 回應缺少 S&P 500 constituents 表格。")
-        rows = table.find_all("tr")
-        headers = [cell.get_text(" ", strip=True) for cell in rows[0].find_all(["th", "td"])]
-        try:
-            symbol_index = headers.index("Symbol")
-            name_index = headers.index("Security")
-            sector_index = headers.index("GICS Sector")
-        except ValueError as exc:
-            raise DataSourceError("S&P 500 表格欄位已變更。") from exc
-        stocks: list[Stock] = []
-        for row in rows[1:]:
-            values = [cell.get_text(" ", strip=True) for cell in row.find_all("td")]
-            if len(values) <= max(symbol_index, name_index, sector_index):
-                continue
-            symbol = values[symbol_index].replace(".", "-")
-            if not re.fullmatch(r"[A-Z0-9-]+", symbol):
-                raise DataSourceError(f"無法辨識的 S&P 500 代碼: {symbol}")
-            # 成分股身份本身不代表每檔均符合 35% 的流動性上限。
-            # 掃描器再依價格與成交值判定 large_liquid。
-            stocks.append(Stock(symbol, values[name_index], values[sector_index], Market.US, False))
-        if not stocks or len({stock.symbol for stock in stocks}) != len(stocks):
-            raise DataSourceError("S&P 500 清單為空或包含重複代碼。")
-        return stocks
+        return self._fetch_sources(Market.US)
 
     def _fetch_tw(self) -> list[Stock]:
-        soup = BeautifulSoup(self._get_html(self.TW_URL, taiwan=True), "lxml")
-        stocks: list[Stock] = []
-        for row in soup.find_all("tr"):
-            values = [cell.get_text(" ", strip=True) for cell in row.find_all("td")]
-            if len(values) < 6:
-                continue
-            match = re.fullmatch(r"(\d{4})[\s\u3000]+(.+)", values[0])
-            # ES = 普通股；EP = 特別股、ED = 存託憑證、C* = 基金。
-            # 另以四位數代碼及「上市」排除上櫃/其他證券。
-            if match is None or values[3] != "上市" or not values[5].upper().startswith("ES"):
-                continue
-            stocks.append(Stock(
-                symbol=f"{match.group(1)}.TW", name=match.group(2),
-                sector=values[4], market=Market.TW, large_liquid=False,
-            ))
-        if not stocks or len({stock.symbol for stock in stocks}) != len(stocks):
-            raise DataSourceError("TWSE 普通股清單為空或包含重複代碼；請檢查官方表格格式。")
-        return stocks
+        return self._fetch_sources(Market.TW)
+
+    def _restore_cache_metadata(self, market: Market, *, stale: bool = False) -> None:
+        metadata = self._cache_metadata[market]
+        self.statistics[market] = metadata["statistics"]
+        self.coverage_complete[market] = metadata["coverage_complete"] and not stale
+        self.coverage_warnings[market] = list(metadata["coverage_warnings"])
+        self.warnings.extend(metadata["coverage_warnings"])
 
     def load(
         self, market: Market, force_refresh: bool = False, offline: bool = False
     ) -> list[Stock]:
+        from .listed_universe import SCOPES
+
         market = Market(market)
         cached: tuple[list[Stock], pd.Timestamp, str] | None = None
         cache_problem: Exception | None = None
@@ -231,17 +285,23 @@ class UniverseProvider:
             fresh = pd.Timedelta(0) <= age <= self.ttl
             if offline or (fresh and not force_refresh):
                 self.sources[market] = f"cache: {cached[2]} ({cached[1].isoformat()})"
+                self.captured_at[market] = cached[1]
+                self._restore_cache_metadata(market, stale=not fresh)
                 if not fresh:
                     self.warnings.append(f"{market.value}: 使用過期股票池快取，抓取時間 {cached[1].isoformat()}。")
                 return cached[0]
         if offline:
-            raise DataSourceError(f"{market.value}: 離線模式沒有可用股票池快取。{cache_problem or ''}")
-        source = self.US_URL if market is Market.US else self.TW_URL
+            raise DataSourceError(f"{market.value}: 離線模式沒有符合新股票池範圍的快取。{cache_problem or ''}")
         try:
             stocks = self._fetch_us() if market is Market.US else self._fetch_tw()
+            metadata = self._download_metadata[market]
+            captured = _now()
             payload = {
-                "schema_version": 1, "market": market.value, "source": source,
-                "captured_at": _now().isoformat(),
+                "schema_version": self.CACHE_SCHEMA_VERSION, "market": market.value,
+                "scope": SCOPES[market], "source": metadata["source"],
+                "captured_at": captured.isoformat(), "statistics": metadata["statistics"],
+                "coverage_complete": metadata["coverage_complete"],
+                "coverage_warnings": metadata["coverage_warnings"],
                 "stocks": [
                     {"symbol": stock.symbol, "name": stock.name, "sector": stock.sector,
                      "large_liquid": stock.large_liquid} for stock in stocks
@@ -251,15 +311,20 @@ class UniverseProvider:
                 _atomic_text(self._path(market), json.dumps(payload, ensure_ascii=False, indent=2))
             except OSError as exc:
                 self.warnings.append(f"股票池已下載，但快取寫入失敗: {exc}")
-            self.sources[market] = source
+            self.sources[market] = metadata["source"]
+            self.captured_at[market] = captured
+            self.statistics[market] = metadata["statistics"]
+            self.coverage_complete[market] = metadata["coverage_complete"]
+            self.coverage_warnings[market] = list(metadata["coverage_warnings"])
             return stocks
-        except (DataSourceError, _RequestException, ValueError) as exc:
+        except (DataSourceError, _RequestException, OSError, ValueError) as exc:
             if cached is not None:
                 self.sources[market] = f"stale cache: {cached[2]} ({cached[1].isoformat()})"
+                self.captured_at[market] = cached[1]
+                self._restore_cache_metadata(market, stale=True)
                 self.warnings.append(f"{market.value}: 公開清單更新失敗 ({exc})；使用舊股票池快取 {cached[1].isoformat()}。")
                 return cached[0]
             raise DataSourceError(f"{market.value}: 股票池抓取失敗且沒有有效快取: {exc}") from exc
-
 
 @dataclass(frozen=True)
 class _CachedFrame:

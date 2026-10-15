@@ -2,7 +2,7 @@
 enum StockMarket { tw, us }
 
 extension StockMarketInfo on StockMarket {
-  String get label => this == StockMarket.tw ? '台股上市' : '美股 S&P 500';
+  String get label => this == StockMarket.tw ? '台股上市櫃' : '美股三大交易所';
   String get currency => this == StockMarket.tw ? 'TWD' : 'USD';
   String get currencySymbol => this == StockMarket.tw ? 'NT\$' : 'US\$';
   double get defaultEquity => this == StockMarket.tw ? 1000000 : 50000;

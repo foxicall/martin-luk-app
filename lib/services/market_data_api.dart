@@ -672,18 +672,23 @@ class _CachedChart {
   final DateTime fetchedAt;
 }
 
-/// Canonical Yahoo class-share spelling and TWSE suffix. Index IDs are only
+/// Canonical Yahoo class-share spelling and TWSE/TPEx suffix. Index IDs are only
 /// accepted for their own market, avoiding an accidental USD/TWD benchmark mix.
 String canonicalSymbol(String raw, StockMarket market) {
   var symbol = raw.trim().toUpperCase();
   if (market == StockMarket.tw) {
     if (symbol == '^TWII') return symbol;
     if (RegExp(r'^\d{4}$').hasMatch(symbol)) symbol = '$symbol.TW';
-    if (!RegExp(r'^\d{4}\.TW$').hasMatch(symbol)) {
-      throw FormatException('台股行情僅接受四位上市股票代碼與 .TW：$raw');
+    if (!RegExp(r'^\d{4}\.(?:TW|TWO)$').hasMatch(symbol)) {
+      throw FormatException('台股行情僅接受四位普通股代碼與 .TW（上市）或 .TWO（上櫃）：$raw');
     }
   } else {
     if (symbol == '^GSPC') return symbol;
+    // A dot is only a class-share alias (BRK.B), never a foreign suffix.
+    if (symbol.contains('.') &&
+        !RegExp(r'^[A-Z][A-Z0-9]{0,12}\.[A-Z]$').hasMatch(symbol)) {
+      throw FormatException('美股代碼不可包含其他市場後綴：$raw');
+    }
     symbol = symbol.replaceAll('.', '-');
     if (!RegExp(r'^[A-Z][A-Z0-9-]{0,14}$').hasMatch(symbol)) {
       throw FormatException('美股代碼格式無效：$raw');

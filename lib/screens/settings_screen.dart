@@ -133,7 +133,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() => _remindersEnabled = persisted.remindersEnabled);
       final error = widget.controller.error;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error ?? '設定已儲存，候選清單已更新')),
+        SnackBar(content: Text(error ?? (widget.controller.waitingForBackendScan
+            ? '設定已儲存，背景掃描已啟動；可回總覽查看進度。'
+            : '設定已儲存，行情讀取已結束'))),
       );
     } catch (error) {
       if (!mounted) return;
@@ -240,7 +242,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                             items: const [
                               DropdownMenuItem(value: 'direct', child: Text('Yahoo Finance · 手機直接連線')),
-                              DropdownMenuItem(value: 'backend', child: Text('Python API · 自訂中繼')),
+                              DropdownMenuItem(value: 'backend', child: Text('Python API · 雲端／自訂中繼')),
                             ],
                             onChanged: _saving || _useMockData ? null : (value) {
                               if (value != null) setState(() => _dataProvider = value);
@@ -251,7 +253,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ? '示範模式需明確開啟；連線失敗不會自動切換到假資料。'
                               : _dataProvider == 'direct'
                                   ? 'Android 直接取得 Yahoo 日 K 與最新可用報價，並在裝置上計算 ADR、EMA 與動能。行情可能延遲。'
-                                  : '經您的 Python API 取得行情與掃描結果。'),
+                                  : '由 Python API 背景分批掃描，手機快速讀取進度與快照；沒有符合股票時正常顯示 0 檔。'),
                           if (_dataProvider == 'backend') ...[
                           const SizedBox(height: 12),
                           TextFormField(
@@ -262,11 +264,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             autocorrect: false,
                             decoration: InputDecoration(
                               labelText: 'Python API 基底網址',
-                              hintText: 'http://192.168.1.100:8000',
+                              hintText: 'https://你的服務名稱.onrender.com',
                               helperText: _useMockData
                                   ? '示範模式不連線；仍可預先儲存 API 網址。'
-                                  : '實機請填伺服器的 HTTPS 網址或同網域電腦 IP。',
-                              helperMaxLines: 3,
+                                  : '5G 請填已部署的公開 HTTPS 基底網址，不加 /v1/candidates。'
+                                      '免費雲端冷啟動若逾時，先用手機瀏覽器開啟網址加 /health，回應後再重試。',
+                              helperMaxLines: 5,
                               border: const OutlineInputBorder(),
                             ),
                             validator: _validateApiUrl,

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/stock_candidate.dart';
 import '../models/stock_item.dart';
+import 'network_request.dart';
 
 typedef DateTimeFunction = DateTime Function();
 
@@ -33,7 +34,7 @@ class UniverseSnapshot {
   int get totalCount => stocks.length;
 }
 
-/// One request loads a complete provider list, while alias/name lookups reuse
+/// Two bounded requests load exchange metadata, while alias/name lookups reuse
 /// the bundled master dictionary. No metadata HTTP is sent per search keystroke.
 ///
 /// This service fetches public HTTPS endpoints without an API secret. These
@@ -43,32 +44,47 @@ class StockUniverseService {
   StockUniverseService({
     http.Client? client,
     SharedPreferences? preferences,
+    Future<SharedPreferences> Function()? preferencesLoader,
     DateTimeFunction? now,
-  })  : _client = client ?? http.Client(),
-        _ownsClient = client == null,
+    this.requestTimeout = NetworkRequest.defaultTimeout,
+    this.storageTimeout = NetworkRequest.defaultStorageTimeout,
+  })  : _network = NetworkRequest(client: client, timeout: requestTimeout),
         _preferences = preferences,
-        _now = now ?? DateTime.now;
+        _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance,
+        _now = now ?? DateTime.now {
+    if (storageTimeout <= Duration.zero ||
+        storageTimeout > NetworkRequest.storageTimeout) {
+      throw ArgumentError.value(storageTimeout, 'storageTimeout',
+          '本機快取等待必須大於零且不得超過 5 秒。');
+    }
+  }
 
   static final Uri usEndpoint = Uri.parse(
-    'https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv',
+    'https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt',
+  );
+  static final Uri usOtherEndpoint = Uri.parse(
+    'https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt',
   );
   static final Uri twEndpoint = Uri.parse(
     'https://openapi.twse.com.tw/v1/opendata/t187ap03_L',
   );
+  static final Uri twOtcEndpoint = Uri.parse(
+    'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O',
+  );
   static const Duration cacheLifetime = Duration(hours: 24);
   static const Duration maximumStaleAge = Duration(days: 30);
-  static const Duration requestTimeout = Duration(seconds: 20);
-
-  final http.Client _client;
-  final bool _ownsClient;
+  final Duration requestTimeout;
+  final Duration storageTimeout;
+  final NetworkRequest _network;
   final DateTimeFunction _now;
   SharedPreferences? _preferences;
+  final Future<SharedPreferences> Function() _preferencesLoader;
   Future<Map<String, StockItem>>? _master;
   final Map<StockMarket, Future<UniverseSnapshot>> _inFlight = {};
   bool _closed = false;
 
   static String cacheKey(StockMarket market) =>
-      'martin_luk.universe.v1.${market.name}';
+      'martin_luk.universe.v2.all_common.${market.name}';
 
   Future<UniverseSnapshot> load(
     StockMarket market, {
@@ -95,7 +111,8 @@ class StockUniverseService {
     final preferences = await _getPreferences(warnings);
     final cached = _readCache(preferences, market, now, warnings);
     if (!forceRefresh && cached != null &&
-        now.difference(cached.asOf) <= cacheLifetime) {
+        now.difference(cached.asOf) <=
+            (cached.isComplete ? cacheLifetime : const Duration(minutes: 5))) {
       return _cachedCopy(cached, warnings);
     }
 
@@ -103,41 +120,75 @@ class StockUniverseService {
     // aliases only affect bilingual display and can be retried on another load.
     Map<String, StockItem> master = const {};
     try {
-      master = await (_master ??= _loadMaster());
+      master = await (_master ??= _loadMaster()).timeout(storageTimeout);
     } catch (_) {
       _master = null;
       warnings.add('本機中文別名字典無法讀取；連網清單仍使用資料源名稱。');
     }
 
     try {
-      final response = await _client.get(
-        market == StockMarket.us ? usEndpoint : twEndpoint,
-        headers: const {'Accept': 'application/json,text/csv;q=0.9,*/*;q=0.8'},
-      ).timeout(requestTimeout);
-      if (response.statusCode != 200) {
-        throw http.ClientException('HTTP ${response.statusCode}');
+      // Exactly two metadata feeds per market, independent failure isolation.
+      // This is not an unbounded market-price request fan-out.
+      final endpoints = market == StockMarket.us
+          ? [usEndpoint, usOtherEndpoint]
+          : [twEndpoint, twOtcEndpoint];
+      final requestBudget = requestTimeout < NetworkRequest.defaultTimeout
+          ? requestTimeout : NetworkRequest.defaultTimeout;
+      final replies = await Future.wait(endpoints.asMap().entries.map((entry) async {
+        try {
+          final response = await _network.get(entry.value, timeout: requestBudget);
+          if (response.statusCode != 200) {
+            throw http.ClientException('HTTP ${response.statusCode}', entry.value);
+          }
+          final body = utf8.decode(response.bodyBytes);
+          final parsed = market == StockMarket.us
+              ? _parseUs(body, master, nasdaq: entry.key == 0)
+              : _parseTw(body, master, otc: entry.key == 1);
+          if (parsed.stocks.isEmpty) {
+            throw const FormatException('資料源沒有可識別的普通股。');
+          }
+          return parsed;
+        } catch (error) {
+          return _SourceStocks.failure(
+            '${entry.value.host}/${entry.value.pathSegments.last}：${_errorLabel(error)}',
+          );
+        }
+      }));
+      final successful = replies.where((reply) => reply.success).length;
+      final bySymbol = <String, StockItem>{};
+      for (final reply in replies) {
+        warnings.addAll(reply.warnings);
+        for (final stock in reply.stocks) {
+          if (bySymbol.containsKey(stock.symbol)) {
+            warnings.add('資料源含重複代碼 ${stock.symbol}；保留第一筆。');
+          } else {
+            bySymbol[stock.symbol] = stock;
+          }
+        }
       }
-      final body = utf8.decode(response.bodyBytes);
-      final stocks = market == StockMarket.us
-          ? _parseUs(body, master)
-          : _parseTw(body, master);
-      if (stocks.isEmpty) {
-        throw const FormatException('股票池資料源沒有可用普通股。');
+      if (bySymbol.isEmpty) {
+        throw const FormatException('兩個股票池資料源都沒有可用普通股。');
       }
-      // Membership count fluctuates, including multiple S&P share classes.
-      // Broad sanity bounds detect a truncated response, not index membership.
-      final complete = market == StockMarket.us
-          ? stocks.length >= 450 && stocks.length <= 600
-          : stocks.length >= 700 && stocks.length <= 2000;
+      final stocks = bySymbol.values.toList()
+        ..sort((a, b) => a.symbol.compareTo(b.symbol));
+      final complete = successful == 2 && (market == StockMarket.us
+          ? stocks.length >= 2500 && stocks.length <= 15000
+          : stocks.length >= 1500 && stocks.length <= 3500);
       if (!complete) {
-        warnings.add('資料源只回傳 ${stocks.length} 檔，低於完整股票池合理範圍；掃描覆蓋不足。');
+        warnings.add('僅取得 $successful/2 個交易所清單、${stocks.length} 檔普通股；全市場覆蓋不足。');
+      }
+      if (market == StockMarket.us) {
+        warnings.add('美股目錄沒有完整 CFI；以普通股名稱保守分類，未能確認的證券已排除，非百分之百分類認證。');
+      }
+      if (market == StockMarket.tw) {
+        warnings.add('台股使用官方上市／上櫃發行公司清單，並保守排除91開頭存託憑證及非四碼證券；此為啟發式分類，未逐筆取得證券 CFI 認證。');
       }
       final snapshot = UniverseSnapshot(
         stocks: stocks,
         asOf: now,
         source: market == StockMarket.us
-            ? 'S&P 500 constituents (datasets GitHub)'
-            : 'TWSE OpenAPI listed ordinary-stock issuers',
+            ? 'Nasdaq Trader symbol directories: Nasdaq / NYSE / NYSE American common stocks'
+            : 'TWSE / TPEx official ordinary-stock issuers',
         isComplete: complete,
         warnings: warnings,
       );
@@ -145,7 +196,7 @@ class StockUniverseService {
         try {
           final written = await preferences.setString(
             cacheKey(market), jsonEncode(_encode(snapshot, market)),
-          );
+          ).timeout(storageTimeout);
           if (!written) throw StateError('快取儲存失敗。');
         } catch (_) {
           return UniverseSnapshot(
@@ -179,7 +230,7 @@ class StockUniverseService {
         isCached: true,
         warnings: [
           ...warnings,
-          '僅使用內建 ${fallback.length} 檔搜尋字典；它不是目前完整 S&P 500／TWSE 股票池，成分日期未驗證。',
+          '僅使用內建 ${fallback.length} 檔搜尋字典；它不是目前完整台股上市櫃／美股三大交易所股票池，成分日期未驗證。',
         ],
       );
     }
@@ -187,7 +238,7 @@ class StockUniverseService {
 
   Future<SharedPreferences?> _getPreferences(List<String> warnings) async {
     try {
-      return _preferences ??= await SharedPreferences.getInstance();
+      return _preferences ??= await _preferencesLoader().timeout(storageTimeout);
     } catch (_) {
       warnings.add('本機儲存不可用，股票池快取暫停。');
       return null;
@@ -205,8 +256,8 @@ class StockUniverseService {
       final raw = preferences.getString(cacheKey(market));
       if (raw == null) return null;
       final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic> || decoded['version'] != 1 ||
-          decoded['market'] != market.name || decoded['source'] is! String ||
+      if (decoded is! Map<String, dynamic> || decoded['version'] != 2 ||
+          decoded['scope'] != 'all_common' || decoded['market'] != market.name || decoded['source'] is! String ||
           decoded['is_complete'] is! bool || decoded['stocks'] is! List) {
         throw const FormatException('股票池快取結構無效。');
       }
@@ -247,7 +298,8 @@ class StockUniverseService {
   }
 
   static Map<String, dynamic> _encode(UniverseSnapshot snapshot, StockMarket market) => {
-    'version': 1,
+    'version': 2,
+    'scope': 'all_common',
     'market': market.name,
     'as_of': snapshot.asOf.toUtc().toIso8601String(),
     'source': snapshot.source,
@@ -283,60 +335,97 @@ class StockUniverseService {
     return index;
   }
 
-  static List<StockItem> _parseUs(String body, Map<String, StockItem> master) {
-    final rows = _csv(body);
-    if (rows.isEmpty) throw const FormatException('S&P 500 CSV 為空。');
-    final headers = rows.first.map((field) => field.trim().toLowerCase()).toList();
-    final symbolColumn = headers.indexOf('symbol');
-    final nameColumn = headers.indexOf('name');
-    if (symbolColumn < 0 || nameColumn < 0) {
-      throw const FormatException('S&P 500 CSV 缺少 Symbol／Name 欄位。');
+  static _SourceStocks _parseUs(
+    String body,
+    Map<String, StockItem> master, {
+    required bool nasdaq,
+  }) {
+    final lines = const LineSplitter().convert(body.replaceFirst('\ufeff', ''));
+    if (lines.isEmpty) throw const FormatException('美股交易所目錄為空。');
+    final headers = lines.first.split('|').map((cell) => cell.trim()).toList();
+    final expected = nasdaq
+        ? ['Symbol', 'Security Name', 'Test Issue', 'ETF']
+        : ['ACT Symbol', 'Security Name', 'Exchange', 'Test Issue', 'ETF'];
+    if (expected.any((name) => !headers.contains(name))) {
+      throw const FormatException('美股目錄缺少代碼、證券名稱或分類欄位。');
     }
-    final seen = <String>{};
     final stocks = <StockItem>[];
-    for (final row in rows.skip(1)) {
-      if (row.every((field) => field.trim().isEmpty)) continue;
-      if (row.length != headers.length) {
-        throw const FormatException('S&P 500 CSV 欄位數不一致。');
+    final seen = <String>{};
+    var unknown = 0;
+    var footerSeen = false;
+    for (final line in lines.skip(1)) {
+      if (line.trim().isEmpty) continue;
+      if (line.startsWith('File Creation Time:')) {
+        footerSeen = true;
+        continue;
       }
-      final symbol = row[symbolColumn].trim().toUpperCase().replaceAll('.', '-');
-      final name = row[nameColumn].trim();
+      if (footerSeen) throw const FormatException('美股目錄結尾後含未知紀錄。');
+      final cells = line.split('|');
+      if (cells.length != headers.length) {
+        throw const FormatException('美股目錄欄位數不一致。');
+      }
+      String field(String name) => cells[headers.indexOf(name)].trim();
+      if (field('Test Issue') != 'N' || field('ETF') != 'N') continue;
+      // Nasdaq is this file; otherlisted also includes exchanges outside scope.
+      if (!nasdaq && !{'N', 'A'}.contains(field('Exchange'))) continue;
+      final name = field('Security Name');
+      if (RegExp(
+        r'\b(?:preferred|preference|pfd|depositary|depository|ADR|ADS|warrants?|units?|rights?|ET[FN]|funds?|notes?|bonds?)\b|exchange[- ]traded|\bshares?\s+of\s+beneficial\s+interest\b',
+        caseSensitive: false,
+      ).hasMatch(name)) continue;
+      // Corporate REIT ordinary shares remain in scope. An investment trust
+      // or beneficial-interest fund is not made ordinary by its name alone.
+      final withoutCorporateReit = name.replaceAll(
+        RegExp(r'\breal\s+estate\s+investment\s+trust\b', caseSensitive: false), '',
+      );
+      if (RegExp(r'\binvestment\s+trust\b', caseSensitive: false)
+          .hasMatch(withoutCorporateReit)) continue;
+      if (!RegExp(r'\bcommon\s+(?:stock|shares?)\b|\bordinary\s+(?:stock|shares?)\b|\bcapital\s+stock\b', caseSensitive: false)
+          .hasMatch(name)) {
+        unknown++;
+        continue;
+      }
+      final rawSymbol = field(nasdaq ? 'Symbol' : 'ACT Symbol');
+      final symbol = rawSymbol.toUpperCase().replaceAll('.', '-');
       if (!RegExp(r'^[A-Z][A-Z0-9]{0,14}(?:-[A-Z])?$').hasMatch(symbol) || name.isEmpty) {
-        throw const FormatException('S&P 500 CSV 含無效代碼或名稱。');
+        unknown++;
+        continue;
       }
-      if (!seen.add(symbol)) throw const FormatException('S&P 500 CSV 含重複代碼。');
+      if (!seen.add(symbol)) throw const FormatException('美股目錄含重複普通股代碼。');
       final known = master['us:$symbol'];
       stocks.add(StockItem(
-        market: StockMarket.us,
-        symbol: symbol,
-        code: symbol,
-        nameZh: known?.nameZh ?? '',
-        nameFullZh: known?.nameFullZh ?? '',
-        nameEn: name,
-        abbrEn: known?.abbrEn ?? '',
-        aliases: known?.aliases ?? const [],
-        shortCodes: known?.shortCodes ?? const [],
+        market: StockMarket.us, symbol: symbol, code: symbol,
+        nameZh: known?.nameZh ?? '', nameFullZh: known?.nameFullZh ?? '',
+        nameEn: name, abbrEn: known?.abbrEn ?? '',
+        aliases: known?.aliases ?? const [], shortCodes: known?.shortCodes ?? const [],
       ));
     }
-    return stocks..sort((a, b) => a.symbol.compareTo(b.symbol));
+    if (!footerSeen) throw const FormatException('美股目錄缺少檔案完成標記，可能下載不完整。');
+    return _SourceStocks(stocks, warnings: [
+      if (unknown > 0) '美股${nasdaq ? ' Nasdaq' : ' NYSE/NYSE American'}目錄 $unknown 筆未能確認為普通股，未納入。',
+    ]);
   }
 
-  static List<StockItem> _parseTw(String body, Map<String, StockItem> master) {
+  static _SourceStocks _parseTw(
+    String body,
+    Map<String, StockItem> master, {
+    required bool otc,
+  }) {
     final decoded = jsonDecode(body);
-    if (decoded is! List) throw const FormatException('TWSE 股票池必須為 JSON 陣列。');
+    if (decoded is! List) throw const FormatException('台股股票池必須為 JSON 陣列。');
     final stocks = <StockItem>[];
     final seen = <String>{};
     for (final row in decoded) {
-      if (row is! Map<String, dynamic> || !row.containsKey('公司代號')) {
-        throw const FormatException('TWSE 股票池缺少公司代號。');
+      if (row is! Map<String, dynamic> ||
+          (!row.containsKey('公司代號') && !row.containsKey('SecuritiesCompanyCode'))) {
+        throw const FormatException('台股股票池缺少公司代號。');
       }
-      final code = _field(row, ['公司代號']);
-      // Listed issuers' ordinary common shares use four digits beginning with
-      // 1–9. A 0-prefix identifies a fund/ETF rather than an ordinary issuer.
-      if (!RegExp(r'^[1-9]\d{3}$').hasMatch(code)) continue;
-      final name = _field(row, ['公司簡稱', '公司名稱']);
-      final fullName = _field(row, ['公司名稱', '公司簡稱']);
-      final industry = _field(row, ['產業別']);
+      final code = _field(row, ['公司代號', 'SecuritiesCompanyCode']);
+      if (!RegExp(r'^[1-9]\d{3}$').hasMatch(code) ||
+          RegExp(r'^91\d{2}$').hasMatch(code)) continue;
+      final name = _field(row, ['公司簡稱', 'CompanyAbbreviation', '公司名稱', 'CompanyName']);
+      final fullName = _field(row, ['公司名稱', 'CompanyName', '公司簡稱', 'CompanyAbbreviation']);
+      final industry = _field(row, ['產業別', 'SecuritiesIndustryCode']);
       final classification = row.entries
           .where((entry) => RegExp(r'股票種類|證券種類|證券別|security.?type|category', caseSensitive: false)
               .hasMatch(entry.key))
@@ -344,25 +433,22 @@ class StockUniverseService {
       if (industry == '91' || RegExp(r'存託憑證|特別股|TDR|preferred', caseSensitive: false)
           .hasMatch('$name $fullName $classification')) continue;
       if (name.isEmpty || !seen.add(code)) {
-        throw const FormatException('TWSE 股票池含空白名稱或重複代碼。');
+        throw const FormatException('台股股票池含空白名稱或重複代碼。');
       }
-      final symbol = '$code.TW';
+      final symbol = '$code.${otc ? 'TWO' : 'TW'}';
       final known = master['tw:$symbol'];
-      final sourceEnglish = _field(row, ['英文全名', '英文名稱']);
-      final sourceAbbr = _field(row, ['英文簡稱']);
+      final sourceEnglish = _field(row, ['英文全名', '英文名稱', 'EnglishCompanyName', 'CompanyEnglishName']);
+      final sourceAbbr = _field(row, ['英文簡稱', 'Symbol']);
       stocks.add(StockItem(
-        market: StockMarket.tw,
-        symbol: symbol,
-        code: code,
-        nameZh: name,
-        nameFullZh: fullName,
+        market: StockMarket.tw, symbol: symbol, code: code,
+        nameZh: name, nameFullZh: fullName,
         nameEn: sourceEnglish.isNotEmpty ? sourceEnglish : known?.nameEn ?? '',
         abbrEn: sourceAbbr.isNotEmpty ? sourceAbbr : known?.abbrEn ?? '',
         aliases: {...?known?.aliases, if (known != null && known.nameZh != name) known.nameZh}.toList(),
         shortCodes: known?.shortCodes ?? const [],
       ));
     }
-    return stocks..sort((a, b) => a.symbol.compareTo(b.symbol));
+    return _SourceStocks(stocks);
   }
 
   static String _field(Map<String, dynamic> row, List<String> names) {
@@ -372,52 +458,6 @@ class StockUniverseService {
       if (value is num) return value.toString();
     }
     return '';
-  }
-
-  /// RFC 4180-style quotes, escaped quotes, embedded commas/newlines and BOM.
-  static List<List<String>> _csv(String raw) {
-    final input = raw.startsWith('\ufeff') ? raw.substring(1) : raw;
-    final rows = <List<String>>[];
-    var row = <String>[];
-    var field = StringBuffer();
-    var quoted = false;
-    var quoteClosed = false;
-    for (var index = 0; index < input.length; index++) {
-      final char = input[index];
-      if (quoted) {
-        if (char == '"') {
-          if (index + 1 < input.length && input[index + 1] == '"') {
-            field.write('"');
-            index++;
-          } else {
-            quoted = false;
-            quoteClosed = true;
-          }
-        } else {
-          field.write(char);
-        }
-      } else if (char == ',' || char == '\n' || char == '\r') {
-        row.add(field.toString());
-        field = StringBuffer();
-        quoteClosed = false;
-        if (char != ',') {
-          rows.add(row);
-          row = <String>[];
-          if (char == '\r' && index + 1 < input.length && input[index + 1] == '\n') index++;
-        }
-      } else if (char == '"' && field.isEmpty && !quoteClosed) {
-        quoted = true;
-      } else {
-        if (char == '"' || quoteClosed) throw const FormatException('CSV 引號結構無效。');
-        field.write(char);
-      }
-    }
-    if (quoted) throw const FormatException('CSV 引號未閉合。');
-    if (field.isNotEmpty || row.isNotEmpty || quoteClosed) {
-      row.add(field.toString());
-      rows.add(row);
-    }
-    return rows;
   }
 
   static String _errorLabel(Object error) {
@@ -430,6 +470,16 @@ class StockUniverseService {
   void close() {
     if (_closed) return;
     _closed = true;
-    if (_ownsClient) _client.close();
+    _network.close();
   }
+}
+
+/// A source failure is data, never an uncaught rejection of the other source.
+class _SourceStocks {
+  _SourceStocks(this.stocks, {this.warnings = const []}) : success = true;
+  _SourceStocks.failure(String warning)
+      : stocks = const [], warnings = [warning], success = false;
+  final List<StockItem> stocks;
+  final List<String> warnings;
+  final bool success;
 }

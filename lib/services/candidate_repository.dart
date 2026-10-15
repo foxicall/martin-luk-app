@@ -3,7 +3,9 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/backend_scan_status.dart';
 import '../models/stock_candidate.dart';
+import 'network_request.dart';
 
 class CandidateSnapshot {
   CandidateSnapshot({
@@ -15,12 +17,56 @@ class CandidateSnapshot {
     required this.stale,
     List<String> missingSymbols = const [],
     this.evaluatedCount,
+    this.scanPoolSize,
+    this.adrMatchCount,
     this.universeIsComplete = true,
     this.universeAsOf,
     this.scanCompletedAt,
+    this.isFallback = false,
+    this.attemptedAt,
+    this.backendScan,
+    this.isPending = false,
+    this.coverageTotalCount,
+    this.coverageScannedCount,
+    this.coverageEvaluatedCount,
+    this.coverageRemainingCount,
+    this.coverageRound,
+    this.scanPageStart,
+    this.scanPageSize,
+    this.universeFingerprint,
   })  : candidates = List<StockCandidate>.unmodifiable(candidates),
         warnings = List<String>.unmodifiable(warnings),
-        missingSymbols = List<String>.unmodifiable(missingSymbols);
+        missingSymbols = List<String>.unmodifiable(missingSymbols) {
+    RollingScanCoverage(
+      totalCount: coverageTotalCount,
+      scannedCount: coverageScannedCount,
+      evaluatedCount: coverageEvaluatedCount,
+      remainingCount: coverageRemainingCount,
+      round: coverageRound,
+      pageStart: scanPageStart,
+      pageSize: scanPageSize,
+      fingerprint: universeFingerprint,
+      universeCount: universeCount,
+    );
+  }
+
+  /// A diagnostic terminal state, never a successful scan or a quote cache.
+  /// Zero means the universe has not yet been loaded; no prices are invented.
+  factory CandidateSnapshot.fallback({
+    required StockMarket marketType,
+    required DateTime updatedAt,
+    int universeCount = 0,
+    int scanPoolSize = 0,
+    String reason = '市場評估未完成，請檢查連線後重試。',
+  }) => CandidateSnapshot(
+        candidates: const [], fetchedAt: updatedAt.toUtc(),
+        attemptedAt: updatedAt.toUtc(),
+        warnings: [reason],
+        source: '${marketType == StockMarket.tw ? '台股' : '美股'}市場評估未完成',
+        universeCount: universeCount, scanPoolSize: scanPoolSize,
+        evaluatedCount: 0, adrMatchCount: 0,
+        universeIsComplete: false, stale: true, isFallback: true,
+      );
 
   final List<StockCandidate> candidates;
   final DateTime fetchedAt;
@@ -30,9 +76,29 @@ class CandidateSnapshot {
   final bool stale;
   final List<String> missingSymbols;
   final int? evaluatedCount;
+  /// Actual foreground pool, distinct from full market membership.
+  final int? scanPoolSize;
+  /// Successfully evaluated stocks meeting the configured ADR threshold.
+  final int? adrMatchCount;
   final bool universeIsComplete;
   final DateTime? universeAsOf;
   final DateTime? scanCompletedAt;
+  /// This timestamp records the failed attempt, not a verified market quote.
+  final DateTime? attemptedAt;
+  final bool isFallback;
+  /// Background job progress is not a generated market snapshot.
+  final BackendScanStatus? backendScan;
+  final bool isPending;
+  /// Round coverage is distinct from this page's scanPoolSize/evaluatedCount.
+  /// Failed symbols count as attempted; only verified symbols count as evaluated.
+  final int? coverageTotalCount;
+  final int? coverageScannedCount;
+  final int? coverageEvaluatedCount;
+  final int? coverageRemainingCount;
+  final int? coverageRound;
+  final int? scanPageStart;
+  final int? scanPageSize;
+  final String? universeFingerprint;
 
   DateTime get generatedAt => fetchedAt;
   bool get isStale => stale;
@@ -56,14 +122,13 @@ class RepositoryException implements Exception {
 }
 
 class RealCandidateRepository implements CandidateRepository {
-  RealCandidateRepository({required String baseUrl, http.Client? client})
+  RealCandidateRepository({required String baseUrl, http.Client? client,
+      Duration requestTimeout = NetworkRequest.defaultTimeout})
       : _baseUri = _parseBaseUrl(baseUrl),
-        _client = client ?? http.Client(),
-        _ownsClient = client == null;
+        _network = NetworkRequest(client: client, timeout: requestTimeout);
 
   final Uri _baseUri;
-  final http.Client _client;
-  final bool _ownsClient;
+  final NetworkRequest _network;
 
   @override
   Future<CandidateSnapshot> fetch(
@@ -78,19 +143,28 @@ class RealCandidateRepository implements CandidateRepository {
       queryParameters: {
         'market': market.name,
         'adr_threshold': adrThreshold.toString(),
+        'background': 'true',
+        'force_refresh': forceRefresh ? 'true' : 'false',
       },
     );
     try {
-      final response = await _client
-          .get(endpoint, headers: {'Accept': 'application/json'})
-          .timeout(const Duration(seconds: 30));
-      if (response.statusCode != 200) {
+      final response = await _network.get(endpoint,
+          headers: {'Accept': 'application/json'});
+      if (response.statusCode != 200 && response.statusCode != 202 &&
+          response.statusCode != 503) {
         throw RepositoryException('掃描 API 回應 HTTP ${response.statusCode}，請檢查後端狀態。');
       }
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
       if (decoded is! Map<String, dynamic>) {
         throw const FormatException('回應必須為 JSON 物件。');
       }
+      if (decoded.containsKey('scan')) {
+        return _parseBackgroundResponse(decoded, market, response.statusCode);
+      }
+      if (response.statusCode != 200) {
+        throw RepositoryException('掃描 API 回應 HTTP ${response.statusCode}，未提供有效掃描進度。');
+      }
+      // Compatibility with an older server that returns a completed snapshot.
       return _parseSnapshot(decoded, market);
     } on RepositoryException {
       rethrow;
@@ -106,11 +180,66 @@ class RealCandidateRepository implements CandidateRepository {
   }
 
   void close() {
-    if (_ownsClient) _client.close();
+    _network.close();
   }
 }
 
-CandidateSnapshot _parseSnapshot(Map<String, dynamic> json, StockMarket market) {
+CandidateSnapshot _parseBackgroundResponse(
+    Map<String, dynamic> json, StockMarket market, int statusCode) {
+  if (json['market'] != market.name) {
+    throw const FormatException('回應市場與要求市場不符。');
+  }
+  final scan = json['scan'];
+  final retry = json['retry_after_seconds'] ?? 3;
+  if (scan is! Map<String, dynamic> || retry is! int) {
+    throw const FormatException('掃描進度或重試秒數格式無效。');
+  }
+  final progress = BackendScanStatus.fromJson(scan, market: market,
+      retryAfterSeconds: retry);
+  if (statusCode == 503) {
+    throw RepositoryException('後端市場掃描失敗：'
+        '${progress.error ?? 'HTTP 503，請稍後重試或檢查伺服器紀錄。'}');
+  }
+  final snapshot = json['snapshot'];
+  if (snapshot != null) {
+    if (snapshot is! Map<String, dynamic>) {
+      throw const FormatException('snapshot 必須為 JSON 物件或 null。');
+    }
+    return _parseSnapshot(snapshot, market, backendScan: progress);
+  }
+  if (statusCode != 202 || !progress.isRunning) {
+    throw RepositoryException(progress.isFailed
+        ? '後端市場掃描失敗：${progress.error ?? '請檢查伺服器紀錄。'}'
+        : '後端未回傳已完成的市場快照，請重試。');
+  }
+  // A 202 settles immediately. The controller owns future polls and must not
+  // persist or publish this empty placeholder as an actual completed scan.
+  return CandidateSnapshot(
+    candidates: const [],
+    fetchedAt: progress.updatedAt,
+    warnings: const ['後端正在分批掃描；尚未取得已完成的評估快照。'],
+    source: 'Python API 背景掃描進度',
+    universeCount: progress.universeCount,
+    stale: true,
+    evaluatedCount: progress.evaluatedCount,
+    scanPoolSize: progress.totalCount,
+    adrMatchCount: progress.adrMatchCount,
+    universeIsComplete: false,
+    backendScan: progress,
+    isPending: true,
+    coverageTotalCount: progress.coverageTotalCount,
+    coverageScannedCount: progress.coverageScannedCount,
+    coverageEvaluatedCount: progress.coverageEvaluatedCount,
+    coverageRemainingCount: progress.coverageRemainingCount,
+    coverageRound: progress.coverageRound,
+    scanPageStart: progress.scanPageStart,
+    scanPageSize: progress.scanPageSize,
+    universeFingerprint: progress.universeFingerprint,
+  );
+}
+
+CandidateSnapshot _parseSnapshot(Map<String, dynamic> json, StockMarket market,
+    {BackendScanStatus? backendScan}) {
   if (json['market'] != market.name) {
     throw const FormatException('回應市場與要求市場不符。');
   }
@@ -127,40 +256,125 @@ CandidateSnapshot _parseSnapshot(Map<String, dynamic> json, StockMarket market) 
   if (RegExp(r'mock|demo|fictit|假|虛構|示範|離線', caseSensitive: false).hasMatch(source)) {
     throw const FormatException('正式掃描 API 回傳了示範來源，已拒絕載入。');
   }
-  final candidates = <StockCandidate>[];
-  final seenSymbols = <String>{};
-  for (final row in rows) {
-    if (row is! Map<String, dynamic>) {
-      throw const FormatException('個股資料必須為 JSON 物件。');
-    }
-    final candidate = StockCandidate.fromJson(row);
-    if (candidate.market != market || !seenSymbols.add(candidate.symbol)) {
-      throw const FormatException('候選資料包含不同市場或重複股票代碼。');
-    }
-    candidates.add(candidate);
-  }
-  if (count < candidates.length) {
-    throw const FormatException('股票池數量小於候選股票數量。');
+  final coverage = RollingScanCoverage.fromJson(json, universeCount: count);
+  // Envelope failures invalidate the response; a bad individual stock does
+  // not invalidate independently verified rows from the same response.
+  final generatedAt = parseApiTimestamp(json['generated_at'], 'generated_at');
+  final scanCompletedAt = json['scan_completed_at'] == null ? generatedAt :
+      parseApiTimestamp(json['scan_completed_at'], 'scan_completed_at');
+  final universeAsOf = json['universe_as_of'] == null ? null :
+      parseApiTimestamp(json['universe_as_of'], 'universe_as_of');
+  final evaluated = json['evaluated_count'];
+  final scanPoolSize = json['scan_pool_size'];
+  final adrMatchCount = json['adr_match_count'];
+  final complete = json['universe_is_complete'];
+  if ((evaluated != null && (evaluated is! int || evaluated < 0 || evaluated > count)) ||
+      (scanPoolSize != null && (scanPoolSize is! int || scanPoolSize < 0 ||
+          scanPoolSize > count || (evaluated is int && evaluated > scanPoolSize))) ||
+      (adrMatchCount != null && (adrMatchCount is! int || adrMatchCount < 0 ||
+          adrMatchCount > (evaluated is int ? evaluated : count))) ||
+      (complete != null && complete is! bool)) {
+    throw const FormatException('已評估數量或完整股票池旗標格式無效。');
   }
   final missing = json['missing_symbols'];
-  if (missing != null &&
-      (missing is! List || missing.any((item) => item is! String))) {
-    throw const FormatException('missing_symbols 必須為字串陣列。');
+  if (missing != null && (missing is! List ||
+      missing.any((item) => item is! String || item.trim().isEmpty))) {
+    throw const FormatException('missing_symbols 必須為非空字串陣列。');
   }
+  final candidates = <String, StockCandidate>{};
+  final seenSymbols = <String>{};
+  final failedSymbols = <String>{};
+  final rowWarnings = <String>[];
+  var rejectedRows = 0;
+  for (var index = 0; index < rows.length; index++) {
+    final row = rows[index];
+    final rawSymbol = row is Map<String, dynamic> ? row['symbol'] : null;
+    final symbol = rawSymbol is String && rawSymbol.trim().isNotEmpty
+        ? rawSymbol.trim() : null;
+    try {
+      if (row is! Map<String, dynamic>) {
+        throw const FormatException('個股資料必須為 JSON 物件。');
+      }
+      if (symbol != null && !seenSymbols.add(symbol)) {
+        // A duplicate is ambiguous. Remove every copy of this stock, retaining
+        // unrelated symbols instead of choosing whichever copy arrived first.
+        if (candidates.remove(symbol) != null) rejectedRows++;
+        throw const FormatException('重複股票代碼，該股票所有候選已排除。');
+      }
+      final candidate = StockCandidate.fromJson(row);
+      final validSymbol = (market == StockMarket.tw ? RegExp(r'^\d{4}\.(?:TW|TWO)$') :
+          RegExp(r'^[A-Z][A-Z0-9-]{0,14}$')).hasMatch(candidate.symbol);
+      if (candidate.market != market || !validSymbol) {
+        throw const FormatException('個股市場或標準股票代碼與要求不符。');
+      }
+      final latestAllowed = generatedAt.add(const Duration(minutes: 1));
+      if (candidate.dataTimestamp.isAfter(latestAllowed) ||
+          (candidate.signalTimestamp?.isAfter(latestAllowed) ?? false)) {
+        throw const FormatException('個股行情或訊號時間晚於掃描回應時間。');
+      }
+      candidates[candidate.symbol] = candidate;
+    } catch (error) {
+      rejectedRows++;
+      if (symbol != null && failedSymbols.length < 1000) {
+        failedSymbols.add(_boundedCandidateMessage(symbol, 40));
+      }
+      if (rowWarnings.length < 20) {
+        final label = symbol == null ? '第 ${index + 1} 筆候選' : symbol;
+        final reason = error is FormatException ? error.message : error.runtimeType.toString();
+        rowWarnings.add('${_boundedCandidateMessage(label, 40)} 已排除：'
+            '${_boundedCandidateMessage(reason.toString(), 160)}');
+      }
+    }
+  }
+  if (count < candidates.length ||
+      (evaluated is int && evaluated < candidates.length)) {
+    throw const FormatException('股票池或已評估數量小於有效候選股票數量。');
+  }
+  if (rows.isNotEmpty && candidates.isEmpty) {
+    // A valid genuinely empty scan is allowed. A nonempty corrupt response
+    // must fail so the controller retains its previous timestamped snapshot.
+    throw FormatException('非空候選清單全部無法驗證：${rowWarnings.join('；')}');
+  }
+  final combinedWarnings = <String>[
+    ...warnings.cast<String>().take(100)
+        .map((warning) => _boundedCandidateMessage(warning, 240)),
+    if (rejectedRows > 0) '已隔離 $rejectedRows 筆無效候選，其他有效股票仍可查看。',
+    ...rowWarnings,
+    if (rejectedRows > rowWarnings.length)
+      '另有 ${rejectedRows - rowWarnings.length} 筆無效候選；詳細警告最多顯示 20 筆。',
+  ];
   return CandidateSnapshot(
-    candidates: candidates,
-    fetchedAt: parseApiTimestamp(json['generated_at'], 'generated_at'),
-    warnings: warnings.cast<String>(),
+    candidates: candidates.values.toList(),
+    fetchedAt: generatedAt,
+    warnings: combinedWarnings,
     source: source,
     universeCount: count,
     stale: stale,
-    evaluatedCount: json['evaluated_count'] is int ? json['evaluated_count'] as int : null,
-    universeIsComplete: json['universe_is_complete'] != false,
-    universeAsOf: json['universe_as_of'] == null ? null : parseApiTimestamp(json['universe_as_of'], 'universe_as_of'),
-    scanCompletedAt: parseApiTimestamp(json['generated_at'], 'generated_at'),
-    missingSymbols: missing == null ? const [] : (missing as List).cast<String>(),
+    backendScan: backendScan,
+    evaluatedCount: evaluated is int ? evaluated : null,
+    scanPoolSize: scanPoolSize is int ? scanPoolSize : null,
+    adrMatchCount: adrMatchCount is int ? adrMatchCount : null,
+    universeIsComplete: complete != false,
+    universeAsOf: universeAsOf,
+    scanCompletedAt: scanCompletedAt,
+    coverageTotalCount: coverage.totalCount,
+    coverageScannedCount: coverage.scannedCount,
+    coverageEvaluatedCount: coverage.evaluatedCount,
+    coverageRemainingCount: coverage.remainingCount,
+    coverageRound: coverage.round,
+    scanPageStart: coverage.pageStart,
+    scanPageSize: coverage.pageSize,
+    universeFingerprint: coverage.fingerprint,
+    missingSymbols: <String>{
+      if (missing is List) ...missing.cast<String>().take(1000)
+          .map((symbol) => _boundedCandidateMessage(symbol, 40)),
+      ...failedSymbols.where((symbol) => !candidates.containsKey(symbol)),
+    }.take(1000).toList(),
   );
 }
+
+String _boundedCandidateMessage(String value, int maximum) =>
+    value.length <= maximum ? value : '${value.substring(0, maximum)}…';
 
 Uri _parseBaseUrl(String value) {
   final uri = Uri.tryParse(value.trim());
@@ -196,7 +410,7 @@ class MockCandidateRepository implements CandidateRepository {
       fetchedAt: _demoTime,
       warnings: const [
         '離線示範：報價、ADR、RS 與訊號全部為固定假資料，並非即時掃描。',
-        '資料僅含範例股票，未掃描完整 TWSE 或 S&P 500 股票池。',
+        '資料僅含範例股票，未掃描完整台股上市櫃或美股三大交易所股票池。',
       ],
       source: '離線示範',
       universeCount: 8,

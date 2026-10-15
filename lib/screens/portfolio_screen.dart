@@ -6,6 +6,7 @@ import '../models/portfolio_position.dart';
 import '../models/stock_candidate.dart';
 import '../models/stock_item.dart';
 import '../services/exit_advisory_engine.dart';
+import '../services/market_data_api.dart' show canonicalSymbol;
 import '../widgets/stock_search_field.dart';
 
 /// Local holdings are independent of brokerage accounts; all actions are advice.
@@ -75,9 +76,10 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
               StockSearchField(controller: symbol,
                 key: const ValueKey('holding-stock-search'),
                 label: '股票代碼／中英文名稱',
-                helperText: '選擇提示會自動填入市場與標準代碼；台股支援 2330／2330.TW。',
+                helperText: '選擇提示會填入標準代碼；上市 .TW、上櫃 .TWO。未選提示的純數字預設為上市。',
                 onSelected: (item) => update(() {
                   market = item.market;
+                  symbol.text = item.symbol;
                   name.text = item.displayName;
                 }),
                 validator: (text) => (text ?? '').trim().isEmpty ? '請輸入代碼' : null),
@@ -113,9 +115,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
             FilledButton(onPressed: () {
               if (!form.currentState!.validate()) return;
               try {
-                var code = symbol.text.trim().toUpperCase();
-                if (market == StockMarket.tw && !code.endsWith('.TW')) code = '$code.TW';
-                if (market == StockMarket.us) code = code.replaceAll('.', '-');
+                final code = canonicalSymbol(symbol.text, market);
                 final result = PortfolioPosition(
                   id: holding?.id ?? 'holding-${DateTime.now().microsecondsSinceEpoch}',
                   symbol: code, name: name.text.trim(), market: market,

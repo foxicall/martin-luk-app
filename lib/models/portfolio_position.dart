@@ -16,7 +16,7 @@ class PortfolioPosition {
     this.mainUptrend = false,
   }) : trailingStop = trailingStop ?? initialStop {
     if (id.trim().isEmpty || symbol.trim().isEmpty ||
-        !(market == StockMarket.tw ? RegExp(r'^\d{4}\.TW$') :
+        !(market == StockMarket.tw ? RegExp(r'^\d{4}\.(?:TW|TWO)$') :
             RegExp(r'^[A-Z][A-Z0-9-]{0,14}$')).hasMatch(symbol) ||
         !entryPrice.isFinite || entryPrice <= 0 || shares <= 0 || shares > 9007199254740991 ||
         !initialStop.isFinite || initialStop <= 0 || initialStop >= entryPrice ||
@@ -83,7 +83,7 @@ class PortfolioQuote {
     required this.source, required this.isLargeLiquid,
     this.isCached = false, this.isStale = false, this.cacheWarning, this.fetchedAt,
   }) {
-    if (!(market == StockMarket.tw ? RegExp(r'^\d{4}\.TW$') :
+    if (!(market == StockMarket.tw ? RegExp(r'^\d{4}\.(?:TW|TWO)$') :
             RegExp(r'^[A-Z][A-Z0-9-]{0,14}$')).hasMatch(symbol) ||
         name.trim().isEmpty || source.trim().isEmpty ||
         [currentPrice, ema9, ema21, ema50].any((n) => !n.isFinite || n <= 0) ||
