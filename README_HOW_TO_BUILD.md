@@ -2,15 +2,17 @@
 
 這份 ZIP 同時包含 **可直接開啟的 HTML 手機互動預覽** 與 **完整 Flutter／FastAPI 原始碼及 GitHub Actions 工作流**。HTML 預覽不需 SDK、Python、後端或網路；它是獨立的介面與策略運算示範，不是編譯後的 Flutter。ZIP 目前不包含已編譯 APK；APK 由以下雲端工作流產生。
 
+2026-10-15 起，現行門禁改為驗證真實行情與計算正確，允許推薦清單為空；本規則取代先前「至少一檔推薦才建置」。ADR、突破、資料新鮮度、停損與風控條件維持原設定，不以觀察股或假資料補足推薦。
+
 ## 1. 從目前聊天介面下載 ZIP
 
-1. 點擊助理回覆中的 [下載完整交付 ZIP](/workspace/martin_luk_app_deliverable.zip)，儲存檔案。
-2. 解壓縮到一個新資料夾，例如 `martin_luk_app`。ZIP 內直接是專案檔案，沒有額外的外層專案目錄。
-3. 開啟解壓資料夾內的 `preview/index.html`，選擇 Chrome、Edge 或 Safari 開啟。
+1. 儲存助理回覆附上的完整覆蓋包；若介面提供附件下載，直接下載該附件。不能下載時，可複製交付的完整原始碼，或依下方 Base64 匯出方式還原。
+2. 將內容合併至既有專案，例如 `C:\Users\a1258\projects\martin_luk_trading_app`，覆蓋同名檔案。ZIP 內直接是專案檔案，不需重新建立骨架。
+3. 雙擊 `run_preview.bat`，或用 Chrome／Edge／Safari 開啟 `preview/standalone_preview.html`；見 `WINDOWS_UPDATE_GUIDE.md`。
 
 無法下載時，可直接複製 `standalone_preview.html` 的完整內容存成同名檔案；此入口固定離線、不含任何 API 呼叫。完整原始碼 ZIP 另有 Base64 終端匯出／還原方式，詳見 [TERMINAL_EXPORT_GUIDE.md](TERMINAL_EXPORT_GUIDE.md)。
 
-交付檔案的精確位置為 `/workspace/martin_luk_app_deliverable.zip`；這是供聊天介面下載的工作區檔案路徑，不是在自己電腦瀏覽器輸入的網址。若介面提供工作區檔案面板，也可找到同名檔案下載。
+交付檔案的精確位置為 `/workspace/martin_luk_trading_app.zip`；這是供聊天介面下載的工作區檔案路徑，不是在自己電腦瀏覽器輸入的網址。若介面提供工作區檔案面板，也可找到同名檔案下載。
 
 ## 2. 零安裝離線手機預覽
 
@@ -38,8 +40,9 @@ backend/                           FastAPI、股票池、快取、掃描、排�
 backend/engine/exit_engine.py       強勢減碼、保本與 EMA 出場診斷
 backend/engine/portfolio_tracker.py 持股資料與 JSON 保存
 test/                              Dart 單元與 Widget 測試
-.github/workflows/build_apk.yml     GitHub 雲端 APK／Web 建置
-scripts/package_deliverable.sh     一鍵驗證、打包、大小與 SHA256
+.github/workflows/build_apk.yml     GitHub 真實行情／計算門禁與 APK 建置
+scripts/validate_live_scan_evidence.py schema 2 實測報告驗證器
+scripts/package_trading_app.sh     一鍵驗證、打包、大小與 SHA256
 scripts/verify_deliverable.py      交付檔案完整性驗證
 scripts/export_upload.sh           ZIP、SHA256、Base64 終端匯出
 scripts/recover_upload.py          本機還原 Base64 並檢查 ZIP
@@ -52,17 +55,17 @@ PORTFOLIO_GUIDE.md                  持股操作、買賣點與出場規則
 ## 4. 不用本機 Android SDK，在 GitHub 產出 APK
 
 1. 建立 GitHub repository。將**解壓後的專案內容**放在 repository 根目錄：根目錄應直接有 `pubspec.yaml`、`lib/`、`android/` 與 `.github/`。不要只上傳 ZIP，也不要多套一層專案資料夾。
-2. 確認隱藏目錄 `.github` 一起提交。推送到 `main` 或 `master` 時自動執行建置。
-3. 若要重新建置，可開啟 **Actions → Build APK and Web Preview → Run workflow**，選分支後再次按 **Run workflow**；手動入口要求工作流先存在於預設分支。若 Actions 被 repository 或組織政策停用，先在 GitHub 設定允許工作流執行。
-4. 等待工作流完成。第一個 `strategy-tests` 工作設定 Python 3.12 與 Node 22，驗證 Python 後端、HTML 風控／持股操作及跨語言結果一致性。通過後，建置工作設定 Java 17 Temurin、Flutter stable 3.29.3 及 Android SDK，依序執行 `flutter pub get`、`flutter analyze`、`flutter test`，再建置預設離線模式的 Release APK 與正式 Flutter Web。
-5. 在該次執行摘要的 **Artifacts** 點 `martin-luk-release-apk` 下載，解壓取得 `app-release.apk`。產物保留 **14 天**。
+2. 確認隱藏目錄 `.github` 一起提交。提交至 `main`、`master` 或 `fix/refresh-live-gate-20261014` 時自動執行建置。
+3. 若要重新建置，可開啟 **Actions → Build Android APK with Verification Gate → Run workflow**，選分支後再次按 **Run workflow**；手動入口要求工作流先存在於預設分支。若 Actions 被 repository 或組織政策停用，先在 GitHub 設定允許工作流執行。
+4. 等待 `verify-and-build` 完成。工作流使用 Java 17 與 Flutter stable，先執行 Python 報告驗證器測試及 Flutter RS／策略／風控單元測試，再以 `RUN_LIVE_SCAN_TEST=true`、`USE_MOCK_DATA=false` 實際連網驗證：15 秒工作期限內取得兩指數與 NVDA、AAPL、TSLA、2330.TW、2603.TW，獨立驗算 ADR、EMA 與 RS。`scripts/validate_live_scan_evidence.py` 驗證 schema 2 報告通過後才建置 APK。推薦 `[]`、休市或當下沒有買點不會單獨阻止建置；必要行情取得、解析、指標不符或逾時仍會阻止，詳見 `REFRESH_RECOVERY.md`。
+5. 通過門禁後在 **Artifacts** 點 `martin-luk-app-release` 下載，解壓取得 `app-release.apk`；保留 **7 天**。`martin-luk-live-scan-evidence` 保存 `test_logs/verification.log`，成功或失敗都保留 7 天；實測 JSON 亦會寫入日誌供診斷。
 6. 把 APK 傳到 Android 手機，點擊安裝；依手機提示允許該檔案管理器或瀏覽器「安裝未知應用程式」。這是 Android APK，不能安裝到 iPhone。
 
 沒有設定正式簽署金鑰時，專案使用 Debug Keystore 簽署 Release APK 供側載測試。Android APK 必須簽署，此方式不是無簽名 APK。公開發布或穩定更新版本前，請依 `BUILD_ANDROID.md` 設定自己的簽署金鑰；不要把私鑰或密碼提交到 GitHub。
 
 這份交付沒有在 GitHub 上代為觸發建置。工作流的分析、測試及編譯結果，以實際 Actions 執行紀錄為準；本機未具備完整 Flutter／Android SDK，不能把配置檢查視為已編譯成功。
 
-另一個產物 `martin-luk-flutter-web-preview` 是**真正編譯後的 Flutter Web**。下載解壓後需透過 HTTP 提供檔案，不能當成單檔 HTML 直接雙擊；有 Python 的電腦可在該產物目錄執行：
+現行 APK 工作流只上傳實測紀錄與 APK，不產出 Flutter Web artifact。若自行執行 `flutter build web`，真正編譯後的 Flutter Web 仍需透過 HTTP 提供檔案，不能當成單檔 HTML 直接雙擊；有 Python 的電腦可在 `build/web` 目錄執行：
 
 ```bash
 python3 -m http.server 8080 --bind 127.0.0.1
@@ -89,23 +92,23 @@ Windows 的環境啟用指令是 `.venv\Scripts\activate`。API 文件位於同�
 
 ```bash
 cd /workspace/martin_luk_app
-bash scripts/package_deliverable.sh
+bash scripts/package_trading_app.sh
 ```
 
-腳本先驗證必要檔案並產生 `FILE_MANIFEST.json`，再從專案根目錄執行 `zip -r`，產生 `/workspace/martin_luk_app_deliverable.zip` 與相鄰的 `.zip.sha256` 驗證檔，最後檢查 ZIP 內容、CRC 與來源一致性，並輸出檔案大小及 SHA256。包內保留 `.github`，排除 `.git/`、`build/`、`.dart_tool/`、虛擬環境、資料快取、`__pycache__/` 及私密簽署設定等非交付項目。
+腳本先驗證必要檔案並產生 `FILE_MANIFEST.json`，再從專案根目錄執行 `zip -r`，產生 `/workspace/martin_luk_trading_app.zip` 與相鄰的 `.zip.sha256` 驗證檔，最後檢查 ZIP 內容、CRC 與來源一致性，並輸出檔案大小及 SHA256。包內保留 `.github`，排除 `.git/`、`build/`、`.dart_tool/`、虛擬環境、資料快取、`__pycache__/` 及私密簽署設定等非交付項目。
 
 單獨執行完整性檢查：
 
 ```bash
 python3 scripts/verify_deliverable.py
-python3 scripts/verify_deliverable.py --archive /workspace/martin_luk_app_deliverable.zip
+python3 scripts/verify_deliverable.py --archive /workspace/martin_luk_trading_app.zip
 ```
 
 也可手動查看大小與雜湊：
 
 ```bash
-ls -lh /workspace/martin_luk_app_deliverable.zip
-sha256sum /workspace/martin_luk_app_deliverable.zip
+ls -lh /workspace/martin_luk_trading_app.zip
+sha256sum /workspace/martin_luk_trading_app.zip
 ```
 
-下載後可與助理回覆或 `.sha256` 的值比對。Windows PowerShell 使用 `Get-FileHash .\martin_luk_app_deliverable.zip -Algorithm SHA256`；macOS 使用 `shasum -a 256 martin_luk_app_deliverable.zip`。
+下載後可與助理回覆或 `.sha256` 的值比對。Windows PowerShell 使用 `Get-FileHash .\martin_luk_trading_app.zip -Algorithm SHA256`；macOS 使用 `shasum -a 256 martin_luk_trading_app.zip`。

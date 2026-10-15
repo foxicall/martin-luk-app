@@ -2,6 +2,32 @@
 
 Flutter / Dart 手機 App，包含台股上市及美股 S&P 500 儀表板、個股部位計算、我的持股庫存、動態出場診斷、設定、本機定時提醒與 FastAPI 後端。將需求中的交易規則轉成明確的數值規則；價格以各市場原生幣別表示。
 
+## 既有 Windows 專案與正式連網版
+
+正式 App 預設 `USE_MOCK_DATA=false`，手機直接取得 Yahoo 行情、於本機計算 ADR／EMA／RS／突破，不需自架後端；前台 60 秒更新、背景停止、下拉強制刷新。失敗保留帶原始時間的真實快取，不載入假資料。Python 中繼與示範模式均為明確選配，詳見 [PRODUCTION_GUIDE.md](PRODUCTION_GUIDE.md)。
+
+Actions 直接驗證 Checkout 原始碼，不再執行 SHA 補丁更新器。完整直接覆蓋內容見 [GITHUB_MANUAL_UPDATE.md](GITHUB_MANUAL_UPDATE.md)。
+
+2026-10-15 起，建置門禁改為「真實行情取得與計算正確」，取代先前「至少一檔推薦才建置」的規則。推薦清單為空是正常評估結果，不會單獨阻擋 APK；實際 HTTP、解析、必要股票、指標驗算或期限錯誤仍會阻擋。選股與風控規則維持原設定，觀察股不會充當已確認推薦。
+
+市場評估優先掃描最多 30 檔核心成員，每批 5 檔、批次間隔 150ms；逐批顯示進度並支援停止。行情及一般 HTTP 預設最長 8 秒；共用傳輸層明確指定時允許最多 10 秒；直連市場評估預算 9 秒、控制器全流程硬上限 10 秒，報價與持股刷新維持短期限及 `finally` 清理。Actions 先驗證報告驗證器及 Dart 的 RS／策略／風控單元測試，再以 Mock 關閉的實際 HTTP，在 15 秒工作期限內取得 `^GSPC`、`^TWII` 與 NVDA、AAPL、TSLA、2330.TW、2603.TW，獨立驗算 ADR／EMA／RS。schema 2 報告還必須通過 `scripts/validate_live_scan_evidence.py`，才允許編譯 APK；`candidates: []` 可以通過。詳見 [刷新修復與實測門禁](REFRESH_RECOVERY.md)。
+
+將 ZIP 同名檔案合併覆蓋至既有 `C:\Users\a1258\projects\martin_luk_trading_app`，不需重建專案骨架。雙擊根目錄 `run_preview.bat` 開啟 `preview/standalone_preview.html`：完全離線的單檔 HTML 已包含雙市場資金、793 筆字典、搜尋、風控與持股操作。原根目錄 `standalone_preview.html` 保留相同內容。覆蓋步驟見 [WINDOWS_UPDATE_GUIDE.md](WINDOWS_UPDATE_GUIDE.md)。
+
+指定的純數學風控函式已於 `lib/services/live_strategy_engine.dart` 提供：
+
+```dart
+import 'package:martin_luk_app/services/live_strategy_engine.dart';
+
+final plan = calculatePositionSize(
+  capital: 50000, entryPrice: 100, stopLossPrice: 98, isMegaCap: true,
+); // shares=125, riskBudget=250, riskAmount=250
+final exits = calculateExitTargets(100, 98);
+// oneR=2; targets={3:106, 5:110, 10:120}
+```
+
+`calculatePositionSize` 嚴格驗證 1.5%～3% 停損距離，以精確十進位數學向下取整、限制 0.5% 風險及 35%／25% 倉位；不把試算價格冒充市場訊號。`calculateExitTargets` 固定使用原始 1R，可用於現有持股目標價。
+
 ## 台美股智慧搜尋
 
 推薦列與持股表單已加入 200ms 防抖自動完成，支援 `台積電`／`2330`／`TSMC`、`輝達`／`NVDA`、`特斯拉`、中英文全名與簡碼。下拉顯示最多 8 筆市場、代碼與名稱；選取後帶入標準代碼，依股票市場使用 USD／TWD 本金。共同 `stocks_master.json` 預先索引於記憶體，兩個 HTML 同步內嵌，離線搜尋不發送網路請求。只有元資料的股票會帶入持股表單，等待實際成本與行情，搜尋本身不建立策略訊號。
@@ -28,7 +54,7 @@ bash /workspace/martin_luk_app/scripts/package_trading_app.sh
 ls -lh /workspace/martin_luk_trading_app.zip
 ```
 
-成品為 `/workspace/martin_luk_trading_app.zip`，可點擊聊天回覆中的同名連結下載。若介面不能下載，讀取 `/workspace/martin_luk_trading_app.zip.b64` 分段複製並依 [終端匯出指南](TERMINAL_EXPORT_GUIDE.md) 還原；不要遺漏或重複編碼行。包內保留 `.github/workflows/build_apk.yml`：將專案內容推送至 GitHub 根目錄的 `main`／`master`，Actions 自動建置，成功後下載 `martin-luk-release-apk` artifact。
+成品為 `/workspace/martin_luk_trading_app.zip`。若聊天介面提供下載附件可直接儲存；若不能下載，讀取 `/workspace/martin_luk_trading_app.zip.b64` 分段複製並依 [終端匯出指南](TERMINAL_EXPORT_GUIDE.md) 還原，不要遺漏或重複編碼行。工作區路徑不是自己電腦可直接瀏覽的網址。包內保留 `.github/workflows/build_apk.yml`：將專案內容提交至 GitHub，Actions 自動執行驗證，通過真實行情與計算門禁後下載 `martin-luk-app-release` artifact（保留 7 天）。
 
 ## 手機 Web 預覽與雲端 APK
 
@@ -37,7 +63,7 @@ ls -lh /workspace/martin_luk_trading_app.zip
 - **立即互動預覽**：用瀏覽器開啟 `preview/index.html`，不需要 Flutter、Android SDK、後端或網路。此入口是獨立 HTML 行為預覽，可操作市場切換、ADR、排序、分頁、個股風控、持股新增／編輯／刪除、手動行情診斷及設定；正式 Flutter 原始碼位於 `lib/`。
 - **正式 Flutter Web**：已補齊 `web/`，執行 `python3 scripts/check_web.py` 檢查配置，再執行 `bash scripts/preview_web.sh --build`。瀏覽器在同機時開啟 `http://127.0.0.1:8080/phone_preview.html`；遠端請使用8080轉送URL加上 `/phone_preview.html`。桌面內框為390×844；這個方式只需要 Flutter SDK，不需要 Android SDK。詳見 [WEB_PREVIEW.md](WEB_PREVIEW.md)。
 - **固定離線單檔**：複製 `standalone_preview.html` 到本機即可操作推薦、持股及部位計算；此版本完全不含 API／連接埠設定。
-- **本機沒有 Flutter**：將專案推送至 GitHub 的 `main`／`master`，或使用 [build_apk.yml](.github/workflows/build_apk.yml) 的 **Run workflow**，在雲端編譯 APK 與正式 Flutter Web。成功後兩種 Artifacts 保留14天；操作步驟見 [GITHUB_ACTIONS.md](GITHUB_ACTIONS.md)。
+- **本機沒有 Flutter**：將專案提交至 GitHub 的 `main`／`master`／`fix/refresh-live-gate-20261014`，或使用 [build_apk.yml](.github/workflows/build_apk.yml) 的 **Run workflow**，通過真實行情與計算門禁後在雲端編譯 APK。APK 保留 7 天；操作步驟見 [README_HOW_TO_BUILD.md](README_HOW_TO_BUILD.md)。目前工作流只上傳實測紀錄與 APK。
 - **ZIP 無法點擊下載**：執行 `bash scripts/export_upload.sh` 產生上傳包與 Base64，參閱 [TERMINAL_EXPORT_GUIDE.md](TERMINAL_EXPORT_GUIDE.md)。
 
 `?preview=mock` 會在 Web 初次啟動明確選擇離線資料，即使瀏覽器原先保存 API 模式也能預覽。使用者之後仍可在設定頁切換 API；API 失敗會顯示錯誤。Flutter3.29 已移除舊 `--web-renderer` 參數，使用提供的腳本及預設 CanvasKit。
@@ -75,14 +101,14 @@ android/                          Android / Gradle / Manifest / Kotlin
 backend/                          FastAPI、股票池、快取、掃描、持股診斷
 test/                             Dart 單元及 Widget 測試
 scripts/                          建置準備腳本
-.github/workflows/build_apk.yml    Push／手動觸發雲端驗證、APK及Web產物
+.github/workflows/build_apk.yml    Push／手動觸發真實行情與計算驗證、APK產物
 ```
 
 ## 離線使用
 
-預設 `USE_MOCK_DATA=true`，不需要後端或行情帳號即可使用全部主要頁面。每市場有 8 檔範例，所有價格、ADR、RS、型態及走勢為固定合成資料，畫面會標示「OFFLINE MOCK／離線示範」。未宣稱完成完整股票池掃描。
+正式 App 預設 `USE_MOCK_DATA=false`。要明確開啟 Flutter 示範，可在 Settings 開啟 Mock，或建置／執行帶入 `USE_MOCK_DATA=true`。示範每市場有 8 檔範例，所有價格、ADR、RS、型態及走勢為固定合成資料，畫面標示「OFFLINE MOCK／離線示範」。完全無 SDK 的 HTML 預覽始終是離線示範。
 
-使用 Flutter 3.29.3、Dart 3.7，Android SDK Platform 35、Build Tools 35、JDK 17（或相容 Gradle 的 JDK），在專案根目錄執行：
+使用 Flutter 3.29.3、Dart 3.7，Android SDK Platform 36、Build Tools 36.0.0、JDK 17（或相容 Gradle 的 JDK），在專案根目錄執行：
 
 ```bash
 flutter doctor -v
@@ -94,7 +120,7 @@ flutter test
 flutter run --dart-define=USE_MOCK_DATA=true
 ```
 
-設定頁也能於執行時切換模式。設定保存於裝置；`--dart-define` 提供首次安裝的預設，既有設定優先。重新安裝或清除 App 資料可恢復建置預設。
+設定頁也能於執行時切換模式。schema 1 舊設定首次遷移為正式直接連線，保留本金與偏好；schema 2 之後使用者明確保存的模式優先。`--dart-define` 提供新安裝預設；`?preview=mock` 明確開啟 Web 示範。重新安裝或清除 App 資料可恢復建置預設。
 
 ## API 模式
 
@@ -132,7 +158,7 @@ POST /v1/portfolio/analyze
 
 回應含 `market, generated_at, source, universe_count, stale, warnings, candidates`。個股鍵為 `symbol, name, sector, market, adr_percent, rs_score, rs_rank, patterns, entry_price, stop_price, is_large_liquid, status, data_timestamp, signal_timestamp, notes, daily_closes`。日期必須附 ISO-8601 時區，未確認候選使用 `status=watchlist`、`stop_price=null`。
 
-首次完整股票池掃描需要下載大量行情，可能超過 App 的 30 秒連線等待。後端工作執行緒會繼續掃描並寫入 5 分鐘結果快取，可稍後下拉更新；部署時建議先以後端排程預熱快取。無效、缺失或過期來源會公開警告，API 失敗不會自動替換為假資料。Yahoo 公開資料的延遲及分鐘資料可用性依市場與供應端而異。
+後端完整股票池掃描需要下載大量行情，可能超過後端模式的 8 秒刷新期限，建議以後端排程預熱快取。手機直連模式先掃描最多 30 檔核心成員，以 9 秒整批期限、10 秒 Controller 硬上限及可見進度避免向全市場突發請求；缺漏與全股票池數量分開顯示，RS 排名只涵蓋成功評估的核心股票。無效、缺失或過期來源會公開警告，API 失敗不會自動替換為假資料。Yahoo 公開資料的延遲及分鐘資料可用性依市場與供應端而異。
 
 後端取 S&P 500 最新成分表及 TWSE 官方上市清單，普通股自動加 `.TW`，以 CFI 排除存託憑證、特別股及 ETF。台股盤前沒有美股式連續盤前成交資料，盤前依已完成日K提供觀察條件，開盤之後才確認跳空／ORH。S&P 500 成分股筆數可能超過 500。
 
@@ -180,9 +206,9 @@ API 模式從 `/v1/quotes` 更新持股行情，不依賴該股票是否進入�
 請見 [BUILD_ANDROID.md](BUILD_ANDROID.md)，包含 Gradle 配置、Release／分 ABI／Debug 指令及簽署方式。
 
 ```bash
-flutter build apk --release --dart-define=USE_MOCK_DATA=true
-flutter build apk --release --split-per-abi --dart-define=USE_MOCK_DATA=true
-flutter build apk --debug --dart-define=USE_MOCK_DATA=true
+flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+flutter build apk --release --split-per-abi --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+flutter build apk --debug --dart-define=USE_MOCK_DATA=false
 ```
 
 Release 合併 APK 路徑：`build/app/outputs/flutter-apk/app-release.apk`；分 ABI 為同目錄的 `app-arm64-v8a-release.apk` 等檔案。Android 可安裝 APK 必須簽署；Debug Keystore 可以快速測試，不是無簽名 APK。

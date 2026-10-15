@@ -1,0 +1,12 @@
+{
+  "local_python_validator_tests": {
+    "passed": 16,
+    "failed": 0
+  },
+  "workflow_yaml_and_bash_static_checks": "passed",
+  "source_integrity_checks": "passed",
+  "flutter_tests": "not_run_flutter_sdk_unavailable_exit_127",
+  "new_live_network_gate": "not_executed_locally",
+  "apk_build": "not_executed_locally",
+  "gate_policy": "real_market_health_allows_zero_qualified_entries"
+}
