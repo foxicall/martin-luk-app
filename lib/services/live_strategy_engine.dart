@@ -71,30 +71,54 @@ class LiveStrategyEngine {
     return value;
   }
 
-  /// Benchmark and stock returns use identical exchange session dates. The
-  /// newest 61 common dates give 20/60 *trading-session* return denominators.
-  double relativeMomentum(MarketChart stock, MarketChart benchmark) {
-    final other = {
-      for (final bar in benchmark.completedDailyBars)
-        benchmark.localSessionDate(bar.timestamp): bar.close,
+  /// Pair both returns on the same completed exchange dates. A provider may
+  /// publish one tail session earlier than its peer; never mix their endpoints.
+  /// The callback discloses the actual RS date and excluded tail sessions.
+  double relativeMomentum(MarketChart stock, MarketChart benchmark, {
+    void Function(DateTime asOf, int stockTail, int benchmarkTail)? onAligned,
+  }) {
+    if (stock.market != benchmark.market || stock.currency != benchmark.currency ||
+        stock.interval != '1d' || benchmark.interval != '1d') {
+      throw const FormatException('RS 必須使用同市場、同幣別的日 K。');
+    }
+    final stockByDate = <DateTime, PriceBar>{
+      for (final bar in stock.completedDailyBars)
+        stock.localSessionDate(bar.timestamp): bar,
     };
-    final common = stock.completedDailyBars.where((bar) =>
-        other.containsKey(stock.localSessionDate(bar.timestamp))).toList();
+    final benchmarkByDate = <DateTime, PriceBar>{
+      for (final bar in benchmark.completedDailyBars)
+        benchmark.localSessionDate(bar.timestamp): bar,
+    };
+    final common = stockByDate.keys.where(benchmarkByDate.containsKey).toList()
+      ..sort();
     if (common.length < 61) {
       throw const FormatException('RS 需要股票與指數至少 61 個共同完整交易日。');
     }
-    final latestDate = stock.localSessionDate(common.last.timestamp);
-    if (latestDate != benchmark.localSessionDate(benchmark.completedDailyBars.last.timestamp) ||
-        latestDate != stock.localSessionDate(stock.completedDailyBars.last.timestamp)) {
-      throw const FormatException('股票與大盤最新完整交易日未同步，無法排名。');
+    final asOf = common.last;
+    final stockDates = stockByDate.keys.toList()..sort();
+    final benchmarkDates = benchmarkByDate.keys.toList()..sort();
+    final stockTail = stockDates.where((date) => date.isAfter(asOf)).length;
+    final benchmarkTail = benchmarkDates.where((date) => date.isAfter(asOf)).length;
+    String day(DateTime date) => date.toIso8601String().substring(0, 10);
+    final context = '${stock.symbol}=${day(stockDates.last)}，'
+        '${benchmark.symbol}=${day(benchmarkDates.last)}，共同截至 ${day(asOf)}';
+    // Bound publication lag; a common date alone must not legitimize old data.
+    final stockAge = stock.localSessionDate(stock.fetchedAt).difference(asOf);
+    final benchmarkAge = benchmark.localSessionDate(benchmark.fetchedAt).difference(asOf);
+    if (stockTail > 1 || benchmarkTail > 1 || stockAge.isNegative ||
+        benchmarkAge.isNegative || stockAge > const Duration(days: 7) ||
+        benchmarkAge > const Duration(days: 7)) {
+      throw FormatException('RS 資料落差超過一個已知交易日或共同資料已過期：$context');
     }
     double excess(int sessions) {
       final first = common[common.length - 1 - sessions];
-      final firstDate = stock.localSessionDate(first.timestamp);
-      return (common.last.close / first.close - 1) -
-          (other[latestDate]! / other[firstDate]! - 1);
+      return (stockByDate[asOf]!.close / stockByDate[first]!.close - 1) -
+          (benchmarkByDate[asOf]!.close / benchmarkByDate[first]!.close - 1);
     }
-    return (excess(20) + excess(60)) / 2 * 100;
+    final score = (excess(20) + excess(60)) / 2 * 100;
+    if (!score.isFinite) throw const FormatException('RS 計算結果不是有限數值。');
+    onAligned?.call(asOf, stockTail, benchmarkTail);
+    return score;
   }
 
   LiveEvaluation evaluate({required StockItem stock, required ChartBundle data,
@@ -121,6 +145,16 @@ class LiveStrategyEngine {
       '日 EMA 與 ADR 僅使用已完成日 K；Yahoo 公開報價可能延遲。',
       'RS 百分位以本次成功取得且對齊交易日的股票池計算。',
     ];
+    var stockDailyBehindBenchmark = false;
+    final momentum = relativeMomentum(data.daily, benchmark,
+      onAligned: (asOf, stockTail, benchmarkTail) {
+        notes.add('RS 計算截至 ${asOf.toIso8601String().substring(0, 10)}；'
+            '股票未納入尾端 $stockTail 日，大盤未納入尾端 $benchmarkTail 日。');
+        stockDailyBehindBenchmark = benchmarkTail > 0;
+        if (stockDailyBehindBenchmark) {
+          notes.add('股票完整日 K 落後大盤，僅列觀察；補齊日 K 後才確認新突破。');
+        }
+      });
     final patterns = <String>[];
     if (compressed) patterns.add('EMA 9/21/50 收斂');
     if (inside) patterns.add('內包日');
@@ -132,7 +166,7 @@ class LiveStrategyEngine {
     String? stopSource;
     DateTime? signalTime;
     if (data.intradayError != null) notes.add(data.intradayError!);
-    if (data.daily.isStale || intraday?.isStale == true) {
+    if (data.daily.isStale || intraday?.isStale == true || benchmark.isStale) {
       notes.add('行情為過期快取，僅供觀察，不建立新進場確認。');
     }
     if (intraday != null && intraday.regularSessionStart != null &&
@@ -146,7 +180,8 @@ class LiveStrategyEngine {
         notes.add('盤前報價僅列跳空觀察；ORH 必須等實際開盤區間完成，PDH 是目前參考界線。');
       }
     }
-    if (intraday != null && !data.daily.isStale && !intraday.isStale &&
+    if (intraday != null && !stockDailyBehindBenchmark &&
+        !benchmark.isStale && !data.daily.isStale && !intraday.isStale &&
         intraday.quoteIsInRegularSession && intraday.isQuoteFresh(now)) {
       final regular = intraday.regularSessionBars.where((bar) =>
           !bar.closeTimestamp.isAfter(intraday.quoteTimestamp)).toList();
@@ -232,7 +267,7 @@ class LiveStrategyEngine {
     }
     if (patterns.isEmpty) patterns.add('ADR / RS 動能觀察');
     return LiveEvaluation(stock: stock, data: data, adr: adrPercent(bars),
-      momentum: relativeMomentum(data.daily, benchmark), ema9: ema9,
+      momentum: momentum, ema9: ema9,
       ema21: ema21, ema50: ema50, patterns: patterns, trigger: trigger,
       triggerType: triggerType, stop: stop, stopSource: stopSource,
       dayLow: dayLow, entryBarLow: entryBarLow, confirmation: confirmation,
