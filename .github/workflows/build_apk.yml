@@ -80,13 +80,30 @@ jobs:
           set -euo pipefail
           flutter pub get 2>&1 | tee -a test_logs/verification.log
 
+      - name: 驗證離線搜尋字典與多市場身份
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/sync_stock_search.py --check 2>&1 | tee -a test_logs/verification.log
+          node scripts/check_stock_search.cjs 2>&1 | tee -a test_logs/verification.log
+
+      - name: 驗證 Python 背景掃描與快照 API
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r backend/requirements-dev.txt 2>&1 | tee -a test_logs/verification.log
+          python3 -m unittest discover -s backend/tests -v 2>&1 | tee -a test_logs/verification.log
+
       - name: 驗證風控、RS 與門禁報告規則
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m unittest discover -s scripts/tests -p 'test_live_scan_evidence.py' -v 2>&1 | tee -a test_logs/verification.log
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v 2>&1 | tee -a test_logs/verification.log
           flutter test test/rs_alignment_test.dart test/live_strategy_engine_test.dart test/live_risk_helpers_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+          flutter test test/expanded_symbol_test.dart test/rolling_scan_snapshot_test.dart test/stock_universe_service_test.dart test/backend_snapshot_repository_test.dart test/backend_scan_controller_test.dart test/candidate_repository_test.dart test/backend_transport_timeout_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
       - name: 執行真實行情與指標門禁測試（允許零推薦）
         id: run-gate-test
