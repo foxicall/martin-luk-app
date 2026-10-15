@@ -1,0 +1,87 @@
+[
+  {
+    "path": ".github/workflows/build_apk.yml",
+    "bytes": 4851,
+    "sha256": "5fccc2eb696432e6422e419af8cc53493cc6090d96a12b30bb57434fd937a16f"
+  },
+  {
+    "path": "lib/models/market_data.dart",
+    "bytes": 7094,
+    "sha256": "86c2f0f407d718d6627b2c3d3ecd78f2a933682522d97a626e476928c51d1329"
+  },
+  {
+    "path": "lib/services/live_strategy_engine.dart",
+    "bytes": 23266,
+    "sha256": "5bd898ce01bf4fc8b5e67ce916bc2200559f3e728158d758817495b720cb2a32"
+  },
+  {
+    "path": "test/integration_scan_test.dart",
+    "bytes": 30710,
+    "sha256": "d97f5bf045d085f6f4b57b6febe4c36adc2af33b60568eff12042a4167ca0848"
+  },
+  {
+    "path": "test/rs_alignment_test.dart",
+    "bytes": 5714,
+    "sha256": "3af7ceddda392c9f40168dac8d2ceba38309a66be2f2c56bda56d8cc0971a936"
+  },
+  {
+    "path": "test/live_strategy_engine_test.dart",
+    "bytes": 9300,
+    "sha256": "5c79ee3babf9bf7926d32c29b9469e40a2b1600daead8f4fb145999227d97498"
+  },
+  {
+    "path": "test/live_repositories_test.dart",
+    "bytes": 40880,
+    "sha256": "8cd9c290fa5723711f36dc72a7a4bb8bb9a0290caaca381a2568a0543c7d6b79"
+  },
+  {
+    "path": "test/live_risk_helpers_test.dart",
+    "bytes": 5211,
+    "sha256": "7fbb9057affdef402261489edbc2b20d8338826775524e14a10d5b59a78015f7"
+  },
+  {
+    "path": "scripts/validate_live_scan_evidence.py",
+    "bytes": 9127,
+    "sha256": "a59bd0b0e3a028427ac245810977675d36b76fffaf1ff812b93249f29b8d0ba2"
+  },
+  {
+    "path": "scripts/tests/test_live_scan_evidence.py",
+    "bytes": 11609,
+    "sha256": "2d5f075a0de5c9bb937919556791e9288b63536611bd5b06cd3a6b8033a3293d"
+  },
+  {
+    "path": "scripts/verify_deliverable.py",
+    "bytes": 20067,
+    "sha256": "98604350a7e3d1b21a0b5dd31d6f55a4e15eee5afbbbfb2d9a4e5caebb90b669"
+  },
+  {
+    "path": "README.md",
+    "bytes": 17805,
+    "sha256": "c6cadb1a54a4d4e7c157e61e9b4dc3cd1d2eca780567767b27c3e8f8621e6ef4"
+  },
+  {
+    "path": "README_HOW_TO_BUILD.md",
+    "bytes": 10342,
+    "sha256": "f31af156959538fe4385101cbea9c12b1018319a2d86857d00346e4ac4b38a27"
+  },
+  {
+    "path": "PRODUCTION_GUIDE.md",
+    "bytes": 10167,
+    "sha256": "2d97765d11d20c45b89a2e6c4674a643c7e0eee48c83b4cc9cb5c0c840d89532"
+  },
+  {
+    "path": "REFRESH_RECOVERY.md",
+    "bytes": 7864,
+    "sha256": "4bca074ec5ceaef286c1d73f7088574e00a6e690fb5f6ddf3d77b251167652e1"
+  },
+  {
+    "path": "BUILD_STATUS.md",
+    "bytes": 21366,
+    "sha256": "30d36ef8cb7dbf17ad54e9b851266d0f0a99e5e24d020bf2a25493cfd28bf5e8"
+  },
+  {
+    "path": "GITHUB_MANUAL_UPDATE.md",
+    "bytes": 213448,
+    "sha256": "4d332c99f1bf84a50207185aec34a83966b0caf7d661480b1c93a8a66ffb02e6"
+  }
+]
