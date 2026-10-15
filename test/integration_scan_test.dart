@@ -235,27 +235,37 @@ Future<void> _scan(
       String? intradayError;
 
       if (adr >= stock.market.defaultAdr) {
-        try {
-          intraday = await run.wait(
-            api.fetchIntraday(symbol, stock.market, forceRefresh: true),
-          );
-          run.check();
+  try {
+    final MarketChart fetchedIntraday = await run.wait<MarketChart>(
+      api.fetchIntraday(
+        symbol,
+        stock.market,
+        forceRefresh: true,
+      ),
+    );
 
-          expect(intraday.isCached, isFalse);
-          expect(intraday.isStale, isFalse);
+    run.check();
 
-          observation['intraday_quote_at_utc'] =
-              intraday.quoteTimestamp.toIso8601String();
-          observation['quote_in_regular_session'] =
-              intraday.quoteIsInRegularSession;
-          observation['quote_fresh_15m'] =
-              intraday.isQuoteFresh(DateTime.now().toUtc());
-        } catch (error) {
-          if (!run.active) return;
-          intradayError = error.toString();
-          observation['intraday_error'] = intradayError;
-        }
-      }
+    expect(fetchedIntraday.isCached, isFalse);
+    expect(fetchedIntraday.isStale, isFalse);
+
+    observation['intraday_quote_at_utc'] =
+        fetchedIntraday.quoteTimestamp.toIso8601String();
+
+    observation['quote_in_regular_session'] =
+        fetchedIntraday.quoteIsInRegularSession;
+
+    observation['quote_fresh_15m'] =
+        fetchedIntraday.isQuoteFresh(DateTime.now().toUtc());
+
+    intraday = fetchedIntraday;
+  } catch (error) {
+    if (!run.active) return;
+
+    intradayError = error.toString();
+    observation['intraday_error'] = intradayError;
+  }
+}
 
       run.check();
 
