@@ -63,9 +63,9 @@ void main() {
     expect(() => engine.relativeMomentum(daily(bars: history().skip(25).toList()),
       daily(symbol: '^GSPC')), throwsFormatException);
   });
-  test('a mismatched latest benchmark date cannot create a ranking', () {
+  test('a benchmark more than one known session behind cannot create a ranking', () {
     expect(() => engine.relativeMomentum(daily(), daily(symbol: '^GSPC',
-      bars: history().take(79).toList())), throwsFormatException);
+      bars: history().take(78).toList())), throwsFormatException);
   });
   test('completed PDH crossing uses exact high and actual day low', () {
     final result = evaluate(intraday([
@@ -80,6 +80,17 @@ void main() {
     expect(candidate.isConfirmed, true);
     expect(candidate.quotePrice, 102);
     expect(candidate.ema9, 100);
+  });
+  test('one-session stock history lag allows RS but cannot confirm a new entry', () {
+    final result = evaluate(intraday([
+      minute(0, open: 103, high: 104, low: 102, close: 103),
+      minute(5, open: 103, high: 105, low: 102.5, close: 105),
+    ]), dailyChart: daily(bars: history().take(79).toList()));
+    expect(result.momentum.isFinite, isTrue);
+    expect(result.stop, isNull);
+    expect(result.signalTime, isNull);
+    expect(result.notes.any((note) => note.contains('落後')), isTrue);
+    expect(result.toCandidate(rsScore: 50, rsRank: 1).isConfirmed, isFalse);
   });
   test('provisional candle above PDH does not confirm crossing', () {
     final result = evaluate(intraday([

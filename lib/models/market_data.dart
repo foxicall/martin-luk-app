@@ -113,7 +113,15 @@ class MarketChart {
             !fetchedAt.isBefore(sessionEnd.add(const Duration(minutes: 15))) &&
             !quoteTimestamp.isBefore(sessionEnd.subtract(const Duration(minutes: 1)));
       }
-      return date.isBefore(today);
+      if (date.isBefore(today)) return true;
+      if (date != today || sessionDate == null) return false;
+      // Yahoo can roll currentTradingPeriod to tomorrow before changing the
+      // daily history. Today's completed candle still needs a consistent close
+      // test; simply comparing its date with fetchedAt would discard it.
+      // The normal exchange close is conservative on early-close sessions.
+      final close = dailyCloseTimestamp(bar);
+      return !fetchedAt.isBefore(close.add(const Duration(minutes: 15))) &&
+          !quoteTimestamp.isBefore(close.subtract(const Duration(minutes: 1)));
     }));
   }
 

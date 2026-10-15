@@ -71,10 +71,20 @@ REQUIRED_FILES = (
     "lib/services/live_candidate_repository.dart", "lib/services/live_portfolio_repository.dart",
     "lib/services/stock_universe_service.dart",
     "test/market_data_api_test.dart", "test/live_strategy_engine_test.dart",
+    "test/rs_alignment_test.dart",
     "test/live_repositories_test.dart", "test/stock_universe_service_test.dart",
     "test/production_controller_test.dart", "test/production_lifecycle_test.dart",
     "test/production_ui_test.dart", "test/live_http_smoke_test.dart",
     "test/live_risk_helpers_test.dart", "test/support/mock_preferences.dart",
+    "lib/services/network_request.dart", "lib/services/live_batch_deadline.dart",
+    "test/network_request_test.dart", "test/backend_transport_timeout_test.dart",
+    "test/refresh_recovery_test.dart", "test/support/controllable_http_client.dart",
+    "test/integration_scan_test.dart", "REFRESH_RECOVERY.md",
+    "scripts/validate_live_scan_evidence.py", "scripts/tests/test_live_scan_evidence.py",
+    "test/market_transport_regression_test.dart", "test/candidate_repository_test.dart",
+    "MARKET_DEBUG_LOGGING.md", "GITHUB_MANUAL_UPDATE.md",
+    "lib/services/market_scan_progress.dart", "test/market_scan_progress_test.dart",
+    "test/core_market_pool_test.dart", "test/market_scan_timeout_test.dart",
     "assets/fonts/MartinPreviewSans.otf", "assets/fonts/OFL.txt",
     "android/settings.gradle", "android/build.gradle", "android/gradle.properties",
     "android/app/build.gradle", "android/gradlew", "android/gradlew.bat",
@@ -222,20 +232,27 @@ def validate_contents(files: dict[str, bytes]) -> None:
 
     workflow = files[".github/workflows/build_apk.yml"].decode("utf-8")
     for marker in (
-        "workflow_dispatch:", "branches: [main, master]", "runs-on: ubuntu-latest", "actions/checkout@v4",
+        "workflow_dispatch:", "branches: [main, master, fix/refresh-live-gate-20261014]", "runs-on: ubuntu-latest", "actions/checkout@v4",
         "actions/setup-java@v4", "distribution: temurin", "java-version: '17'",
-        "subosito/flutter-action@v2", "channel: stable", "scripts/prepare_android.py",
-        "flutter pub get", "flutter analyze", "flutter test", "flutter build apk --release",
+        "subosito/flutter-action@v2", "channel: stable",
+        "flutter pub get", "flutter test", "flutter build apk --release",
         "USE_MOCK_DATA=false", "--android-skip-build-dependency-validation",
-        "martin-luk-production-apk", "actions/upload-artifact@v4",
-        "build/app/outputs/flutter-apk/app-release.apk", "retention-days: 14",
+        "martin-luk-app-release", "actions/upload-artifact@v4",
+        "**/build/app/outputs/flutter-apk/*.apk", "retention-days: 7",
+        "martin-luk-live-scan-evidence", "**/test_logs/verification.log", "if: always()",
+        "flutter test test/integration_scan_test.dart --dart-define=RUN_LIVE_SCAN_TEST=true --timeout=90s",
+        "set -euo pipefail", "build/live-scan-evidence.json",
+        "python3 scripts/validate_live_scan_evidence.py build/live-scan-evidence.json",
+        "test/live_risk_helpers_test.dart", "test_live_scan_evidence.py",
     ):
         require(marker in workflow, f"Actions 工作流缺少：{marker}")
     android_app = files["android/app/build.gradle"].decode("utf-8")
     require(bool(re.search(r"\bcompileSdk\s*=\s*36\b", android_app)),
             "Android compileSdk 必須符合 shared_preferences_android 的 API 36 要求")
-    require("platforms;android-36" in workflow and "build-tools;36.0.0" in workflow,
-            "Actions 未安裝 Android SDK 36／Build Tools 36.0.0")
+    require("android-actions/setup-android" not in workflow and "sdkmanager" not in workflow,
+            "Actions 不應再次依賴額外 Android SDK 安裝步驟")
+    require("apply_market_scan" not in workflow and "market-scan-updated-source.zip" not in workflow,
+            "Actions 不應再次依賴已停用的補丁或來源 ZIP")
 
     pubspec = files["pubspec.yaml"].decode("utf-8")
     require(bool(re.search(r"^\s*-\s*stocks_master\.json\s*$", pubspec, re.M)),
