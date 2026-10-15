@@ -32,6 +32,7 @@ EXCLUDE_PATTERNS+=(
   'local.properties' '*/local.properties' 'key.properties' '*/key.properties'
   '.env' '*/.env' '.env.local' '*/.env.local' '.env.production' '*/.env.production'
   '.env.*.local' '*/.env.*.local'
+  'scripts/apply_market_scan_fix.py' 'scripts/apply_market_scan_timeout_fix.py'
 )
 
 # Remove only the previous generated output; zip updates can retain stale entries.

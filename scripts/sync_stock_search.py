@@ -39,7 +39,7 @@ def validate_records(records: object) -> list[dict[str, object]]:
                 raise ValueError(f"Invalid {field} at row {row}")
         symbol, code = item["symbol"], item["code"]
         if item["market"] == "TW":
-            valid = bool(re.fullmatch(r"\d{4}\.TW", symbol)) and code == symbol[:-3]
+            valid = bool(re.fullmatch(r"\d{4}\.(?:TW|TWO)", symbol)) and code == symbol.split(".")[0]
         else:
             valid = bool(re.fullmatch(r"[A-Z][A-Z0-9]{0,14}(?:-[A-Z])?", symbol)) and code == symbol
         if not valid:

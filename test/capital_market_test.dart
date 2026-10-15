@@ -185,7 +185,7 @@ void main() {
 
     await tester.pageBack();
     await tester.pumpAndSettle();
-    final usTab = find.text('S&P 500 · US');
+    final usTab = find.text('美股三大交易所 · US');
     await tester.ensureVisible(usTab);
     await tester.tap(usTab);
     await tester.pumpAndSettle();

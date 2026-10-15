@@ -29,7 +29,8 @@ const reason = (result, code) => Array.from(result.reason_codes).includes(code);
 function engineChecks() {
   equal(engine.symbolFor(' 2330 ', 'tw'),'2330.TW','Taiwan ordinary stock suffix normalized');
   equal(engine.symbolFor('brk-b','us'),'BRK-B','Yahoo US share-class symbol normalized');
-  for (const symbol of ['2330.TWO','ABC.TW','9101-DR','../../2330']) rejects(()=>engine.symbolFor(symbol,'tw'),'Reject invalid or wrong-market Taiwan symbol');
+  equal(engine.symbolFor('6488.TWO','tw'),'6488.TWO','TPEx suffix accepted');
+  for (const symbol of ['2330.TWOO','ABC.TW','9101-DR','../../2330']) rejects(()=>engine.symbolFor(symbol,'tw'),'Reject invalid or wrong-market Taiwan symbol');
   const initial = diagnose();
   equal(initial.current_r,2.5,'Known price 105, entry 100, stop 98 gives exactly 2.5R');
   equal(initial.unrealized_pnl,500,'100 shares times known gain 5 gives PnL 500');

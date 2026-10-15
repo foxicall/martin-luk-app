@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -9,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:martin_luk_app/models/market_data.dart';
 import 'package:martin_luk_app/models/stock_candidate.dart';
 import 'package:martin_luk_app/services/market_data_api.dart';
+
+import 'support/controllable_http_client.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -74,6 +77,176 @@ void main() {
     await expectLater(api.fetchDaily('NVDA', StockMarket.us),
         throwsA(isA<MarketDataException>()));
     api.close();
+  });
+
+  test('missing market metadata uses explicit market defaults without marking real quotes stale', () async {
+    for (final market in StockMarket.values) {
+      final data = _document(market);
+      for (final field in ['symbol', 'currency', 'exchangeTimezoneName', 'gmtoffset']) {
+        _meta(data).remove(field);
+      }
+      final api = MarketDataApi(now: () => now, client: MockClient((_) async =>
+          http.Response(jsonEncode(data), 200)));
+      final chart = await api.fetchDaily(market == StockMarket.tw ? '2330.TW' : 'NVDA', market);
+      expect(chart.currency, market.currency);
+      expect(chart.exchangeTimezoneName,
+          market == StockMarket.tw ? 'Asia/Taipei' : 'America/New_York');
+      expect(chart.gmtoffset, market == StockMarket.tw ? 28800 : -14400);
+      expect(chart.source, contains('供應商未提供交易所時區'));
+      expect(chart.source, contains('供應商未提供幣別'));
+      expect(chart.source, contains('供應商未提供 UTC 時差'));
+      expect(chart.isCached, isFalse);
+      expect(chart.isStale, isFalse);
+      expect(chart.cacheWarning, isNull,
+          reason: 'Metadata normalization is not a network failure or a stale-cache event.');
+      if (market == StockMarket.us) expect(chart.isQuoteFresh(now), isTrue);
+      api.close();
+    }
+  });
+
+  test('missing New York offset follows winter DST rules rather than a fixed minus-four-hours value', () async {
+    final winterNow = DateTime.utc(2026, 1, 6, 22);
+    final data = _document(StockMarket.us);
+    final start = DateTime.utc(2026, 1, 6, 14, 30);
+    _meta(data).remove('gmtoffset');
+    _meta(data)['regularMarketTime'] = _unix(DateTime.utc(2026, 1, 6, 21));
+    _meta(data)['currentTradingPeriod'] = {'regular': {
+      'start': _unix(start), 'end': _unix(DateTime.utc(2026, 1, 6, 21)),
+    }};
+    _result(data)['timestamp'] = [_unix(start.subtract(const Duration(days: 1))), _unix(start)];
+    final api = MarketDataApi(now: () => winterNow, client: MockClient((_) async =>
+        http.Response(jsonEncode(data), 200)));
+    final chart = await api.fetchDaily('NVDA', StockMarket.us);
+    expect(chart.gmtoffset, -18000);
+    expect(chart.completedDailyBars.length, 2);
+    api.close();
+  });
+
+  test('an equivalent US/Eastern alias is normalized while contradictory metadata remains rejected', () async {
+    final alias = _document(StockMarket.us);
+    _meta(alias)['exchangeTimezoneName'] = 'US/Eastern';
+    final accepted = MarketDataApi(now: () => now, client: MockClient((_) async =>
+        http.Response(jsonEncode(alias), 200)));
+    final chart = await accepted.fetchDaily('NVDA', StockMarket.us);
+    expect(chart.exchangeTimezoneName, 'America/New_York');
+    expect(chart.source, contains('已正規化'));
+    accepted.close();
+    for (final pair in [
+      ('symbol', 'TSLA'), ('currency', 'TWD'),
+      ('exchangeTimezoneName', 'Asia/Tokyo'), ('gmtoffset', 'invalid'),
+    ]) {
+      SharedPreferences.setMockInitialValues({});
+      final invalid = _document(StockMarket.us);
+      _meta(invalid)[pair.$1] = pair.$2;
+      final api = MarketDataApi(now: () => now, client: MockClient((_) async =>
+          http.Response(jsonEncode(invalid), 200)));
+      await expectLater(api.fetchDaily('NVDA', StockMarket.us),
+          throwsA(isA<MarketDataException>()));
+      api.close();
+    }
+  });
+
+  test('a missing independent daily quote uses an actual candle price and its original timestamp', () async {
+    final data = _document(StockMarket.us);
+    _meta(data).remove('regularMarketPrice');
+    final api = MarketDataApi(now: () => now, client: MockClient((_) async =>
+        http.Response(jsonEncode(data), 200)));
+    final chart = await api.fetchDaily('NVDA', StockMarket.us);
+    expect(chart.latestPrice, chart.bars.last.close);
+    expect(chart.quoteTimestamp, chart.bars.last.timestamp);
+    expect(chart.quoteTimestamp, isNot(chart.fetchedAt));
+    expect(chart.source, contains('非獨立即時成交報價'));
+    expect(chart.isQuoteFresh(now), isFalse,
+        reason: 'A download time cannot make a historical candle quote fresh.');
+    expect(chart.completedDailyBars.length, 1);
+    api.close();
+  });
+
+  test('missing intraday session metadata never invents an opening range', () async {
+    final data = _document(StockMarket.us);
+    _meta(data).remove('currentTradingPeriod');
+    final api = MarketDataApi(now: () => now, client: MockClient((_) async =>
+        http.Response(jsonEncode(data), 200)));
+    final chart = await api.fetchIntraday('NVDA', StockMarket.us);
+    expect(chart.regularSessionBars, isEmpty);
+    expect(chart.regularSessionStart, isNull);
+    expect(chart.quoteIsInRegularSession, isFalse);
+    expect(chart.source, contains('未提供當日常規交易時段'));
+    api.close();
+  });
+
+  test('one malformed candle is isolated while the other observed candles remain usable', () async {
+    final data = _document(StockMarket.us);
+    (_result(data)['timestamp'] as List).insert(1, _unix(DateTime.utc(2026, 10, 13, 14)));
+    for (final field in ['open', 'high', 'low', 'close', 'volume']) {
+      (_values(data)[field] as List).insert(1, field == 'high' ? 'malformed' : 100);
+    }
+    final api = MarketDataApi(now: () => now, client: MockClient((_) async =>
+        http.Response(jsonEncode(data), 200)));
+    final chart = await api.fetchDaily('NVDA', StockMarket.us);
+    expect(chart.bars.length, 2);
+    expect(chart.source, contains('已忽略 1 根'));
+    expect(chart.bars.map((bar) => bar.close), [100, 102]);
+    api.close();
+  });
+
+  test('finite numeric JSON strings are decoded but retain validated OHLCV and timing', () async {
+    final data = _document(StockMarket.us);
+    _result(data)['timestamp'] = (_result(data)['timestamp'] as List)
+        .map((value) => value.toString()).toList();
+    for (final field in ['open', 'high', 'low', 'close', 'volume']) {
+      _values(data)[field] = (_values(data)[field] as List)
+          .map((value) => value.toString()).toList();
+    }
+    for (final field in ['gmtoffset', 'regularMarketPrice', 'regularMarketTime']) {
+      _meta(data)[field] = _meta(data)[field].toString();
+    }
+    final api = MarketDataApi(now: () => now, client: MockClient((_) async =>
+        http.Response(jsonEncode(data), 200)));
+    final chart = await api.fetchDaily('NVDA', StockMarket.us);
+    expect(chart.latestPrice, 102);
+    expect(chart.bars.last.volume, 1200);
+    expect(chart.gmtoffset, -14400);
+    expect(chart.quoteTimestamp, now);
+    api.close();
+  });
+
+  test('provider error descriptions and empty result failures are explicit', () async {
+    for (final data in [
+      {'chart': {'result': null, 'error': {
+        'code': 'Not Found', 'description': 'No data found, symbol may be delisted',
+      }}},
+      {'chart': {'result': null, 'error': null}},
+      {'chart': {'result': <Object>[], 'error': null}},
+    ]) {
+      final api = MarketDataApi(now: () => now, client: MockClient((_) async =>
+          http.Response(jsonEncode(data), 200)));
+      final hasProviderError = (data['chart'] as Map)['error'] != null;
+      await expectLater(api.fetchDaily('NVDA', StockMarket.us),
+          throwsA(isA<MarketDataException>().having((error) => error.message,
+            'message', contains(hasProviderError ? 'symbol may be delisted' : 'result 為空'))));
+      api.close();
+    }
+  });
+
+  test('chronology and missing unadjusted OHLC are not repaired with adjusted closes', () async {
+    for (final adjustedOnly in [false, true]) {
+      final data = _document(StockMarket.us);
+      if (adjustedOnly) {
+        _values(data)['close'] = <Object?>[null, null];
+        (_result(data)['indicators'] as Map)['adjclose'] = [
+          {'adjclose': [100, 102]},
+        ];
+      } else {
+        final times = _result(data)['timestamp'] as List;
+        times[1] = times[0];
+      }
+      final api = MarketDataApi(now: () => now, client: MockClient((_) async =>
+          http.Response(jsonEncode(data), 200)));
+      await expectLater(api.fetchDaily('NVDA', StockMarket.us),
+          throwsA(isA<MarketDataException>()));
+      api.close();
+    }
   });
 
   test('Daily memory cache prevents repeated HTTP; forced pull refresh bypasses it', () async {
@@ -187,6 +360,177 @@ void main() {
         client: MockClient((_) => never.future));
     await expectLater(api.fetchDaily('NVDA', StockMarket.us),
         throwsA(isA<MarketDataException>().having((error) => error.message, 'message', contains('逾時'))));
+    api.close();
+  });
+
+  test('a stalled response body aborts and permits retry without closing a borrowed client', () async {
+    final preferences = await SharedPreferences.getInstance();
+    final blockedBody = Completer<List<int>>();
+    var requests = 0, aborts = 0;
+    final client = ControllableHttpClient((request) async {
+      requests++;
+      if (requests > 1) {
+        return http.StreamedResponse(Stream.value(
+            utf8.encode(jsonEncode(_document(StockMarket.us)))), 200);
+      }
+      expect(request, isA<http.AbortableRequest>());
+      (request as http.AbortableRequest).abortTrigger!.then((_) {
+        aborts++;
+        if (!blockedBody.isCompleted) blockedBody.complete(<int>[]);
+      });
+      return http.StreamedResponse(Stream.fromFuture(blockedBody.future), 200);
+    });
+    final api = MarketDataApi(client: client, preferences: preferences,
+        now: () => now, requestTimeout: const Duration(milliseconds: 30));
+    addTearDown(api.close);
+    await expectLater(api.fetchDaily('NVDA', StockMarket.us, forceRefresh: true),
+        throwsA(isA<MarketDataException>().having((error) => error.message,
+          'message', contains('逾時'))));
+    await Future<void>.delayed(Duration.zero);
+    expect(aborts, 1, reason: 'The deadline cancels transport, even after HTTP headers arrive.');
+    final retry = await api.fetchDaily('NVDA', StockMarket.us, forceRefresh: true);
+    expect(retry.latestPrice, 102);
+    expect(retry.isStale, isFalse);
+    expect(requests, 2);
+    api.close();
+    expect(client.closeCalls, 0, reason: 'An injected HTTP client retains caller ownership.');
+  });
+
+  test('US and TW API instances share five HTTP slots through the complete body', () async {
+    final preferences = await SharedPreferences.getInstance();
+    final bodies = <MapEntry<Completer<List<int>>, List<int>>>[];
+    final waves = {for (final count in [5, 10, 12]) count: Completer<void>()};
+    var sent = 0, active = 0, maximumActive = 0;
+    Future<http.StreamedResponse> handle(http.BaseRequest request) async {
+      final symbol = request.url.pathSegments.last;
+      final market = symbol.endsWith('.TW') ? StockMarket.tw : StockMarket.us;
+      final document = _document(market);
+      _meta(document)['symbol'] = symbol;
+      final body = Completer<List<int>>();
+      bodies.add(MapEntry(body, utf8.encode(jsonEncode(document))));
+      active++;
+      if (active > maximumActive) maximumActive = active;
+      sent++;
+      waves[sent]?.complete();
+      (request as http.AbortableRequest).abortTrigger!.then((_) {
+        if (!body.isCompleted) body.complete(<int>[]);
+      });
+      return http.StreamedResponse(Stream.fromFuture(body.future.then((bytes) {
+        active--;
+        return bytes;
+      })), 200);
+    }
+
+    final usClient = ControllableHttpClient(handle);
+    final twClient = ControllableHttpClient(handle);
+    final usApi = MarketDataApi(client: usClient, preferences: preferences, now: () => now);
+    final twApi = MarketDataApi(client: twClient, preferences: preferences, now: () => now);
+    addTearDown(usApi.close);
+    addTearDown(twApi.close);
+    const usSymbols = ['NVDA', 'TSLA', 'AAPL', 'AMD', 'META', 'MSFT'];
+    const twSymbols = ['2330.TW', '2603.TW', '2454.TW', '2317.TW', '3017.TW', '1519.TW'];
+    final requests = <Future<MarketChart>>[
+      for (final symbol in usSymbols) usApi.fetchDaily(symbol, StockMarket.us, forceRefresh: true),
+      for (final symbol in twSymbols) twApi.fetchDaily(symbol, StockMarket.tw, forceRefresh: true),
+    ];
+    for (final count in [5, 10, 12]) {
+      await waves[count]!.future.timeout(const Duration(seconds: 2));
+      expect(sent, count);
+      expect(active, count == 12 ? 2 : 5,
+          reason: 'Waiting for the response body must keep its global HTTP permit.');
+      for (final entry in List<MapEntry<Completer<List<int>>, List<int>>>.of(bodies)) {
+        if (!entry.key.isCompleted) entry.key.complete(entry.value);
+      }
+    }
+    final charts = await Future.wait(requests).timeout(const Duration(seconds: 2));
+    expect(charts.map((chart) => chart.symbol), [...usSymbols, ...twSymbols]);
+    expect(charts.take(6).every((chart) => chart.currency == 'USD'), isTrue);
+    expect(charts.skip(6).every((chart) => chart.currency == 'TWD'), isTrue);
+    expect(charts.every((chart) => chart.latestPrice == 102 && !chart.isStale), isTrue);
+    expect(maximumActive, 5);
+    expect(active, 0);
+    expect(usClient.closeCalls, 0);
+    expect(twClient.closeCalls, 0);
+  });
+
+  test('timeout releases a shared request and a late reply cannot overwrite retry cache', () async {
+    final preferences = await SharedPreferences.getInstance();
+    final late = Completer<http.Response>();
+    var requests = 0;
+    final current = _document(StockMarket.us);
+    _meta(current)['regularMarketPrice'] = 110;
+    final api = MarketDataApi(preferences: preferences, now: () => now,
+        requestTimeout: const Duration(milliseconds: 10),
+        client: MockClient((_) => ++requests == 1 ? late.future
+            : Future.value(http.Response(jsonEncode(current), 200))));
+    await expectLater(Future.wait([
+      api.fetchDaily('NVDA', StockMarket.us, forceRefresh: true),
+      api.fetchDaily('NVDA', StockMarket.us, forceRefresh: true),
+    ]), throwsA(isA<MarketDataException>()));
+    expect(requests, 1);
+    final retry = await api.fetchDaily('NVDA', StockMarket.us, forceRefresh: true);
+    expect(retry.latestPrice, 110);
+    expect(retry.isStale, isFalse);
+    late.complete(http.Response(jsonEncode(_document(StockMarket.us)), 200));
+    await Future<void>.delayed(Duration.zero);
+    final cached = await api.fetchDaily('NVDA', StockMarket.us);
+    expect(cached.latestPrice, 110);
+    expect(requests, 2);
+    api.close();
+  });
+
+  test('SocketException retains a dated stale quote and does not block the next retry', () async {
+    var requests = 0;
+    final api = MarketDataApi(now: () => now,
+        client: MockClient((_) async {
+          if (++requests == 2) throw const SocketException('network disconnected');
+          return http.Response(jsonEncode(_document(StockMarket.us)), 200);
+        }));
+    final first = await api.fetchDaily('NVDA', StockMarket.us);
+    final stale = await api.fetchDaily('NVDA', StockMarket.us, forceRefresh: true);
+    expect(stale.isStale, isTrue);
+    expect(stale.quoteTimestamp, first.quoteTimestamp);
+    expect(stale.fetchedAt, first.fetchedAt);
+    expect(stale.cacheWarning, contains('SocketException'));
+    final next = await api.fetchDaily('NVDA', StockMarket.us, forceRefresh: true);
+    expect(next.isStale, isFalse);
+    expect(requests, 3);
+    api.close();
+  });
+
+  test('an unavailable preferences plugin cannot prevent HTTP or preserve a sync lock', () async {
+    final unavailable = Completer<SharedPreferences>();
+    var requests = 0;
+    final api = MarketDataApi(now: () => now,
+        preferencesLoader: () => unavailable.future,
+        storageTimeout: const Duration(milliseconds: 5),
+        client: MockClient((_) async {
+          requests++;
+          return http.Response(jsonEncode(_document(StockMarket.us)), 200);
+        }));
+    final first = await api.fetchDaily('NVDA', StockMarket.us);
+    final next = await api.fetchDaily('NVDA', StockMarket.us, forceRefresh: true);
+    expect(first.latestPrice, 102);
+    expect(next.isStale, isFalse);
+    expect(requests, 2);
+    api.close();
+  });
+
+  test('a hanging rate-limit backoff shares the original request deadline', () async {
+    final preferences = await SharedPreferences.getInstance();
+    final never = Completer<void>();
+    var requests = 0;
+    final api = MarketDataApi(preferences: preferences, now: () => now,
+        requestTimeout: const Duration(milliseconds: 10),
+        delay: (_) => never.future,
+        client: MockClient((_) async {
+          requests++;
+          return http.Response('', 429, headers: {'retry-after': '1'});
+        }));
+    await expectLater(api.fetchDaily('NVDA', StockMarket.us),
+        throwsA(isA<MarketDataException>().having((error) => error.message,
+          'message', contains('逾時'))));
+    expect(requests, 1);
     api.close();
   });
 
