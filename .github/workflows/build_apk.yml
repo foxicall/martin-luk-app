@@ -60,12 +60,10 @@ jobs:
         run: |
           set -euo pipefail
           WRAPPER_FILE='android/gradle/wrapper/gradle-wrapper.properties'
-
           if [[ ! -f "$WRAPPER_FILE" ]]; then
             echo '::error::缺少 gradle-wrapper.properties'
             exit 1
           fi
-
           if ! grep -Eq '^distributionUrl=.*gradle-8\.14-(all|bin)\.zip$' "$WRAPPER_FILE"; then
             if grep -Eq '^distributionSha256Sum=' "$WRAPPER_FILE"; then
               echo '::error::Wrapper 有 SHA256 校驗值，升級 Gradle 時須一併更新對應校驗值。'
@@ -73,7 +71,6 @@ jobs:
             fi
             sed -i -E 's#(gradle-)[0-9.]+-(all|bin)\.zip#\18.14-\2.zip#' "$WRAPPER_FILE"
           fi
-
           grep -E '^distributionUrl=.*gradle-8\.14-(all|bin)\.zip$' "$WRAPPER_FILE" | tee -a test_logs/verification.log
 
       - name: 下載依賴套件
@@ -83,37 +80,28 @@ jobs:
           set -euo pipefail
           flutter pub get 2>&1 | tee -a test_logs/verification.log
 
-      - name: 執行真實連網與策略推薦門禁測試
+      - name: 驗證風控、RS 與門禁報告規則
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts/tests -p 'test_live_scan_evidence.py' -v 2>&1 | tee -a test_logs/verification.log
+          flutter test test/rs_alignment_test.dart test/live_strategy_engine_test.dart test/live_risk_helpers_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+
+      - name: 執行真實行情與指標門禁測試（允許零推薦）
         id: run-gate-test
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
         shell: bash
         run: |
           set -euo pipefail
-
           if [[ ! -f test/integration_scan_test.dart ]]; then
             echo '::error::缺少 test/integration_scan_test.dart，請先提交測試檔。' | tee -a test_logs/verification.log
             exit 1
           fi
-
           mkdir -p build
           rm -f build/live-scan-evidence.json
-
           flutter test test/integration_scan_test.dart --dart-define=RUN_LIVE_SCAN_TEST=true --timeout=90s --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
-
-          python3 - <<'PY' 2>&1 | tee -a test_logs/verification.log
-          import json
-          from pathlib import Path
-
-          report = json.loads(
-              Path('build/live-scan-evidence.json').read_text(encoding='utf-8')
-          )
-          candidates = report.get('candidates')
-
-          if report.get('status') != 'passed' or not isinstance(candidates, list) or not candidates:
-              raise SystemExit('門禁失敗：必須取得 passed 報告及至少一檔真實推薦標的。')
-
-          print(f'[GATE PASSED] 真實推薦標的：{len(candidates)} 檔')
-          PY
+          python3 scripts/validate_live_scan_evidence.py build/live-scan-evidence.json 2>&1 | tee -a test_logs/verification.log
 
       - name: 保存實測紀錄
         if: always()
