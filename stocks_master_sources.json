@@ -1,43 +1,216 @@
 {
-  "schema_version": 1,
-  "snapshot_date": "2026-10-13",
+  "schema_version": 2,
+  "snapshot_date": "2026-10-06",
   "coverage": {
-    "total": 793,
-    "us": 509,
-    "us_sp500_snapshot": 503,
-    "us_additional_major": 6,
-    "tw": 284
+    "total": 7091,
+    "us": 5113,
+    "tw": 1978,
+    "twse": 1085,
+    "tpex": 893
   },
-  "additional_us_symbols": [
-    "TSM",
-    "SHOP",
-    "NET",
-    "RBLX",
-    "ZM",
-    "OKTA"
-  ],
-  "sources": {
+  "scope": {
+    "us": "NYSE / Nasdaq / NYSE American common-stock identities; conservative name classification",
+    "tw": "TWSE + TPEx ordinary-stock search identities; excludes identified TDRs"
+  },
+  "is_current_complete_verified": false,
+  "source_dates": {
+    "us_directory_footer": "2026-10-14 07:00 (timezone unspecified)",
+    "tw_issuer_mirror_commit": "2026-10-06T15:01:35Z",
+    "tw_cfi_snapshot_commit": "2026-03-26T14:21:37Z",
+    "tw_name_enrichment_as_of": "2026-10-14"
+  },
+  "classification": {
     "us": {
-      "url": "https://github.com/datasets/s-and-p-500-companies/blob/main/data/constituents.csv",
-      "blob_sha": "728fd5f099dcd362e0f381ccf4806cd0603ff854",
-      "upstream": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
-      "license": "ODC-PDDL-1.0",
-      "description": "503 security records read from an external S&P 500 dataset snapshot, plus the named major-US additions. Multiple share classes mean security count differs from company count."
+      "nasdaq": {
+        "source": "nasdaq",
+        "rows": 5622,
+        "included": 3183,
+        "excluded_exchange": 0,
+        "excluded_test_or_etf": 1299,
+        "excluded_security_type": 1120,
+        "unknown_security_type": 20,
+        "invalid_symbol": 0,
+        "duplicates": 0,
+        "classification_method": "conservative_security_name_patterns",
+        "classification_verified": false,
+        "file_creation_time": "File Creation Time: 1014202607:00"
+      },
+      "other": {
+        "source": "other",
+        "rows": 7658,
+        "included": 1930,
+        "excluded_exchange": 4437,
+        "excluded_test_or_etf": 96,
+        "excluded_security_type": 1065,
+        "unknown_security_type": 130,
+        "invalid_symbol": 0,
+        "duplicates": 0,
+        "classification_method": "conservative_security_name_patterns",
+        "classification_verified": false,
+        "file_creation_time": "File Creation Time: 1014202607:00"
+      }
     },
-    "tw": {
-      "description": "Manually curated metadata for 284 known TWSE ordinary-stock identities. This is a common-stock search seed, not an official complete/current TWSE listing snapshot.",
-      "refresh_source": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
+    "tw_cfi_matches_to_old_snapshot": 1941,
+    "tw_without_cfi_match": [
+      "2237.TW",
+      "4169.TW",
+      "4178.TW",
+      "4195.TW",
+      "4582.TW",
+      "5236.TW",
+      "6947.TW",
+      "7689.TW",
+      "7760.TW",
+      "7768.TW",
+      "7803.TW",
+      "7812.TW",
+      "7818.TW",
+      "7821.TW",
+      "7822.TW",
+      "7827.TW",
+      "7835.TW",
+      "7855.TW",
+      "1780.TWO",
+      "2938.TWO",
+      "3485.TWO",
+      "3718.TWO",
+      "6028.TWO",
+      "6604.TWO",
+      "6945.TWO",
+      "6983.TWO",
+      "6986.TWO",
+      "7772.TWO",
+      "7794.TWO",
+      "7814.TWO",
+      "7819.TWO",
+      "7820.TWO",
+      "7825.TWO",
+      "7828.TWO",
+      "7839.TWO",
+      "7842.TWO",
+      "7856.TWO"
+    ],
+    "tw_excluded_tdr_or_nonfour_digit": [
+      "9103.TW",
+      "910322.TW",
+      "9105.TW",
+      "910861.TW",
+      "9110.TW",
+      "911608.TW",
+      "911622.TW",
+      "911868.TW",
+      "912000.TW",
+      "9136.TW"
+    ]
+  },
+  "sources": {
+    "retrieved_at": "2026-10-15",
+    "retrieval_method": "Read-only GitHub connector; original CRLF normalized to LF.",
+    "files": [
+      {
+        "path": "nasdaqlisted.txt",
+        "upstream": "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
+        "mirror": "https://github.com/Cperkin/CanadianStats/blob/b4cf17386823dd7638031ad2a22c3a73edacea92/data/sources/nasdaqlisted.txt",
+        "mirror_commit": "b4cf17386823dd7638031ad2a22c3a73edacea92",
+        "mirror_commit_time": "2026-10-14T11:25:44Z",
+        "source_footer": "File Creation Time: 1014202607:00",
+        "warning": "Original provider snapshot time is supplied without explicit timezone. Directory includes ETFs, preferreds, ADRs, warrants, units, notes and test symbols; filter explicitly.",
+        "retrieved_utf8_lf_sha256": "cece78c91189d426a8ecc7bee687c9d15f6eab766c99c93ed8093468e77cb335"
+      },
+      {
+        "path": "otherlisted.txt",
+        "upstream": "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
+        "mirror": "https://github.com/Cperkin/CanadianStats/blob/b4cf17386823dd7638031ad2a22c3a73edacea92/data/sources/otherlisted.txt",
+        "mirror_commit": "b4cf17386823dd7638031ad2a22c3a73edacea92",
+        "mirror_commit_time": "2026-10-14T11:25:44Z",
+        "source_footer": "File Creation Time: 1014202607:00",
+        "warning": "All exchange categories included in raw; select N/A for NYSE/NYSE American. Has no reliable comprehensive ordinary-stock security_type field.",
+        "retrieved_utf8_lf_sha256": "f3f7bb285ec0b89121ea798c301d6016de7bb34808f7450b7084e61bafc58088"
+      },
+      {
+        "path": "tw_stock_list_20261006.csv",
+        "upstream": [
+          "https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv",
+          "https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv"
+        ],
+        "mirror": "https://github.com/w2xg2022/twstock-alphabeta/blob/b3fad78de8599316b97d17309552af15e7157457/data/stock_list.csv",
+        "mirror_commit": "b3fad78de8599316b97d17309552af15e7157457",
+        "mirror_commit_time": "2026-10-06T15:01:35Z",
+        "records": 1988,
+        "twse": 1095,
+        "tpex": 893,
+        "warning": "Issuer directory; no CFI field. Fetch script can reuse prior per-market list on upstream failure; commit time is not proof every row freshly retrieved. Needs live official refresh before claiming current complete ordinary-stock membership. Confirmed includes TDR issuers such as 9103/9105/9110/9136 and six-digit 910322/910861; digit-only filtering is insufficient.",
+        "with_march_cfi_es_intersection_count": 1941,
+        "not_in_march_es_count": 47,
+        "retrieved_utf8_lf_sha256": "85c8ef83a660f31e11aa0244f80cbaf3a35641f018643451495317f714d99f26"
+      },
+      {
+        "path": "twse_equities.csv",
+        "upstream": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2",
+        "mirror": "https://github.com/mlouielu/twstock/blob/5c3f64fdf178b11e604f8a84d399b9bf19add4f6/twstock/codes/twse_equities.csv",
+        "mirror_blob": "c355c49084be299ca0c1001372cd1dece88ab9e8",
+        "mirror_commit_time": "2026-03-26T14:21:37Z",
+        "ordinary_four_digit_count": 1069,
+        "warning": "Old CFI-bearing snapshot; suitable bilingual/sector enrichment and validation, not a current full universe.",
+        "retrieved_utf8_lf_sha256": "5fe86377d6b85ec73c3411909eff619ff79eb32ab6e0f1546917d8dbad39b359"
+      },
+      {
+        "path": "tpex_equities.csv",
+        "upstream": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4",
+        "mirror": "https://github.com/mlouielu/twstock/blob/5c3f64fdf178b11e604f8a84d399b9bf19add4f6/twstock/codes/tpex_equities.csv",
+        "mirror_blob": "bdf7602aabfd6ae0b9e62c8025a5cae23db36524",
+        "mirror_commit_time": "2026-03-26T14:21:37Z",
+        "ordinary_four_digit_count": 880,
+        "warning": "Old CFI-bearing snapshot; no claim of current full membership.",
+        "retrieved_utf8_lf_sha256": "586ca220c3cbc18048e87d83bcf863704e2e67fecea7e35ed7fb2d5bb931bae4"
+      },
+      {
+        "path": "tw_valuation_latest_20261014.json",
+        "mirror": "https://github.com/roseamyclara/tw-stock-valuation/blob/main/docs/data/latest.json",
+        "metadata_file": "tw_valuation_metadata_20261014.json",
+        "provider_as_of": "2026-10-14",
+        "records": 2351,
+        "listed": 1088,
+        "otc": 892,
+        "esb": 371,
+        "warning": "Derived valuation dataset; do not include ESB (emerging) in listed/OTC scope. Suitable current names/sector cross-check only; record membership may omit profiles without valuations.",
+        "retrieved_utf8_lf_sha256": "d6367598cdb0118c44489c36afd0d4d5fbe4b2367696fef7130df80fd3ca6b2c"
+      }
+    ],
+    "official_attempts_failed": [
+      "TWSE ISIN pages timed out in web tool",
+      "TWSE/TPEx OpenAPI could not be fetched by web tool",
+      "MOPS CSV endpoint rejected by web tool as unsupported text/csv content-type"
+    ],
+    "no_permissions_requested": true,
+    "no_local_git_commands": true,
+    "bundled_files": {
+      "nasdaqlisted.txt": "cece78c91189d426a8ecc7bee687c9d15f6eab766c99c93ed8093468e77cb335",
+      "otherlisted.txt": "f3f7bb285ec0b89121ea798c301d6016de7bb34808f7450b7084e61bafc58088",
+      "tpex_equities_common_20260326.csv": "47bbe3017ae368319d08f17e7e2a43085318daa22a0a35a054b9cc2a9dd47457",
+      "tw_names_20261014.json": "f17f0f145b15c5fd2f880f312cbe31843e919b9be9e7c9b8c71dd36a0c03b663",
+      "tw_stock_list_20261006.csv": "85c8ef83a660f31e11aa0244f80cbaf3a35641f018643451495317f714d99f26",
+      "twse_equities_common_20260326.csv": "f7ecc8e40661e6e357cd997d44f4435fcc1eee4bc22a5610df7b0470a0d619f6"
     },
-    "names_and_aliases": {
-      "description": "Manually curated common Chinese/English company names, short codes, and aliases are merged with public company identity facts."
+    "derivations": {
+      "twse_equities_common_20260326.csv": "twse_equities.csv: code four digits and CFI starts ES; retain only code/name/market/group/CFI.",
+      "tpex_equities_common_20260326.csv": "tpex_equities.csv: same four-digit/ES selection.",
+      "tw_names_20261014.json": "tw_valuation_latest_20261014.json: only listed/otc identity fields c/n/m/i; no prices, capitalization or indicators."
     }
   },
+  "warnings": [
+    "搜尋字典是掛牌身份快照，不含報價、指標、可交易狀態或即時買點。",
+    "美股目錄沒有完整 CFI；名稱未能確認的證券已保守排除。不能保證零誤判或完整涵蓋。",
+    "台股公司名錄可能沿用舊資料；已排除已辨識的 91xx/六碼存託憑證，尚未取得新逐檔 CFI。",
+    "台股 37 檔未與 2026-03-26 的同市場 CFI ES 身份匹配，不能宣稱類別已核證。",
+    "上市／上櫃轉板、下市與改名可能改變成分。正式背景掃描重新向官方名錄取得普通股，不以字典冒充最新全池。"
+  ],
   "field_policy": {
-    "name_zh": "Chinese common name when curated; otherwise the source English name is a transparent display fallback.",
-    "name_full_zh": "Empty string when a complete legal Chinese name has not been verified; never invent a translation.",
-    "name_en": "Known English company name, or the public source Security label. Some source labels are short names rather than complete legal names.",
-    "quotes": "This file has no prices, indicators, current membership guarantee, or generated trading signals."
+    "name_zh": "Verified source short name or preserved curated name; US English source name is fallback.",
+    "name_full_zh": "Verified issuer company name when available; unknown US legal translations remain empty.",
+    "name_en": "Curated company name or source Security Name; never invented.",
+    "quotes": "No prices or signals in this file."
   },
-  "refresh": "python scripts/refresh_stock_metadata.py --market all; then regenerate embedded HTML search assets with the project synchronization script.",
-  "caveat": "Metadata supports offline identification only. Constituents, tickers and company names can change; use the refresh command in a network-enabled environment before relying on current universe coverage."
+  "rebuild": "python3 scripts/import_bundled_metadata.py; python3 scripts/sync_stock_search.py",
+  "refresh": "python3 scripts/refresh_stock_metadata.py --market all --allow-partial; python3 scripts/sync_stock_search.py"
 }

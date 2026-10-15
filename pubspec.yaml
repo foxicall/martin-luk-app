@@ -2,10 +2,8 @@ name: martin_luk_app
 description: 台股與美股連網行情、客戶端動能掃描與嚴格風控 Android App。
 publish_to: none
 version: 1.3.0+4
-
 environment:
   sdk: '>=3.7.0 <4.0.0'
-
 dependencies:
   flutter:
     sdk: flutter
@@ -14,19 +12,15 @@ dependencies:
   shared_preferences: ^2.5.2
   flutter_local_notifications: ^18.0.1
   timezone: ^0.10.0
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-
 flutter:
   uses-material-design: true
-
   assets:
     - stocks_master.json
     - stocks_master_sources.json
-
   fonts:
     - family: MartinPreviewSans
       fonts:
