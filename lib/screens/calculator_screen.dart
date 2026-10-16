@@ -120,7 +120,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     final colors = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: Text(stock.symbol),
+        title: Text(stock.symbol, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),
@@ -327,46 +327,87 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 ),
               ),
               const SizedBox(height: 18),
-              _dataRow(context, '初始硬停損價', _money(stock.stopPrice!)),
-              _dataRow(context, '停損來源', stock.stopSource == 'entry_bar_low' ? '實際進場分鐘 K 低點' : '當日實際低點'),
-              _dataRow(context, '停損幅度', '${plan.stopPercent.toStringAsFixed(2)}%'),
-              _dataRow(context, '每股風險 · 1R', _money(plan.riskPerShare)),
               _dataRow(context, '0.5% 風險預算', _money(plan.riskBudget)),
               _dataRow(context, '此部位名目風險', _money(plan.riskAmount)),
               _dataRow(context, '最大持倉上限', '${plan.capPercent.toStringAsFixed(0)}%'),
               if (plan.shares == 0)
                 _notice(context, '淨值不足', '風險與曝險上限不足以購入 1 股。'),
-              const Divider(height: 32),
-              Text('獲利目標與強勢減碼',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final multiple in [3, 5, 10])
-                    _targetChip(context, '${multiple}R',
-                        _money(plan.targets[multiple]!)),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                plan.trimShares > 0
-                    ? '到達 3R 可先減碼約 12%（${_integer(plan.trimShares)} 股）；'
-                        '5R、10R 為觀察目標。其餘部位持續追蹤日收盤與 EMA 移動停損。'
-                    : '3R 為強勢減碼觀察點；此股數無法以整股維持 10%–15% 減碼比例。'
-                        '5R、10R 為觀察目標，其餘部位持續追蹤 EMA 移動停損。',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
-                      height: 1.6,
-                    ),
-              ),
             ],
             if (_eligible && plan == null && _inputError == null)
               _notice(context, '尚無計算結果', '請輸入有效的帳戶淨值。'),
+            const Divider(height: 32),
+            _buildTradeLevels(context),
           ],
         ),
       ),
+    );
+  }
+
+  /// Targets share the validated position plan; an incomplete entry, stale
+  /// quote or invalid balance never acquires executable-looking target values.
+  Widget _buildTradeLevels(BuildContext context) {
+    final stock = widget.candidate;
+    final plan = _plan;
+    final pending = widget.isCached ? '待更新' : '待確認';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('進出場價位與分批計畫',
+            style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        _dataRow(context,
+            plan == null
+                ? '${stock.triggerType ?? '條件'} 觸發參考價'
+                : '假設買價 · ${stock.triggerType ?? '條件'} 觸發',
+            _money(stock.triggerPrice),
+            valueKey: ValueKey('calculator-entry-${stock.id}')),
+        _dataRow(context, '初始硬停損參考',
+            plan == null ? pending : _money(stock.stopPrice!),
+            valueKey: ValueKey('calculator-stop-${stock.id}')),
+        _dataRow(context, '停損來源', plan == null
+            ? '待確認實際低點'
+            : stock.stopSource == 'entry_bar_low'
+                ? '實際進場分鐘 K 低點' : '突破日當日實際低點'),
+        _dataRow(context, '停損幅度',
+            plan == null ? pending : '${plan.stopPercent.toStringAsFixed(2)}%',
+            valueKey: ValueKey('calculator-stop-percent-${stock.id}')),
+        _dataRow(context, '每股風險 · 1R',
+            plan == null ? pending : _money(plan.riskPerShare),
+            valueKey: ValueKey('calculator-1r-${stock.id}')),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _targetChip(context, '3R 賣價 · 原始股數 15%',
+                plan == null ? pending : _money(plan.targetPrice(3)),
+                valueKey: ValueKey('calculator-3r-${stock.id}')),
+            _targetChip(context, '5R 賣價 · 再賣原始股數 15%',
+                plan == null ? pending : _money(plan.targetPrice(5)),
+                valueKey: ValueKey('calculator-5r-${stock.id}')),
+            _targetChip(context, '10R · 額外觀察目標',
+                plan == null ? pending : _money(plan.targetPrice(10)),
+                valueKey: ValueKey('calculator-10r-${stock.id}')),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text('剩餘 70%：以日收盤跌破 9 EMA 為追蹤出場條件。',
+            key: ValueKey('calculator-trailing-${stock.id}'),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              height: 1.6,
+            )),
+        const SizedBox(height: 6),
+        Text(plan == null
+                ? '買點、實際停損與有效本金確認後，才提供完整價位；目前為觀察參考。'
+                : '1R＝假設買價－初始硬停損；3R／5R＝假設買價＋3／5×1R。'
+                    '兩次各賣原始股數的 15%，合計 30%；整股交易需另行調整股數。'
+                    '停損先觸發則先出場。'
+                    '價位為策略試算，請確認交易所跳動單位與最新行情後再下單。',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              height: 1.6,
+            )),
+      ],
     );
   }
 
@@ -452,7 +493,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         visualDensity: VisualDensity.compact,
       );
 
-  Widget _dataRow(BuildContext context, String label, String value) => Padding(
+  Widget _dataRow(BuildContext context, String label, String value,
+      {Key? valueKey}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 7),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -464,6 +506,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             const SizedBox(width: 12),
             Flexible(
                 child: Text(value,
+                    key: valueKey,
                     textAlign: TextAlign.end,
                     style: const TextStyle(fontWeight: FontWeight.w600))),
           ],
@@ -486,7 +529,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         ),
       );
 
-  Widget _targetChip(BuildContext context, String label, String value) => Container(
+  Widget _targetChip(BuildContext context, String label, String value,
+      {Key? valueKey}) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
@@ -500,7 +544,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                     color: Theme.of(context).colorScheme.primary,
                     fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Text(value),
+            Text(value, key: valueKey),
           ],
         ),
       );

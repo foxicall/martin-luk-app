@@ -6,12 +6,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_config.dart';
 import 'models/app_settings.dart';
+import 'models/backend_scan_status.dart';
 import 'models/stock_candidate.dart';
 import 'models/portfolio_position.dart';
 import 'services/candidate_repository.dart';
 import 'services/exit_advisory_engine.dart';
 import 'services/live_candidate_repository.dart';
 import 'services/live_portfolio_repository.dart';
+import 'services/market_scan_progress.dart';
 import 'services/portfolio_repository.dart';
 import 'services/reminder_service.dart';
 import 'services/strategy_engine.dart';
@@ -20,6 +22,49 @@ enum CandidateSort { rs, adr, position }
 
 typedef RepositoryFactory = CandidateRepository Function(AppSettings settings);
 typedef PortfolioRepositoryFactory = PortfolioRepository Function(AppSettings settings);
+typedef PreferenceWriter = Future<bool> Function(String key, String value);
+
+/// One owner is installed before notifying listeners. Its public future always
+/// settles, including cancellation, so a RefreshIndicator cannot stay spinning.
+class _RefreshOperation {
+  _RefreshOperation(this.key, this.version, this.force, this.budget);
+  final String key;
+  final int version;
+  final bool force;
+  final Duration budget;
+  final elapsed = Stopwatch()..start();
+  Duration get remaining => budget - elapsed.elapsed;
+  final completion = Completer<void>();
+  final cancelled = Completer<void>();
+  Timer? deadlineTimer;
+  CandidateSnapshot? partialSnapshot;
+  Completer<void>? queuedForce;
+  Stopwatch? queuedElapsed;
+  bool queuedQuotesOnly = true;
+
+  void cancel() {
+    if (!cancelled.isCompleted) cancelled.complete();
+    finish();
+    finishQueued();
+  }
+
+  void finish() {
+    deadlineTimer?.cancel();
+    deadlineTimer = null;
+    elapsed.stop();
+    if (!completion.isCompleted) completion.complete();
+  }
+
+  void finishQueued() {
+    queuedElapsed?.stop();
+    final queued = queuedForce;
+    if (queued != null && !queued.isCompleted) queued.complete();
+  }
+}
+
+class _UpdateCancelled implements Exception {
+  const _UpdateCancelled();
+}
 
 /// 將設定、來源、分頁與行情请求集中管理；過期请求不覆蓋最新市場。
 class AppController extends ChangeNotifier {
@@ -29,6 +74,12 @@ class AppController extends ChangeNotifier {
     ReminderService? reminders,
     bool? forceMockPreview,
     Duration pollingInterval = const Duration(seconds: 60),
+    Duration? scanUpdateTimeout,
+    Duration? directMarketScanTimeout,
+    Duration portfolioUpdateTimeout = const Duration(seconds: 8),
+    Duration storageTimeout = const Duration(seconds: 2),
+    Duration backendScanWaitTimeout = const Duration(minutes: 3),
+    PreferenceWriter? preferenceWriter,
     DateTime Function()? now,
   })
       : _repositoryFactory = repositoryFactory ?? _defaultRepository,
@@ -36,11 +87,27 @@ class AppController extends ChangeNotifier {
         _reminders = reminders ?? ReminderService(),
         _forceMockPreview = forceMockPreview ?? AppConfig.forceMockPreview,
         _pollingInterval = pollingInterval,
+        _scanUpdateTimeout = _boundedMarketTimeout(
+            scanUpdateTimeout ?? const Duration(seconds: 8)),
+        _directMarketScanTimeout = _boundedMarketTimeout(
+            directMarketScanTimeout ?? scanUpdateTimeout ?? hardMarketScanTimeout),
+        _portfolioUpdateTimeout = portfolioUpdateTimeout,
+        _storageTimeout = storageTimeout,
+        _backendScanWaitTimeout = backendScanWaitTimeout,
+        _preferenceWriter = preferenceWriter,
         _now = now ?? DateTime.now {
-    if (pollingInterval <= Duration.zero) {
-      throw ArgumentError('自動更新間隔必須大於零。');
+    if ([pollingInterval, _scanUpdateTimeout, _directMarketScanTimeout,
+        portfolioUpdateTimeout, storageTimeout, backendScanWaitTimeout]
+        .any((duration) => duration <= Duration.zero)) {
+      throw ArgumentError('更新間隔與逾時必須大於零。');
     }
   }
+
+  /// Includes repository construction, metadata, requests and validation. A
+  /// larger caller-supplied timeout cannot disable the market's hard deadline.
+  static const hardMarketScanTimeout = Duration(seconds: 10);
+  static Duration _boundedMarketTimeout(Duration requested) =>
+      requested > hardMarketScanTimeout ? hardMarketScanTimeout : requested;
 
   static CandidateRepository _defaultRepository(AppSettings settings) =>
       settings.useMockData
@@ -59,28 +126,50 @@ class AppController extends ChangeNotifier {
   final ReminderService _reminders;
   final bool _forceMockPreview;
   final Duration _pollingInterval;
+  final Duration _scanUpdateTimeout;
+  // Full scans and hot quotes both obey the outer 10-second limit. Shorter
+  // injected durations remain available for deterministic timeout tests.
+  final Duration _directMarketScanTimeout;
+  final Duration _portfolioUpdateTimeout;
+  final Duration _storageTimeout;
+  final Duration _backendScanWaitTimeout;
+  final PreferenceWriter? _preferenceWriter;
   final DateTime Function() _now;
   final Map<String, CandidateRepository> _candidateRepositories = {};
   final Map<String, PortfolioRepository> _portfolioRepositories = {};
   final Map<String, CandidateSnapshot> _candidateSnapshots = {};
   Timer? _pollTimer;
+  Timer? _backendScanTimer;
+  Timer? _backendWaitDeadline;
+  Stopwatch? _backendWaitWatch;
+  BackendScanStatus? _backendScanStatus;
+  String? _backendScanKey;
+  bool _backendScanWaiting = false;
+  int _backendPollVersion = 0;
+
+  /// These are server work timestamps, deliberately separate from quote age.
+  BackendScanStatus? get backendScanStatus => _backendScanStatus;
+  bool get waitingForBackendScan => _backendScanWaiting;
+  bool get backendStatusPollingActive => _backendScanTimer != null;
+
   bool _foreground = false;
   bool _initialized = false;
   bool _pollBusy = false;
+  bool _mobileScanPaused = false;
+  /// Manual stop pauses the phone's Taiwan round between pages as well as
+  /// during an active page. Pull-to-refresh explicitly resumes it.
+  bool get mobileScanPaused => _mobileScanPaused;
+  bool get _isMobileTwScan => !_settings.useMockData &&
+      _settings.dataProvider == 'direct' && _market == StockMarket.tw;
+  int _pollVersion = 0;
   DateTime? _lastAutoRefreshAt;
   bool get autoRefreshActive => _pollTimer != null;
   bool get polling => _pollBusy;
   DateTime? get lastAutoRefreshAt => _lastAutoRefreshAt;
   bool get isSnapshotCached => _snapshot?.stale ?? false;
   DateTime? get lastUpdated => _snapshot?.generatedAt;
-  Future<void>? _activeScanFuture;
-  String? _activeScanKey;
-  int _activeScanVersion = -1;
-  bool _activeScanForce = false;
-  Future<void>? _activePortfolioFuture;
-  String? _activePortfolioSource;
-  int _activePortfolioVersion = -1;
-  bool _activePortfolioForce = false;
+  _RefreshOperation? _scanOperation;
+  _RefreshOperation? _portfolioOperation;
   static const _settingsKey = 'martin_luk_settings_v1';
   static const _portfolioKey = 'martin_luk_portfolio_v1';
   static const _portfolioRecoveryKey = 'martin_luk_portfolio_recovery_v1';
@@ -95,6 +184,9 @@ class AppController extends ChangeNotifier {
   CandidateSnapshot? get snapshot => _snapshot;
   bool _loading = false;
   bool get loading => _loading;
+  bool get isEvaluatingMarket => _loading;
+  MarketScanProgress? _marketScanProgress;
+  MarketScanProgress? get marketScanProgress => _marketScanProgress;
   String? _error;
   String? get error => _error;
   int _page = 0;
@@ -122,13 +214,19 @@ class AppController extends ChangeNotifier {
   Map<String, String> get portfolioErrors => Map.unmodifiable(_portfolioErrors);
   final Map<String, PortfolioQuote> _mockQuoteOverrides = {};
   final Map<String, Map<String, Map<String, num>>> _observationHistory = {};
+  final Set<String> _dirtyObservationSources = {};
   bool _portfolioLoading = false;
   bool get portfolioLoading => _portfolioLoading;
   int _portfolioRequestVersion = 0;
   double _euphoriaPercent = 20;
   double get euphoriaPercent => _euphoriaPercent;
   String? _portfolioNotice;
-  String? get portfolioNotice => _portfolioNotice;
+  final Set<String> _portfolioDataWarnings = {};
+  String? get portfolioNotice {
+    final notices = {if (_portfolioNotice != null) _portfolioNotice!,
+      ..._portfolioDataWarnings};
+    return notices.isEmpty ? null : notices.join('\n');
+  }
 
   String _portfolioSource(AppSettings settings) => settings.useMockData ? 'mock' :
       settings.dataProvider == 'direct' ? 'direct:yahoo' :
@@ -166,11 +264,19 @@ class AppController extends ChangeNotifier {
     final quote = _portfolioQuotes[holding.key];
     if (quote == null) return null;
     try {
-      return ExitAdvisoryEngine.evaluate(holding, quote, equityFor(holding.market),
+      final diagnosis = ExitAdvisoryEngine.evaluate(holding, quote, equityFor(holding.market),
           euphoriaPercent: _euphoriaPercent,
           observe: !isPortfolioQuoteCached(holding.key));
-    } on ArgumentError catch (error) {
-      _portfolioErrors[holding.key] = '診斷數值超出有效範圍：$error';
+      if ([diagnosis.currentR, diagnosis.unrealizedPnl, diagnosis.positionPercent,
+        diagnosis.emaBoundary, diagnosis.deviationPercent, ...diagnosis.targets.values]
+          .any((value) => !value.isFinite)) {
+        throw const FormatException('診斷結果超出可表示的有限數值範圍。');
+      }
+      return diagnosis;
+    } catch (error, stack) {
+      // A corrupt/extreme holding must not abort observation of other stocks.
+      debugPrint('持股 ${holding.symbol} 診斷失敗：$error\n$stack');
+      _portfolioErrors[holding.key] = '此持股診斷失敗，保留原始風控紀錄：$error';
       return null;
     }
   }
@@ -215,7 +321,7 @@ class AppController extends ChangeNotifier {
     if (_disposed) return;
     String? initializationNotice;
     try {
-      _preferences = await SharedPreferences.getInstance();
+      _preferences = await _getPreferences();
       if (_disposed) return;
       final text = _preferences?.getString(_settingsKey);
       if (text != null) {
@@ -242,10 +348,10 @@ class AppController extends ChangeNotifier {
     if (_disposed) return;
     if (initializeReminders) {
       try {
-        await _reminders.initialize();
+        await _reminders.initialize().timeout(_scanUpdateTimeout);
         if (_disposed) return;
         if (_settings.remindersEnabled) {
-          final enabled = await _reminders.setEnabled(true);
+          final enabled = await _reminders.setEnabled(true).timeout(_scanUpdateTimeout);
           if (_disposed) return;
           if (!enabled) {
             _settings = _settings.copyWith(remindersEnabled: false);
@@ -268,82 +374,564 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  /// User refreshes bypass a quote TTL. A foreground poll reuses historical
-  /// candles and only refreshes the limited candidate/holding quote set.
+  /// Pulls bypass the TTL. A queued forced follow-up shares the FIRST scan's
+  /// deadline; repeated pulls cannot extend one continuously visible spinner.
   Future<void> refresh({bool forceRefresh = true, bool refreshQuotesOnly = false}) {
     if (_disposed) return Future<void>.value();
-    final key = '${_portfolioSource(_settings)}:${_market.name}:'
-        '${_market == StockMarket.tw ? _settings.twAdrThreshold : _settings.usAdrThreshold}';
-    if (_activeScanKey == key && _activeScanVersion == _requestVersion &&
-        _activeScanFuture != null) {
-      if (forceRefresh && !_activeScanForce) {
-        // A pull during a TTL-based poll must still force a network refresh.
-        // Queue it after the current work rather than overlap both requests.
-        return _activeScanFuture!.then<void>((_) async {
-          final currentKey = '${_portfolioSource(_settings)}:${_market.name}:'
-              '${_market == StockMarket.tw ? _settings.twAdrThreshold : _settings.usAdrThreshold}';
-          if (_disposed || currentKey != key) return;
-          await refresh(forceRefresh: true, refreshQuotesOnly: refreshQuotesOnly);
-        });
+    if (forceRefresh && _isMobileTwScan) _mobileScanPaused = false;
+    final key = _scanKey();
+    final active = _scanOperation;
+    if (active != null && active.key == key && active.version == _requestVersion) {
+      if (forceRefresh && !active.force) {
+        active.queuedForce ??= Completer<void>();
+        active.queuedElapsed ??= Stopwatch()..start();
+        active.queuedQuotesOnly = active.queuedQuotesOnly && refreshQuotesOnly;
+        return active.queuedForce!.future;
       }
-      return _activeScanFuture!;
+      return active.completion.future;
     }
-    final future = _refresh(forceRefresh: forceRefresh, refreshQuotesOnly: refreshQuotesOnly);
-    _activeScanKey = key;
-    _activeScanVersion = _requestVersion;
-    _activeScanForce = forceRefresh;
-    _activeScanFuture = future;
-    unawaited(future.whenComplete(() {
-      if (identical(_activeScanFuture, future)) {
-        _activeScanFuture = null;
-        _activeScanKey = null;
-      }
-    }));
-    return future;
+    return _beginScan(forceRefresh: forceRefresh,
+        refreshQuotesOnly: refreshQuotesOnly,
+        budget: _marketRefreshBudget(refreshQuotesOnly: refreshQuotesOnly));
   }
 
-  Future<void> _refresh({required bool forceRefresh, required bool refreshQuotesOnly}) async {
-    final version = ++_requestVersion;
+  Duration _marketRefreshBudget({required bool refreshQuotesOnly}) =>
+      !_settings.useMockData && _settings.dataProvider == 'direct' &&
+          !refreshQuotesOnly ? _directMarketScanTimeout : _scanUpdateTimeout;
+
+  Future<void> _beginScan({required bool forceRefresh,
+      required bool refreshQuotesOnly, required Duration budget}) {
+    _cancelScan();
+    _cancelBackendTimer();
+    _marketScanProgress = null;
+    final operation = _RefreshOperation(_scanKey(), ++_requestVersion,
+        forceRefresh, _boundedMarketTimeout(budget));
+    // Do this BEFORE the worker's notifyListeners or repository factory: a
+    // listener may synchronously call refresh again.
+    _scanOperation = operation;
+    operation.deadlineTimer = Timer(operation.budget,
+        () => _expireMarketScan(operation));
+    unawaited(_refresh(operation, refreshQuotesOnly: refreshQuotesOnly));
+    return operation.completion.future;
+  }
+
+  String _scanKey() => '${_portfolioSource(_settings)}:${_market.name}:'
+      '${_market == StockMarket.tw ? _settings.twAdrThreshold : _settings.usAdrThreshold}';
+
+  bool _ownsScan(_RefreshOperation operation) => !_disposed &&
+      identical(_scanOperation, operation) && operation.version == _requestVersion &&
+      operation.key == _scanKey();
+
+  bool _scanWithinDeadline(_RefreshOperation operation) =>
+      _ownsScan(operation) && operation.remaining > Duration.zero;
+
+  /// A separate watchdog releases the UI even if the worker never completes.
+  /// Future.timeout alone does not cancel work; retiring ownership prevents all
+  /// later callbacks, results and errors from overwriting the current market.
+  void _expireMarketScan(_RefreshOperation operation) {
+    if (!_ownsScan(operation)) return;
+    final cacheKey = operation.key.substring(0, operation.key.lastIndexOf(':'));
+    final reason = '市場掃描逾時（全流程最長 ${operation.budget.inMilliseconds / 1000} 秒）';
+    debugPrint('[MarketScan] $reason；停止等待並保留可驗證資料。');
+    _failBackendWaiting(reason);
+    _publishIncompleteScan(operation, cacheKey, reason);
+    _finishMarketProgress('評估未完成（已達硬逾時）');
+    _cancelScan();
+    _notify();
+  }
+
+  void _publishIncompleteScan(_RefreshOperation operation,
+      String cacheKey, String reason) {
+    final partial = operation.partialSnapshot;
+    final previous = _candidateSnapshots[cacheKey];
+    if (partial != null) {
+      _snapshot = _staleSnapshot(partial,
+          '$reason；僅顯示本次已驗證的部分資料，評估尚未完成。');
+      _error = '$reason；已保留 ${partial.evaluatedCount ?? 0} 檔已驗證資料，請重試完成掃描。';
+    } else if (previous != null && !previous.isFallback) {
+      _snapshot = _staleSnapshot(previous,
+          '$reason；顯示上次快取，不可視為當前突破訊號。');
+      _error = '$reason；保留 ${previous.generatedAt.toLocal()} 的快取。';
+    } else {
+      final progress = _marketScanProgress;
+      _snapshot = CandidateSnapshot.fallback(marketType: _market,
+          updatedAt: _now().toUtc(), universeCount: progress?.universeCount ?? 0,
+          scanPoolSize: progress?.poolSize ?? 0, reason: reason);
+      _error = '評估未完成：$reason。請檢查連線後重試。';
+    }
+    _page = _page.clamp(0, pageCount - 1).toInt();
+  }
+
+  Future<T> _awaitUpdate<T>(Future<T> work, _RefreshOperation operation,
+      Duration timeout) {
+    // Attach error handlers even when the remaining budget reached zero. A
+    // just-started HTTP future may otherwise deliver an unhandled late error.
+    return Future.any<T>([
+      work,
+      operation.cancelled.future.then<T>((_) => throw const _UpdateCancelled()),
+    ]).timeout(timeout > Duration.zero ? timeout : Duration.zero);
+  }
+
+  void _retireCandidate(String cacheKey, CandidateRepository repository) {
+    if (identical(_candidateRepositories[cacheKey], repository)) {
+      _candidateRepositories.remove(cacheKey);
+    }
+    try {
+      if (repository is RealCandidateRepository) repository.close();
+      if (repository is DirectLiveCandidateRepository) repository.close();
+    } catch (error, stack) {
+      debugPrint('關閉行情掃描服務失敗：$error\n$stack');
+    }
+  }
+
+  void _cancelScan() {
+    final active = _scanOperation;
+    if (active == null) return;
+    _scanOperation = null;
+    active.cancel();
+    _loading = false;
+    final cacheKey = active.key.substring(0, active.key.lastIndexOf(':'));
+    final repository = _candidateRepositories[cacheKey];
+    if (repository != null) _retireCandidate(cacheKey, repository);
+  }
+
+  /// Stops this phone's status requests, not the shared server-side scan.
+  /// Retiring request ownership also prevents a late HTTP reply from committing.
+  void cancelMarketEvaluation() {
+    if (_disposed) return;
+    if (_isMobileTwScan) {
+      _mobileScanPaused = true;
+      // A round may be waiting for the next minute tick with no active page.
+      // Stopping in that interval must still suppress future automatic pages.
+      if (_scanOperation == null) {
+        _finishMarketProgress('台股輪掃已暫停；下拉更新可續掃');
+        _notify();
+        return;
+      }
+    }
+    final operation = _scanOperation;
+    if (_backendScanWaiting ||
+        (_backendScanStatus?.isRunning ?? false)) {
+      _backendScanWaiting = false;
+      _cancelBackendTimer();
+      _stopBackendWaitDeadline();
+      _cancelScan();
+      _error = null;
+      _notify();
+      return;
+    }
+    if (operation == null) return;
+    final cacheKey = operation.key.substring(0, operation.key.lastIndexOf(':'));
+    if (_snapshot == null || _snapshot!.isFallback || operation.partialSnapshot != null) {
+      _publishIncompleteScan(operation, cacheKey, '市場掃描已停止');
+    } else {
+      _error = '市場掃描已停止；保留上次評估快照。';
+    }
+    _cancelScan();
+    _finishMarketProgress('掃描已停止');
+    _notify();
+  }
+
+  void _cancelBackendTimer() {
+    _backendPollVersion++;
+    _backendScanTimer?.cancel();
+    _backendScanTimer = null;
+  }
+
+  void _resetBackendWaiting() {
+    _cancelBackendTimer();
+    _backendScanWaiting = false;
+    _backendScanKey = null;
+    _backendScanStatus = null;
+    _stopBackendWaitDeadline();
+  }
+
+  void _stopBackendWaitDeadline() {
+    _backendWaitDeadline?.cancel();
+    _backendWaitDeadline = null;
+    _backendWaitWatch?.stop();
+    _backendWaitWatch = null;
+  }
+
+  void _syncBackendWaitDeadline() {
+    _backendWaitDeadline?.cancel();
+    _backendWaitDeadline = null;
+    if (_disposed || !_foreground || !_backendScanWaiting) {
+      _backendWaitWatch?.stop();
+      return;
+    }
+    final watch = _backendWaitWatch ??= Stopwatch();
+    watch.start();
+    final remaining = _backendScanWaitTimeout - watch.elapsed;
+    _backendWaitDeadline = Timer(
+      remaining > Duration.zero ? remaining : Duration.zero,
+      () {
+        if (_disposed || !_foreground || !_backendScanWaiting) return;
+        const reason = '等待 Python 背景掃描超過上限，已停止查詢進度。'
+            '後端可能仍在執行；請稍後下拉重試。';
+        _failBackendWaiting(reason);
+        _cancelScan();
+        final previous = _snapshot;
+        if (previous != null && !previous.isFallback) {
+          _snapshot = _staleSnapshot(previous, reason);
+        }
+        _error = reason;
+        _notify();
+      },
+    );
+  }
+
+  void _failBackendWaiting(String reason) {
+    _cancelBackendTimer();
+    _stopBackendWaitDeadline();
+    _backendScanWaiting = false;
+    final current = _backendScanStatus;
+    if (current != null && current.isRunning) {
+      _backendScanStatus = current.withClientFailure(reason);
+    }
+  }
+
+  void _acceptBackendStatus(CandidateSnapshot response,
+      _RefreshOperation operation) {
+    final status = response.backendScan;
+    if (status == null) {
+      _resetBackendWaiting(); // Compatibility with a completed legacy backend.
+      return;
+    }
+    if (_settings.useMockData || _settings.dataProvider != 'backend' ||
+        status.market != _market) {
+      throw const RepositoryException('背景掃描進度的市場或資料來源不符。');
+    }
+    if (_backendScanStatus?.jobId != status.jobId) {
+      _stopBackendWaitDeadline();
+    }
+    _backendScanStatus = status;
+    _backendScanKey = operation.key;
+    _backendScanWaiting = status.isRunning;
+    if (!status.isRunning) {
+      _cancelBackendTimer();
+      _stopBackendWaitDeadline();
+    } else {
+      _syncBackendWaitDeadline();
+    }
+    if (status.isFailed) {
+      _error = 'Python 背景掃描失敗：${status.error ?? '請檢查後端服務後重試。'}';
+    }
+  }
+
+  /// Every tick makes exactly one bounded HTTP request. A 202 response settles
+  /// its RefreshIndicator immediately; the independent timer asks again later.
+  void _scheduleBackendStatusPoll({bool immediately = false}) {
+    _cancelBackendTimer();
+    final status = _backendScanStatus;
+    final key = _backendScanKey;
+    if (_disposed || !_foreground || !_backendScanWaiting ||
+        status == null || !status.isRunning || key != _scanKey() ||
+        _settings.useMockData || _settings.dataProvider != 'backend' ||
+        _scanOperation != null) return;
+    final version = _backendPollVersion;
+    final delay = immediately ? Duration.zero :
+        Duration(seconds: status.retryAfterSeconds.clamp(1, 60).toInt());
+    _backendScanTimer = Timer(delay, () {
+      _backendScanTimer = null;
+      if (_disposed || !_foreground || !_backendScanWaiting ||
+          version != _backendPollVersion || key != _scanKey() ||
+          _scanOperation != null) return;
+      unawaited(refresh(forceRefresh: false, refreshQuotesOnly: true));
+    });
+  }
+
+  void _finishMarketProgress(String stage) {
+    final current = _marketScanProgress;
+    if (current == null) return;
+    _marketScanProgress = MarketScanProgress(
+      market: current.market, universeCount: current.universeCount,
+      poolSize: current.poolSize, attemptedCount: current.attemptedCount,
+      completedCount: current.completedCount, evaluatedCount: current.evaluatedCount,
+      adrMatchCount: current.adrMatchCount, confirmedCount: current.confirmedCount,
+      failedCount: current.failedCount, finished: true, stage: stage,
+      partialSnapshot: current.partialSnapshot,
+    );
+  }
+
+  void _acceptMarketProgress(_RefreshOperation operation,
+      StockMarket market, MarketScanProgress progress) {
+    if (!_scanWithinDeadline(operation) || progress.market != market || market != _market) return;
+    // Progress is presentation only. Reject inconsistent or backwards counts
+    // without turning them into successful evaluations or trade signals.
+    if (progress.universeCount < 0 || progress.poolSize < 0 ||
+        progress.poolSize > progress.universeCount || progress.attemptedCount < 0 ||
+        progress.attemptedCount > progress.poolSize || progress.completedCount < 0 ||
+        progress.completedCount > progress.attemptedCount || progress.evaluatedCount < 0 ||
+        progress.evaluatedCount > progress.completedCount || progress.adrMatchCount < 0 ||
+        progress.adrMatchCount > progress.evaluatedCount || progress.confirmedCount < 0 ||
+        progress.confirmedCount > progress.adrMatchCount || progress.failedCount < 0 ||
+        progress.failedCount > progress.completedCount ||
+        (_marketScanProgress != null &&
+          progress.completedCount < _marketScanProgress!.completedCount)) {
+      debugPrint('[MarketEvaluation] 已忽略不一致的掃描進度。');
+      return;
+    }
+    final partial = progress.partialSnapshot;
+    if (partial != null) {
+      try {
+        if (partial.isFallback || (partial.evaluatedCount ?? 0) <= 0 ||
+            partial.universeCount != progress.universeCount ||
+            partial.evaluatedCount != progress.evaluatedCount ||
+            partial.scanPoolSize != progress.poolSize ||
+            partial.adrMatchCount != progress.adrMatchCount) {
+          throw const RepositoryException('部分快照與已驗證進度不一致。');
+        }
+        final checked = _checkedCandidates(partial, market,
+            allowMock: _settings.useMockData);
+        if (!_scanWithinDeadline(operation)) return;
+        operation.partialSnapshot = checked;
+      } catch (error, stack) {
+        debugPrint('[MarketScan] 已忽略無法驗證的部分快照：$error\n$stack');
+      }
+    }
+    _marketScanProgress = progress;
+    _notify();
+  }
+
+  Future<void> _refresh(_RefreshOperation operation,
+      {required bool refreshQuotesOnly}) async {
     final requestMarket = _market;
     final currentSettings = _settings;
-    _loading = true;
-    _error = null;
-    _notify();
     final cacheKey = '${_portfolioSource(currentSettings)}:${requestMarket.name}';
+    CandidateRepository? repository;
+    var committed = false;
+    var pending = false;
+    var timedOut = false;
     try {
-      final repository = _candidateRepositories.putIfAbsent(cacheKey,
+      if (!_ownsScan(operation)) return;
+      _loading = true;
+      _error = null;
+      _notify();
+      if (!_ownsScan(operation)) return;
+      repository = _candidateRepositories.putIfAbsent(cacheKey,
           () => _repositoryFactory(currentSettings));
-      final response = await repository.fetch(
-        requestMarket,
-        adrThreshold: requestMarket == StockMarket.tw
-            ? currentSettings.twAdrThreshold
-            : currentSettings.usAdrThreshold,
-        forceRefresh: forceRefresh,
-        refreshQuotesOnly: refreshQuotesOnly,
-      );
-      if (_disposed || version != _requestVersion) return;
-      _snapshot = response;
-      _candidateSnapshots[cacheKey] = response;
+      if (!_scanWithinDeadline(operation)) {
+        throw TimeoutException('市場掃描已達全域硬逾時。', operation.budget);
+      }
+      final threshold = requestMarket == StockMarket.tw
+          ? currentSettings.twAdrThreshold : currentSettings.usAdrThreshold;
+      final work = repository is ProgressiveCandidateRepository
+          ? repository.fetchWithProgress(requestMarket,
+              adrThreshold: threshold, forceRefresh: operation.force,
+              refreshQuotesOnly: refreshQuotesOnly,
+              onProgress: (progress) =>
+                  _acceptMarketProgress(operation, requestMarket, progress))
+          : repository.fetch(requestMarket, adrThreshold: threshold,
+              forceRefresh: operation.force, refreshQuotesOnly: refreshQuotesOnly);
+      final response = await _awaitUpdate(work, operation, operation.remaining);
+      if (!_ownsScan(operation)) return;
+      if (!_scanWithinDeadline(operation)) {
+        throw TimeoutException('市場掃描已達全域硬逾時。', operation.budget);
+      }
+      if (response.isPending) {
+        final status = response.backendScan;
+        if (status == null || !status.isRunning ||
+            response.candidates.isNotEmpty) {
+          throw const RepositoryException('等待中的背景掃描回應格式無效。');
+        }
+        _acceptBackendStatus(response, operation);
+        // Do not persist a progress timestamp as quote data, create a fake
+        // empty successful scan, or replace a genuine previous snapshot.
+        if (_snapshot?.isFallback ?? false) _snapshot = null;
+        pending = true;
+        return;
+      }
+      final checked = _checkedCandidates(response, requestMarket,
+          allowMock: currentSettings.useMockData);
+      if (!_scanWithinDeadline(operation)) {
+        throw TimeoutException('市場掃描驗證已達全域硬逾時。', operation.budget);
+      }
+      if (checked.isFallback) {
+        throw const RepositoryException('行情來源回傳兜底快照，市場評估尚未完成。');
+      }
+      _acceptBackendStatus(response, operation);
+      _snapshot = checked;
+      _candidateSnapshots[cacheKey] = checked;
       _page = _page.clamp(0, pageCount - 1).toInt();
-    } catch (exception) {
-      if (_disposed || version != _requestVersion) return;
-      final previous = _candidateSnapshots[cacheKey];
-      _snapshot = previous == null ? null : _staleSnapshot(previous,
-          '更新失敗，顯示上次快取；不可視為當前突破訊號。');
-      _error = previous == null
-          ? '無法取得評估資料：$exception。請檢查連線後重試。'
-          : '資料更新失敗：$exception；保留 ${previous.generatedAt.toLocal()} 的快取。';
+      committed = true;
+    } on _UpdateCancelled {
+      // Cancellation settles the public future; it is not a failed new source.
+    } catch (exception, stack) {
+      if (!_ownsScan(operation)) return;
+      timedOut = exception is TimeoutException;
+      if (exception is TimeoutException && repository != null) {
+        // Retrying must get a fresh client, not the expired repository's pending
+        // future. Late completion is consumed by _awaitUpdate and cannot commit.
+        _retireCandidate(cacheKey, repository);
+      }
+      _failBackendWaiting('$exception');
+      debugPrint('行情更新失敗：$exception\n$stack');
+      final reason = exception is TimeoutException
+          ? '行情更新逾時（本次最長 ${operation.budget.inMilliseconds / 1000} 秒）' : '$exception';
+      _publishIncompleteScan(operation, cacheKey, reason);
     } finally {
-      if (!_disposed && version == _requestVersion) {
+      final owned = _ownsScan(operation);
+      if (owned) {
+        if (_snapshot == null && !pending) {
+          _publishIncompleteScan(operation, cacheKey, '市場評估尚未取得可驗證結果');
+        }
+        final progress = _marketScanProgress;
+        final incomplete =
+            (_snapshot?.scanPoolSize != null && _snapshot?.scanCompletedAt == null) ||
+            (progress != null && progress.completedCount < progress.poolSize);
+        final stage = !committed
+            ? (timedOut ? '評估未完成（已達硬逾時）' : '更新失敗')
+            : (_snapshot?.stale ?? false) ? '顯示上次快取'
+            : incomplete ? '本次評估已結束（部分完成）' : '評估已完成';
+        if (!pending) _finishMarketProgress(stage);
+      }
+      if (identical(_scanOperation, operation)) {
+        _scanOperation = null;
         _loading = false;
+      }
+      operation.finish();
+      // The next owner is installed before any notification can re-enter us.
+      if (owned && committed && operation.queuedForce != null && !_disposed &&
+          operation.key == _scanKey()) {
+        try {
+          // A forced follow-up inherits the original operation's remaining
+          // deadline. It can never add another 10 seconds to this spinner.
+          final queuedBudget = operation.budget;
+          final remaining = operation.remaining;
+          if (remaining > Duration.zero) {
+            await _beginScan(forceRefresh: true,
+                refreshQuotesOnly: operation.queuedQuotesOnly, budget: remaining);
+          } else {
+            _error ??= '行情更新已達 ${queuedBudget.inMilliseconds / 1000} 秒總時限，請重試。';
+          }
+        } finally {
+          operation.finishQueued();
+        }
+      } else {
+        operation.finishQueued();
+      }
+      if (owned && !_disposed && _scanOperation == null) {
+        _scheduleBackendStatusPoll();
         _notify();
       }
     }
   }
 
+  bool _demoSource(String source) => RegExp(
+      r'mock|demo|fictit|假|虛構|示範|離線', caseSensitive: false).hasMatch(source);
+
+  CandidateSnapshot _checkedCandidates(CandidateSnapshot response,
+      StockMarket market, {required bool allowMock}) {
+    if (response.isPending) {
+      throw const RepositoryException('背景掃描進度不是已完成的行情快照。');
+    }
+    final evaluated = response.evaluatedCount;
+    final poolSize = response.scanPoolSize;
+    final adrMatches = response.adrMatchCount;
+    // Only the phone's Taiwan scanner accumulates candidates across pages.
+    // Page counts remain page counts; coverage is separately validated by the
+    // immutable snapshot constructor. A server/US/mock flag cannot opt out of
+    // the original candidate-versus-evaluated-count protection.
+    final cumulative = response.candidatesAreCumulative && !allowMock &&
+        !_settings.useMockData && _settings.dataProvider == 'direct' &&
+        market == StockMarket.tw && response.backendScan == null &&
+        response.coverageTotalCount == response.universeCount &&
+        response.universeCount > 0 &&
+        response.coverageScannedCount != null &&
+        response.coverageEvaluatedCount != null &&
+        response.coverageRemainingCount != null &&
+        evaluated != null && poolSize != null &&
+        response.coverageEvaluatedCount! >= evaluated;
+    if (response.candidatesAreCumulative && !cumulative) {
+      throw const RepositoryException('累積候選僅允許具完整輪掃統計的手機台股來源。');
+    }
+    if (response.source.trim().isEmpty || response.universeCount < 0 ||
+        (evaluated != null && (evaluated < 0 || evaluated > response.universeCount)) ||
+        (poolSize != null && (poolSize < 0 || poolSize > response.universeCount ||
+            (evaluated != null && evaluated > poolSize))) ||
+        (adrMatches != null && (adrMatches < 0 ||
+            adrMatches > (evaluated ?? poolSize ?? response.universeCount))) ||
+        (!allowMock && _demoSource(response.source))) {
+      throw const RepositoryException('掃描回應的來源或股票池統計無效；未載入該回應。');
+    }
+    if (!response.stale && response.universeCount > 0 && evaluated == 0) {
+      throw const RepositoryException('本次股票池未成功評估任何股票；這並非「沒有符合條件的候選」，請檢查行情來源後重試。');
+    }
+    if (cumulative && evaluated == 0 &&
+        (response.coverageScannedCount == 0 || response.warnings.isEmpty)) {
+      throw const RepositoryException('失敗頁面必須標示已嘗試進度與診斷警告，不能宣稱成功評估。');
+    }
+    final accepted = <StockCandidate>[];
+    final seenSymbols = <String>{};
+    final seenIds = <String>{};
+    final missing = {...response.missingSymbols};
+    final warnings = [...response.warnings];
+    for (final candidate in response.candidates) {
+      String? reason;
+      final canonical = (market == StockMarket.tw
+          ? RegExp(r'^\d{4}\.(?:TW|TWO)$') : RegExp(r'^[A-Z][A-Z0-9-]{0,14}$'))
+          .hasMatch(candidate.symbol);
+      if (candidate.market != market || !canonical) {
+        reason = '市場或標準股票代碼不符';
+      } else if (seenSymbols.contains(candidate.symbol) || seenIds.contains(candidate.id)) {
+        reason = '重複代碼或識別碼';
+      } else if (candidate.isConfirmed && (!candidate.hasValidStopRange ||
+          (candidate.stopSource == 'day_low' && candidate.dayLow != null &&
+              candidate.dayLow != candidate.stopPrice) ||
+          (candidate.stopSource == 'entry_bar_low' &&
+              (candidate.entryBarLow != candidate.stopPrice || candidate.dayLow == null ||
+               (candidate.entryPrice - candidate.dayLow!) / candidate.entryPrice <= 0.05 ||
+               candidate.dayLow! > candidate.stopPrice!)))) {
+        reason = '已確認訊號的實際低點或停損距離不符風控規則';
+      }
+      if (reason != null) {
+        missing.add(candidate.symbol);
+        warnings.add('已排除 ${candidate.symbol}：$reason；其他有效候選照常顯示。');
+        continue;
+      }
+      accepted.add(candidate);
+      seenSymbols.add(candidate.symbol);
+      seenIds.add(candidate.id);
+    }
+    if (accepted.length > response.universeCount ||
+        (cumulative
+            ? accepted.length > response.coverageEvaluatedCount!
+            : evaluated != null && accepted.length > evaluated)) {
+      throw const RepositoryException('有效候選數量超過股票池或成功評估數量。');
+    }
+    if (response.candidates.isNotEmpty && accepted.isEmpty) {
+      throw const RepositoryException('回應中的候選資料全部無效，保留上次可驗證快取。');
+    }
+    // An actually successful empty scan is valid. It must replace an old list,
+    // rather than masquerading as a request failure or inventing recommendations.
+    missing.removeAll(seenSymbols);
+    return CandidateSnapshot(candidates: accepted, fetchedAt: response.fetchedAt,
+      warnings: warnings, source: response.source, universeCount: response.universeCount,
+      stale: response.stale, missingSymbols: missing.toList()..sort(),
+      evaluatedCount: evaluated, scanPoolSize: poolSize, adrMatchCount: adrMatches,
+      universeIsComplete: response.universeIsComplete,
+      candidatesAreCumulative: response.candidatesAreCumulative,
+      universeAsOf: response.universeAsOf, scanCompletedAt: response.scanCompletedAt,
+      isFallback: response.isFallback, attemptedAt: response.attemptedAt,
+      backendScan: response.backendScan, isPending: response.isPending,
+      coverageTotalCount: response.coverageTotalCount,
+      coverageScannedCount: response.coverageScannedCount,
+      coverageEvaluatedCount: response.coverageEvaluatedCount,
+      coverageRemainingCount: response.coverageRemainingCount,
+      coverageRound: response.coverageRound,
+      scanPageStart: response.scanPageStart,
+      scanPageSize: response.scanPageSize,
+      universeFingerprint: response.universeFingerprint);
+  }
+
   Future<void> setMarket(StockMarket value) async {
-    if (_market == value) return;
+    if (_disposed || _market == value) return;
+    _cancelScan();
+    _resetBackendWaiting();
+    _marketScanProgress = null;
     _market = value;
+    _mobileScanPaused = false;
     _page = 0;
     final saved = _candidateSnapshots['${_portfolioSource(_settings)}:${value.name}'];
     _snapshot = saved == null ? null : _staleSnapshot(saved, '市場切換中，暫顯示上次快取。');
@@ -355,15 +943,47 @@ class AppController extends ChangeNotifier {
         warnings: {...value.warnings, warning}.toList(), source: value.source,
         universeCount: value.universeCount, stale: true,
         missingSymbols: value.missingSymbols, evaluatedCount: value.evaluatedCount,
+        scanPoolSize: value.scanPoolSize, adrMatchCount: value.adrMatchCount,
         universeIsComplete: value.universeIsComplete, universeAsOf: value.universeAsOf,
-        scanCompletedAt: value.scanCompletedAt);
+        candidatesAreCumulative: value.candidatesAreCumulative,
+        scanCompletedAt: value.scanCompletedAt, isFallback: value.isFallback,
+        attemptedAt: _now().toUtc(), backendScan: value.backendScan,
+        isPending: value.isPending,
+        coverageTotalCount: value.coverageTotalCount,
+        coverageScannedCount: value.coverageScannedCount,
+        coverageEvaluatedCount: value.coverageEvaluatedCount,
+        coverageRemainingCount: value.coverageRemainingCount,
+        coverageRound: value.coverageRound,
+        scanPageStart: value.scanPageStart,
+        scanPageSize: value.scanPageSize,
+        universeFingerprint: value.universeFingerprint);
 
   /// The Flutter lifecycle owner explicitly enables polling only while visible.
   void setForeground(bool value) {
     if (_disposed || _foreground == value) return;
     _foreground = value;
+    if (!value) {
+      _cancelBackendTimer();
+      _syncBackendWaitDeadline();
+      // Stop this phone's in-flight status request on backgrounding. The
+      // server continues independently; its job is not cancelled by the phone.
+      if ((!_settings.useMockData && _settings.dataProvider == 'backend') ||
+          _isMobileTwScan) {
+        _cancelScan();
+      }
+      if (_isMobileTwScan) {
+        // A suspended page is not a completed auto refresh. Its detached
+        // continuation must neither retain the poll lock nor move the last
+        // successful foreground-update timestamp forward.
+        _pollVersion++;
+        _pollBusy = false;
+      }
+    }
     _syncPolling();
-    if (value && _initialized && _settings.autoRefreshEnabled &&
+    if (value && _backendScanWaiting) {
+      _syncBackendWaitDeadline();
+      _scheduleBackendStatusPoll(immediately: true);
+    } else if (value && _initialized && _settings.autoRefreshEnabled &&
         !_settings.useMockData && (_lastAutoRefreshAt == null ||
           _now().difference(_lastAutoRefreshAt!) >= _pollingInterval)) {
       unawaited(pollNow());
@@ -385,18 +1005,48 @@ class AppController extends ChangeNotifier {
   Future<void> pollNow() async {
     if (_disposed || !_initialized || !_foreground ||
         !_settings.autoRefreshEnabled || _settings.useMockData ||
-        _pollBusy || _loading || _portfolioLoading) return;
+        _pollBusy || _loading || _portfolioLoading || _backendScanWaiting ||
+        (_backendScanStatus?.isRunning ?? false) ||
+        (_backendScanStatus?.isFailed ?? false)) return;
     _pollBusy = true;
-    _notify();
+    final version = ++_pollVersion;
     try {
+      _notify();
+      final scan = _snapshot;
+      // Partial direct scans have a genuine quote timestamp but no completed
+      // scan timestamp. They must retry the full scan instead of polling only
+      // their partial quote list forever. Legacy responses without pool counts
+      // retain their historical fetchedAt compatibility.
+      final completed = scan?.scanCompletedAt ??
+          (scan?.scanPoolSize == null ? scan?.fetchedAt : null);
+      final age = completed == null ? null : _now().toUtc().difference(completed);
+      // A hot poll must stay small, but a failed cold start or expired full
+      // scan must still recover automatically. Never treat a clock anomaly or
+      // a stale fallback as a recent successful universe scan.
+      final quotesOnly = scan != null && !scan.stale && age != null &&
+          !age.isNegative && age < const Duration(minutes: 15) &&
+          !(_isMobileTwScan && (scan.coverageRemainingCount ?? 0) > 0);
       await Future.wait([
-        refresh(forceRefresh: false, refreshQuotesOnly: true),
+        _isMobileTwScan && _mobileScanPaused
+            ? Future<void>.value()
+            : refresh(forceRefresh: false, refreshQuotesOnly: quotesOnly),
         refreshPortfolio(forceRefresh: false),
       ]);
-      _lastAutoRefreshAt = _now().toUtc();
+      if (!_disposed && version == _pollVersion) {
+        _lastAutoRefreshAt = _now().toUtc();
+      }
+    } catch (error, stack) {
+      // Timer callbacks are deliberately unawaited by the lifecycle owner, so
+      // never leak an exception into the zone and strand the polling lock.
+      debugPrint('定時行情更新失敗：$error\n$stack');
+      if (!_disposed && version == _pollVersion) {
+        _error = '自動更新失敗：$error。請下拉重試；保留上次可驗證行情。';
+      }
     } finally {
-      _pollBusy = false;
-      _notify();
+      if (version == _pollVersion) {
+        _pollBusy = false;
+        _notify();
+      }
     }
   }
 
@@ -438,6 +1088,11 @@ class AppController extends ChangeNotifier {
     final previousSettings = _settings;
     final oldSource = _portfolioSource(previousSettings);
     final nextSource = _portfolioSource(next);
+    _cancelScan();
+    _resetBackendWaiting();
+    _cancelPortfolio();
+    _pollVersion++;
+    _pollBusy = false;
     if (oldSource != nextSource) {
       // Invalidate BEFORE any reminder/persistence await. An old mock request
       // must never update the real-data observation history after a switch.
@@ -445,6 +1100,7 @@ class AppController extends ChangeNotifier {
       _portfolioLoading = false;
       _portfolioQuotes.clear();
       _portfolioErrors.clear();
+      _portfolioDataWarnings.clear();
       _cachedQuoteKeys.clear();
       _captureObservations(oldSource);
       _restoreObservations(nextSource);
@@ -452,15 +1108,18 @@ class AppController extends ChangeNotifier {
     }
     _requestVersion++;
     _snapshot = null;
+    _marketScanProgress = null;
     _loading = false;
     _page = 0;
     _settings = next;
+    _mobileScanPaused = false;
     _syncPolling();
     _notify();
     String? reminderError;
     if (next.remindersEnabled != previousSettings.remindersEnabled) {
       try {
-        final allowed = await _reminders.setEnabled(next.remindersEnabled);
+        final allowed = await _reminders.setEnabled(next.remindersEnabled)
+            .timeout(_scanUpdateTimeout);
         if (next.remindersEnabled && !allowed) {
           next = next.copyWith(remindersEnabled: false);
           reminderError = '通知權限未開啟，提醒維持關閉。';
@@ -475,6 +1134,7 @@ class AppController extends ChangeNotifier {
     _portfolioLoading = false;
     _portfolioQuotes.clear();
     _portfolioErrors.clear();
+    _portfolioDataWarnings.clear();
     _cachedQuoteKeys.clear();
     _snapshot = null;
     _page = 0;
@@ -489,15 +1149,35 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  Future<SharedPreferences> _getPreferences() async {
+    final existing = _preferences;
+    if (existing != null) return existing;
+    final preferences = await SharedPreferences.getInstance().timeout(_storageTimeout);
+    if (!_disposed) _preferences = preferences;
+    return preferences;
+  }
+
+  Future<bool> _writePreference(String key, String value,
+      {bool Function()? isCurrent}) async {
+    if (_disposed || (isCurrent != null && !isCurrent())) return true;
+    final writer = _preferenceWriter;
+    if (writer != null) return writer(key, value).timeout(_storageTimeout);
+    final preferences = await _getPreferences();
+    if (_disposed || (isCurrent != null && !isCurrent())) return true;
+    return preferences.setString(key, value).timeout(_storageTimeout);
+  }
+
   Future<void> _persist() async {
-    final preferences = _preferences ??= await SharedPreferences.getInstance();
-    final saved = await preferences.setString(_settingsKey, jsonEncode(_settings.toJson()));
+    if (_disposed) return;
+    final saved = await _writePreference(_settingsKey, jsonEncode(_settings.toJson()));
     if (!saved) throw StateError('本機設定儲存失敗。');
   }
 
   Future<void> _loadPortfolio() async {
+    String? storedPayload;
     try {
       final text = _preferences?.getString(_portfolioKey);
+      storedPayload = text;
       if (text == null) {
         _portfolioPositions = _settings.useMockData ? demoPortfolioPositions() : [];
         await _persistPortfolio();
@@ -573,6 +1253,12 @@ class AppController extends ChangeNotifier {
         }
       }
     } catch (error) {
+      if (storedPayload == null) {
+        // A transient disk timeout while creating a first inventory is not
+        // corrupt user data, and must not permanently block later CRUD retries.
+        if (!_disposed) _portfolioNotice = '持股本機快取暫無法儲存：$error。請稍後重試。';
+        return;
+      }
       // Preserve the corrupt payload for recovery; do not overwrite it with demos.
       _portfolioNotice = '持股讀取失敗，請先備份本機資料：$error';
       _portfolioPositions = [];
@@ -580,7 +1266,7 @@ class AppController extends ChangeNotifier {
       try {
         final original = _preferences?.getString(_portfolioKey);
         if (original != null && _preferences?.getString(_portfolioRecoveryKey) == null) {
-          await _preferences?.setString(_portfolioRecoveryKey, original);
+          await _writePreference(_portfolioRecoveryKey, original);
         }
       } catch (_) {
         // The original primary payload is still protected from replacement.
@@ -588,80 +1274,153 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> _persistPortfolio() async {
-    // Saving unrelated Settings must not erase an unreadable inventory. CRUD
-    // requires a repaired payload; retain a recovery copy and the primary data.
-    if (_disposed) return;
+  bool _portfolioCurrent(int version, String source) => !_disposed &&
+      version == _portfolioRequestVersion && _portfolioSource(_settings) == source;
+
+  Future<void> _persistPortfolio({int? version, String? source}) async {
+    final expectedVersion = version ?? _portfolioRequestVersion;
+    final expectedSource = source ?? _portfolioSource(_settings);
+    bool current() => _portfolioCurrent(expectedVersion, expectedSource);
+    // Keep the original unreadable payload; an unrelated Settings save must
+    // never replace a corrupt inventory with an empty list.
+    if (!current()) return;
     if (_portfolioStorageCorrupt) {
       _portfolioNotice = '持股儲存資料損毀；原始資料保留，設定更新不會覆寫庫存。'
           '請先備份並修復本機資料。';
       return;
     }
-    _captureObservations(_portfolioSource(_settings));
-    final preferences = _preferences ??= await SharedPreferences.getInstance();
-    final saved = await preferences.setString(_portfolioKey, jsonEncode({
+    _captureObservations(expectedSource);
+    final payload = jsonEncode({
       'positions': _portfolioPositions.map((p) => p.toJson()).toList(),
       'mock_quotes': _mockQuoteOverrides.values.map((q) => q.toJson()).toList(),
       'euphoria_percent': _euphoriaPercent,
-      'active_source': _portfolioSource(_settings),
+      'active_source': expectedSource,
       'observations': _observationHistory,
-    }));
+    });
+    final saved = await _writePreference(_portfolioKey, payload, isCurrent: current);
+    if (!current()) return;
     if (!saved) throw StateError('本機持股儲存失敗。');
   }
 
   Future<void> refreshPortfolio({bool forceRefresh = true}) {
     if (_disposed) return Future<void>.value();
     final source = _portfolioSource(_settings);
-    if (_activePortfolioSource == source &&
-        _activePortfolioVersion == _portfolioRequestVersion &&
-        _activePortfolioFuture != null) {
-      if (forceRefresh && !_activePortfolioForce) {
-        return _activePortfolioFuture!.then<void>((_) async {
-          if (_disposed || _portfolioSource(_settings) != source) return;
-          await refreshPortfolio(forceRefresh: true);
-        });
+    final active = _portfolioOperation;
+    if (active != null && active.key == source &&
+        active.version == _portfolioRequestVersion) {
+      if (forceRefresh && !active.force) {
+        active.queuedForce ??= Completer<void>();
+        active.queuedElapsed ??= Stopwatch()..start();
+        return active.queuedForce!.future;
       }
-      return _activePortfolioFuture!;
+      return active.completion.future;
     }
-    final future = _refreshPortfolio(forceRefresh: forceRefresh);
-    _activePortfolioSource = source;
-    _activePortfolioVersion = _portfolioRequestVersion;
-    _activePortfolioForce = forceRefresh;
-    _activePortfolioFuture = future;
-    unawaited(future.whenComplete(() {
-      if (identical(_activePortfolioFuture, future)) {
-        _activePortfolioFuture = null;
-        _activePortfolioSource = null;
-      }
-    }));
-    return future;
+    return _beginPortfolio(forceRefresh: forceRefresh, budget: _portfolioUpdateTimeout);
   }
 
-  Future<void> _refreshPortfolio({required bool forceRefresh}) async {
-    final version = ++_portfolioRequestVersion;
+  Future<void> _beginPortfolio({required bool forceRefresh, required Duration budget}) {
+    _cancelPortfolio();
+    final operation = _RefreshOperation(_portfolioSource(_settings),
+        ++_portfolioRequestVersion, forceRefresh, budget);
+    _portfolioOperation = operation;
+    unawaited(_refreshPortfolio(operation));
+    return operation.completion.future;
+  }
+
+  bool _ownsPortfolio(_RefreshOperation operation) => !_disposed &&
+      identical(_portfolioOperation, operation) &&
+      _portfolioCurrent(operation.version, operation.key);
+
+  void _retirePortfolio(String source, PortfolioRepository repository) {
+    if (identical(_portfolioRepositories[source], repository)) {
+      _portfolioRepositories.remove(source);
+    }
+    try {
+      repository.close();
+    } catch (error, stack) {
+      debugPrint('關閉持股行情服務失敗：$error\n$stack');
+    }
+  }
+
+  void _cancelPortfolio() {
+    final active = _portfolioOperation;
+    if (active == null) return;
+    _portfolioOperation = null;
+    active.cancel();
+    _portfolioLoading = false;
+    final repository = _portfolioRepositories[active.key];
+    if (repository != null) _retirePortfolio(active.key, repository);
+  }
+
+  void _quoteFailure(List<String> symbols, StockMarket market, Object error) {
+    for (final symbol in symbols) {
+      final key = '${market.name}:$symbol';
+      final previous = _portfolioQuotes[key];
+      if (previous != null) _cachedQuoteKeys.add(key);
+      _portfolioErrors[key] = previous == null
+          ? '無法取得可驗證行情：$error'
+          : '更新失敗：$error；顯示 ${previous.quoteTimestamp.toLocal()} 的快取行情。';
+    }
+  }
+
+  Future<void> _refreshPortfolio(_RefreshOperation operation) async {
     final settings = _settings;
     final holdings = List<PortfolioPosition>.of(_portfolioPositions);
-    _portfolioLoading = true;
-    // Keep the last real quote visible while updating; never substitute a
-    // demonstration quote on a failed production request.
-    final holdingKeys = holdings.map((p) => p.key).toSet();
-    _portfolioQuotes.removeWhere((key, _) => !holdingKeys.contains(key));
-    _cachedQuoteKeys.removeWhere((key) => !holdingKeys.contains(key));
-    _portfolioErrors.clear();
-    _notify();
+    Duration remaining() => operation.remaining;
     try {
+      if (!_ownsPortfolio(operation)) return;
+      _portfolioLoading = true;
+      // A failed production request retains only the previous verified quote,
+      // with an explicit cached marker. It never substitutes mock prices.
+      final holdingKeys = holdings.map((p) => p.key).toSet();
+      _portfolioQuotes.removeWhere((key, _) => !holdingKeys.contains(key));
+      _cachedQuoteKeys.removeWhere((key) => !holdingKeys.contains(key));
+      _portfolioErrors.clear();
+      _portfolioDataWarnings.clear();
+      _notify();
       for (final market in StockMarket.values) {
-        final symbols = holdings.where((p) => p.market == market).map((p) => p.symbol).toList();
+        if (!_ownsPortfolio(operation)) return;
+        final symbols = holdings.where((p) => p.market == market)
+            .map((p) => p.symbol).toList();
         if (symbols.isEmpty) continue;
+        PortfolioRepository? repository;
         try {
-          final source = _portfolioSource(settings);
-          final repository = _portfolioRepositories.putIfAbsent(source,
+          // A single absolute budget covers both markets and every chunk;
+          // adding more holdings must not extend the spinner indefinitely.
+          if (remaining() <= Duration.zero) {
+            throw TimeoutException('持股行情更新已達 ${_portfolioUpdateTimeout.inSeconds} 秒總時限。');
+          }
+          repository = _portfolioRepositories.putIfAbsent(operation.key,
               () => _portfolioRepositoryFactory(settings));
-          final snapshot = await repository.fetch(market, symbols, forceRefresh: forceRefresh);
-          if (_disposed || version != _portfolioRequestVersion) return;
+          final snapshot = await _awaitUpdate(repository.fetch(market, symbols,
+              forceRefresh: operation.force), operation, remaining());
+          if (!_ownsPortfolio(operation)) return;
+          if (snapshot.source.trim().isEmpty ||
+              (!settings.useMockData && _demoSource(snapshot.source))) {
+            throw const FormatException('持股行情回應的來源無效，未採用該市場回應。');
+          }
+          for (final warning in snapshot.warnings) {
+            if (_portfolioDataWarnings.length >= 8) break;
+            final text = warning.trim();
+            if (text.isEmpty) continue;
+            final bounded = String.fromCharCodes(text.runes.take(240));
+            _portfolioDataWarnings.add('${market.label}：$bounded');
+          }
+          final accepted = <String>{};
           for (final entry in snapshot.quotes.entries) {
+            if (!symbols.contains(entry.key)) {
+              // Never attach an unsolicited symbol to a user's inventory.
+              continue;
+            }
             final key = '${market.name}:${entry.key}';
             final quote = entry.value;
+            if (quote.market != market || quote.symbol != entry.key ||
+                (!settings.useMockData && _demoSource(quote.source))) {
+              _quoteFailure([entry.key], market,
+                  const FormatException('此股票的市場、代碼或行情來源不符，已拒絕該筆資料。'));
+              continue;
+            }
+            accepted.add(entry.key);
             _portfolioQuotes[key] = quote;
             if (quote.isCached || quote.isStale) {
               _cachedQuoteKeys.add(key);
@@ -670,28 +1429,29 @@ class AppController extends ChangeNotifier {
             }
           }
           for (final entry in snapshot.errors.entries) {
-            _portfolioErrors['${market.name}:${entry.key}'] = entry.value;
+            if (!symbols.contains(entry.key) || accepted.contains(entry.key)) continue;
+            _portfolioErrors['${market.name}:${entry.key}'] = entry.value.trim().isEmpty
+                ? '此股票未取得可驗證行情。' : entry.value;
           }
           for (final symbol in symbols) {
             final key = '${market.name}:$symbol';
-            if (!snapshot.quotes.containsKey(symbol)) {
+            if (!accepted.contains(symbol)) {
               _portfolioErrors.putIfAbsent(key, () => '資料來源未回傳可驗證行情。');
               if (_portfolioQuotes.containsKey(key)) _cachedQuoteKeys.add(key);
             }
           }
-        } catch (error) {
-          if (_disposed || version != _portfolioRequestVersion) return;
-          for (final symbol in symbols) {
-            final key = '${market.name}:$symbol';
-            final previous = _portfolioQuotes[key];
-            if (previous != null) _cachedQuoteKeys.add(key);
-            _portfolioErrors[key] = previous == null
-                ? '無法取得可驗證行情：$error'
-                : '更新失敗：$error；顯示 ${previous.quoteTimestamp.toLocal()} 的快取行情。';
+        } on _UpdateCancelled {
+          return;
+        } catch (error, stack) {
+          if (!_ownsPortfolio(operation)) return;
+          if (error is TimeoutException && repository != null) {
+            _retirePortfolio(operation.key, repository);
           }
+          debugPrint('持股行情更新失敗：$error\n$stack');
+          _quoteFailure(symbols, market, error);
         }
       }
-      if (_disposed || version != _portfolioRequestVersion) return;
+      if (!_ownsPortfolio(operation)) return;
       if (settings.useMockData) {
         for (final holding in holdings) {
           final manual = _mockQuoteOverrides[holding.key];
@@ -702,19 +1462,51 @@ class AppController extends ChangeNotifier {
           }
         }
       }
-      await _observePortfolio();
-    } finally {
-      if (!_disposed && version == _portfolioRequestVersion) {
-        _portfolioLoading = false;
-        _notify();
+      // Record a verified first market's observed 2R peak even when a later
+      // market exhausted the budget. Only persistence may be deferred.
+      await _observePortfolio(version: operation.version, source: operation.key,
+          persistenceBudget: remaining());
+    } on _UpdateCancelled {
+      // The source owner cancelled this operation; no notice in the new source.
+    } catch (error, stack) {
+      debugPrint('持股診斷更新失敗：$error\n$stack');
+      if (_ownsPortfolio(operation)) {
+        _portfolioNotice = '持股更新失敗：$error。請下拉重試；保留上次可驗證行情。';
       }
+    } finally {
+      final owned = _ownsPortfolio(operation);
+      if (identical(_portfolioOperation, operation)) {
+        _portfolioOperation = null;
+        _portfolioLoading = false;
+      }
+      operation.finish();
+      if (owned && operation.queuedForce != null && !_disposed &&
+          _portfolioSource(_settings) == operation.key) {
+        try {
+          final remaining = _portfolioUpdateTimeout - operation.queuedElapsed!.elapsed;
+          if (remaining > Duration.zero) {
+            await _beginPortfolio(forceRefresh: true, budget: remaining);
+          } else {
+            _portfolioNotice = '持股更新已達 ${_portfolioUpdateTimeout.inSeconds} 秒總時限，請重試。';
+          }
+        } finally {
+          operation.finishQueued();
+        }
+      } else {
+        operation.finishQueued();
+      }
+      if (!_disposed && _portfolioOperation == null) _notify();
     }
   }
 
-  Future<void> _observePortfolio() async {
+  Future<void> _observePortfolio({int? version, String? source,
+      Duration? persistenceBudget}) async {
+    final expectedVersion = version ?? _portfolioRequestVersion;
+    final expectedSource = source ?? _portfolioSource(_settings);
+    bool current() => _portfolioCurrent(expectedVersion, expectedSource);
+    if (!current()) return;
     var changed = false;
-    final sourceHistory = _observationHistory.putIfAbsent(
-        _portfolioSource(_settings), () => {});
+    final sourceHistory = _observationHistory.putIfAbsent(expectedSource, () => {});
     _portfolioPositions = _portfolioPositions.map((holding) {
       // Cached data may be inspected, but cannot create a newly observed peak
       // or arm a breakeven stop. Only fresh verified quotes alter live history.
@@ -737,9 +1529,20 @@ class AppController extends ChangeNotifier {
         'trailing_stop': next.trailingStop, 'observed_at_ms': timestamp};
       return next;
     }).toList();
-    if (changed) {
-      try { await _persistPortfolio(); }
-      catch (error) { _portfolioNotice = '最高 R 與移動停損儲存失敗：$error'; }
+    if (changed) _dirtyObservationSources.add(expectedSource);
+    if (_dirtyObservationSources.contains(expectedSource)) {
+      if (persistenceBudget != null && persistenceBudget <= Duration.zero) {
+        _portfolioNotice = '本次行情更新已達總時限；已保留取得行情的診斷，觀察紀錄將於下次更新儲存。';
+        return;
+      }
+      try {
+        await _persistPortfolio(version: expectedVersion, source: expectedSource)
+            .timeout(persistenceBudget ?? _storageTimeout);
+        if (current()) _dirtyObservationSources.remove(expectedSource);
+      } catch (error, stack) {
+        debugPrint('最高 R 與移動停損儲存失敗：$error\n$stack');
+        if (current()) _portfolioNotice = '最高 R 與移動停損儲存失敗：$error';
+      }
     }
   }
 
@@ -840,15 +1643,28 @@ class AppController extends ChangeNotifier {
     _disposed = true;
     _pollTimer?.cancel();
     _pollTimer = null;
+    _resetBackendWaiting();
+    _cancelScan();
+    _cancelPortfolio();
+    _pollVersion++;
+    _pollBusy = false;
     _requestVersion++;
     _portfolioRequestVersion++;
     _reminders.dispose();
     for (final repository in _candidateRepositories.values.toSet()) {
-      if (repository is RealCandidateRepository) repository.close();
-      if (repository is DirectLiveCandidateRepository) repository.close();
+      try {
+        if (repository is RealCandidateRepository) repository.close();
+        if (repository is DirectLiveCandidateRepository) repository.close();
+      } catch (error, stack) {
+        debugPrint('關閉行情掃描服務失敗：$error\n$stack');
+      }
     }
     for (final repository in _portfolioRepositories.values.toSet()) {
-      repository.close();
+      try {
+        repository.close();
+      } catch (error, stack) {
+        debugPrint('關閉持股行情服務失敗：$error\n$stack');
+      }
     }
     super.dispose();
   }

@@ -5,14 +5,18 @@ import 'package:http/http.dart' as http;
 
 import '../models/portfolio_position.dart';
 import '../models/stock_candidate.dart';
+import 'network_request.dart';
 
 class PortfolioQuoteSnapshot {
   PortfolioQuoteSnapshot({required Map<String, PortfolioQuote> quotes,
-    required Map<String, String> errors, required this.source})
-      : quotes = Map.unmodifiable(quotes), errors = Map.unmodifiable(errors);
+    required Map<String, String> errors, required this.source,
+    List<String> warnings = const []})
+      : quotes = Map.unmodifiable(quotes), errors = Map.unmodifiable(errors),
+        warnings = List.unmodifiable(warnings);
   final Map<String, PortfolioQuote> quotes;
   final Map<String, String> errors;
   final String source;
+  final List<String> warnings;
 }
 
 abstract interface class PortfolioRepository {
@@ -21,23 +25,24 @@ abstract interface class PortfolioRepository {
 }
 
 class RealPortfolioRepository implements PortfolioRepository {
-  RealPortfolioRepository({required String baseUrl, http.Client? client})
-      : _baseUri = Uri.parse(baseUrl), _client = client ?? http.Client(),
-        _ownsClient = client == null {
+  RealPortfolioRepository({required String baseUrl, http.Client? client,
+      Duration requestTimeout = NetworkRequest.defaultTimeout})
+      : _baseUri = Uri.parse(baseUrl),
+        _network = NetworkRequest(client: client, timeout: requestTimeout) {
     if (!['http', 'https'].contains(_baseUri.scheme) || _baseUri.host.isEmpty ||
         _baseUri.userInfo.isNotEmpty || _baseUri.hasQuery || _baseUri.hasFragment) {
       throw ArgumentError('行情 API 網址格式無效。');
     }
   }
   final Uri _baseUri;
-  final http.Client _client;
-  final bool _ownsClient;
+  final NetworkRequest _network;
 
   @override
   Future<PortfolioQuoteSnapshot> fetch(StockMarket market, List<String> symbols, {bool forceRefresh = false}) async {
     final quotes = <String, PortfolioQuote>{};
     final errors = <String, String>{};
     final sources = <String>{};
+    final warnings = <String>[];
     // The backend permits at most 50 symbols per request. Keep successes from
     // other chunks if a single request fails, and identify every missing quote.
     for (var start = 0; start < symbols.length; start += 50) {
@@ -47,12 +52,16 @@ class RealPortfolioRepository implements PortfolioRepository {
         quotes.addAll(snapshot.quotes);
         errors.addAll(snapshot.errors);
         sources.add(snapshot.source);
+        warnings.addAll(snapshot.warnings.take(20 - warnings.length));
       } catch (error) {
-        for (final symbol in batch) { errors[symbol] = '行情批次取得失敗：$error'; }
+        for (final symbol in batch) {
+          errors[symbol] = _boundedQuoteMessage('行情批次取得失敗：$error');
+        }
       }
     }
     return PortfolioQuoteSnapshot(quotes: quotes, errors: errors,
-      source: sources.isEmpty ? 'API 行情尚不可用' : sources.join('／'));
+      source: sources.isEmpty ? 'API 行情尚不可用' : sources.join('／'),
+      warnings: warnings);
   }
 
   Future<PortfolioQuoteSnapshot> _fetchBatch(StockMarket market, List<String> symbols) async {
@@ -64,42 +73,114 @@ class RealPortfolioRepository implements PortfolioRepository {
       queryParameters: {'market': market.name, 'symbols': symbols.join(','), 'demo': 'false'},
     );
     try {
-      final response = await _client.get(endpoint,
-          headers: {'Accept': 'application/json'}).timeout(const Duration(seconds: 30));
+      final response = await _network.get(endpoint,
+          headers: {'Accept': 'application/json'});
       if (response.statusCode != 200) throw StateError('行情 API HTTP ${response.statusCode}');
       final data = jsonDecode(utf8.decode(response.bodyBytes));
       if (data is! Map<String, dynamic> || data['market'] != market.name ||
           data['quotes'] is! List || data['errors'] is! Map || data['source'] is! String) {
         throw const FormatException('行情回應格式無效。');
       }
-      parseApiTimestamp(data['generated_at'], 'generated_at');
+      final generatedAt = parseApiTimestamp(data['generated_at'], 'generated_at');
       final source = (data['source'] as String).trim();
       if (source.isEmpty || _isDemoSource(source)) {
         throw const FormatException('實際行情 API 回傳了示範來源或空白來源。');
       }
-      final quotes = <String, PortfolioQuote>{};
-      for (final row in data['quotes'] as List) {
-        if (row is! Map<String, dynamic>) throw const FormatException('行情必須為 JSON 物件。');
-        final quote = PortfolioQuote.fromJson(row);
-        if (quote.market != market || !symbols.contains(quote.symbol) ||
-            quotes.containsKey(quote.symbol) || _isDemoSource(quote.source)) {
-          throw const FormatException('行情含重複、不同市場或未要求的股票。');
+      for (final flag in ['is_cached', 'is_stale', 'stale']) {
+        if (data.containsKey(flag) && data[flag] is! bool) {
+          throw FormatException('$flag 回應旗標必須為布林值。');
         }
-        quotes[quote.symbol] = quote;
       }
+      final quotes = <String, PortfolioQuote>{};
       final errors = <String, String>{};
-      for (final entry in (data['errors'] as Map).entries) {
-        if (entry.key is! String || entry.value is! String ||
-            (entry.value as String).trim().isEmpty ||
-            !symbols.contains(entry.key) || quotes.containsKey(entry.key)) {
-          throw const FormatException('行情錯誤訊息格式無效。');
+      final warnings = <String>[];
+      final requested = symbols.toSet();
+      final seenSymbols = <String>{};
+      final rows = data['quotes'] as List;
+      void warn(String message) {
+        if (warnings.length < 20) warnings.add(_boundedQuoteMessage(message));
+      }
+      for (var index = 0; index < rows.length; index++) {
+        final row = rows[index];
+        final rawSymbol = row is Map<String, dynamic> ? row['symbol'] : null;
+        final symbol = rawSymbol is String ? rawSymbol.trim() : null;
+        try {
+          if (row is! Map<String, dynamic>) {
+            throw const FormatException('行情必須為 JSON 物件。');
+          }
+          if (symbol != null && requested.contains(symbol) && !seenSymbols.add(symbol)) {
+            quotes.remove(symbol);
+            throw const FormatException('重複股票行情；該代碼所有回應已排除。');
+          }
+          for (final flag in ['is_cached', 'is_stale']) {
+            if (row.containsKey(flag) && row[flag] is! bool) {
+              throw FormatException('$flag 個股旗標必須為布林值。');
+            }
+          }
+          if (row['cache_warning'] != null && row['cache_warning'] is! String) {
+            throw const FormatException('個股快取警告必須為字串。');
+          }
+          final quote = PortfolioQuote.fromJson(row);
+          if (quote.market != market || !requested.contains(quote.symbol) ||
+              _isDemoSource(quote.source)) {
+            throw const FormatException('行情來自不同市場、未要求的股票或示範來源。');
+          }
+          final latestAllowed = generatedAt.add(const Duration(minutes: 1));
+          if (quote.quoteTimestamp.isAfter(latestAllowed) ||
+              (quote.fetchedAt?.isAfter(latestAllowed) ?? false)) {
+            throw const FormatException('個股報價時間晚於行情回應時間。');
+          }
+          // Any explicit cached/stale marker freezes observation history. The
+          // original provider quote/close timestamps are preserved unchanged.
+          final stale = quote.isStale || data['stale'] == true || data['is_stale'] == true;
+          final cached = quote.isCached || data['is_cached'] == true || stale ||
+              (quote.cacheWarning?.trim().isNotEmpty ?? false);
+          quotes[quote.symbol] = PortfolioQuote(
+            symbol: quote.symbol, name: quote.name, market: quote.market,
+            currentPrice: quote.currentPrice, ema9: quote.ema9,
+            ema21: quote.ema21, ema50: quote.ema50, lastClose: quote.lastClose,
+            closeConfirmed: quote.closeConfirmed, quoteTimestamp: quote.quoteTimestamp,
+            closeTimestamp: quote.closeTimestamp, source: quote.source,
+            isLargeLiquid: quote.isLargeLiquid, isCached: cached, isStale: stale,
+            cacheWarning: quote.cacheWarning ?? (cached ? 'API 標示為快取行情；最高 R 與停損保持不變。' : null),
+            fetchedAt: quote.fetchedAt,
+          );
+        } catch (error) {
+          final reason = error is FormatException ? error.message.toString() : error.runtimeType.toString();
+          final label = symbol?.isNotEmpty == true ? symbol! : '第 ${index + 1} 筆行情';
+          final message = _boundedQuoteMessage('$label 行情已排除：$reason');
+          warn(message);
+          if (symbol != null && requested.contains(symbol)) errors[symbol] = message;
         }
-        errors[entry.key as String] = entry.value as String;
+      }
+      for (final entry in (data['errors'] as Map).entries) {
+        final key = entry.key;
+        final value = entry.value;
+        if (key is! String || !requested.contains(key)) {
+          warn('已忽略未要求股票或無代碼的 API 錯誤訊息。');
+          continue;
+        }
+        if (value is! String || value.trim().isEmpty) {
+          quotes.remove(key);
+          errors[key] = 'API 回傳的個股錯誤訊息格式無效；該股保留上次快取。';
+          continue;
+        }
+        if (quotes.remove(key) != null) {
+          errors[key] = _boundedQuoteMessage('同一股票同時回傳行情與錯誤：$value；行情已排除。');
+          warn('$key 行情與錯誤互相矛盾，該股保留上次快取。');
+        } else {
+          errors.putIfAbsent(key, () => _boundedQuoteMessage(value));
+        }
       }
       for (final symbol in symbols) {
         if (!quotes.containsKey(symbol)) errors.putIfAbsent(symbol, () => 'API 未提供可驗證行情');
       }
-      return PortfolioQuoteSnapshot(quotes: quotes, errors: errors, source: source);
+      if (rows.isNotEmpty && quotes.isEmpty) {
+        throw FormatException('非空行情清單全部無法驗證：'
+            '${errors.values.take(3).join('；')}');
+      }
+      return PortfolioQuoteSnapshot(quotes: quotes, errors: errors,
+          source: source, warnings: warnings);
     } on TimeoutException {
       throw StateError('持股行情連線逾時，請稍後重試。');
     } on http.ClientException {
@@ -108,11 +189,14 @@ class RealPortfolioRepository implements PortfolioRepository {
   }
 
   @override
-  void close() { if (_ownsClient) _client.close(); }
+  void close() { _network.close(); }
 }
 
 bool _isDemoSource(String value) =>
     RegExp(r'mock|demo|fictit|假|虛構|示範|離線', caseSensitive: false).hasMatch(value);
+
+String _boundedQuoteMessage(String value) =>
+    value.length <= 240 ? value : '${value.substring(0, 240)}…';
 
 /// Fixed fictitious daily snapshots. Unknown symbols require manual demo input.
 class MockPortfolioRepository implements PortfolioRepository {

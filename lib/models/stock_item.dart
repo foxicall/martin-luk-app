@@ -16,8 +16,8 @@ class StockItem {
   })  : aliases = List.unmodifiable(aliases),
         shortCodes = List.unmodifiable(shortCodes) {
     if (symbol.isEmpty || code.isEmpty ||
-        (market == StockMarket.tw && (!RegExp(r'^\d{4}\.TW$').hasMatch(symbol) ||
-            code != symbol.substring(0, symbol.length - 3))) ||
+        (market == StockMarket.tw && (!RegExp(r'^\d{4}\.(?:TW|TWO)$').hasMatch(symbol) ||
+            code != symbol.split('.').first)) ||
         (market == StockMarket.us && (!RegExp(r'^[A-Z][A-Z0-9]{0,14}(?:-[A-Z])?$').hasMatch(symbol) ||
             code != symbol))) {
       throw const FormatException('股票元資料的市場或標準代碼無效。');

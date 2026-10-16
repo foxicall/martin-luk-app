@@ -1,0 +1,95 @@
+{
+  "retrieved_at": "2026-10-15",
+  "retrieval_method": "Read-only GitHub connector; original CRLF normalized to LF.",
+  "files": [
+    {
+      "path": "nasdaqlisted.txt",
+      "upstream": "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
+      "mirror": "https://github.com/Cperkin/CanadianStats/blob/b4cf17386823dd7638031ad2a22c3a73edacea92/data/sources/nasdaqlisted.txt",
+      "mirror_commit": "b4cf17386823dd7638031ad2a22c3a73edacea92",
+      "mirror_commit_time": "2026-10-14T11:25:44Z",
+      "source_footer": "File Creation Time: 1014202607:00",
+      "warning": "Original provider snapshot time is supplied without explicit timezone. Directory includes ETFs, preferreds, ADRs, warrants, units, notes and test symbols; filter explicitly.",
+      "retrieved_utf8_lf_sha256": "cece78c91189d426a8ecc7bee687c9d15f6eab766c99c93ed8093468e77cb335"
+    },
+    {
+      "path": "otherlisted.txt",
+      "upstream": "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
+      "mirror": "https://github.com/Cperkin/CanadianStats/blob/b4cf17386823dd7638031ad2a22c3a73edacea92/data/sources/otherlisted.txt",
+      "mirror_commit": "b4cf17386823dd7638031ad2a22c3a73edacea92",
+      "mirror_commit_time": "2026-10-14T11:25:44Z",
+      "source_footer": "File Creation Time: 1014202607:00",
+      "warning": "All exchange categories included in raw; select N/A for NYSE/NYSE American. Has no reliable comprehensive ordinary-stock security_type field.",
+      "retrieved_utf8_lf_sha256": "f3f7bb285ec0b89121ea798c301d6016de7bb34808f7450b7084e61bafc58088"
+    },
+    {
+      "path": "tw_stock_list_20261006.csv",
+      "upstream": [
+        "https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv",
+        "https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv"
+      ],
+      "mirror": "https://github.com/w2xg2022/twstock-alphabeta/blob/b3fad78de8599316b97d17309552af15e7157457/data/stock_list.csv",
+      "mirror_commit": "b3fad78de8599316b97d17309552af15e7157457",
+      "mirror_commit_time": "2026-10-06T15:01:35Z",
+      "records": 1988,
+      "twse": 1095,
+      "tpex": 893,
+      "warning": "Issuer directory; no CFI field. Fetch script can reuse prior per-market list on upstream failure; commit time is not proof every row freshly retrieved. Needs live official refresh before claiming current complete ordinary-stock membership. Confirmed includes TDR issuers such as 9103/9105/9110/9136 and six-digit 910322/910861; digit-only filtering is insufficient.",
+      "with_march_cfi_es_intersection_count": 1941,
+      "not_in_march_es_count": 47,
+      "retrieved_utf8_lf_sha256": "85c8ef83a660f31e11aa0244f80cbaf3a35641f018643451495317f714d99f26"
+    },
+    {
+      "path": "twse_equities.csv",
+      "upstream": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2",
+      "mirror": "https://github.com/mlouielu/twstock/blob/5c3f64fdf178b11e604f8a84d399b9bf19add4f6/twstock/codes/twse_equities.csv",
+      "mirror_blob": "c355c49084be299ca0c1001372cd1dece88ab9e8",
+      "mirror_commit_time": "2026-03-26T14:21:37Z",
+      "ordinary_four_digit_count": 1069,
+      "warning": "Old CFI-bearing snapshot; suitable bilingual/sector enrichment and validation, not a current full universe.",
+      "retrieved_utf8_lf_sha256": "5fe86377d6b85ec73c3411909eff619ff79eb32ab6e0f1546917d8dbad39b359"
+    },
+    {
+      "path": "tpex_equities.csv",
+      "upstream": "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4",
+      "mirror": "https://github.com/mlouielu/twstock/blob/5c3f64fdf178b11e604f8a84d399b9bf19add4f6/twstock/codes/tpex_equities.csv",
+      "mirror_blob": "bdf7602aabfd6ae0b9e62c8025a5cae23db36524",
+      "mirror_commit_time": "2026-03-26T14:21:37Z",
+      "ordinary_four_digit_count": 880,
+      "warning": "Old CFI-bearing snapshot; no claim of current full membership.",
+      "retrieved_utf8_lf_sha256": "586ca220c3cbc18048e87d83bcf863704e2e67fecea7e35ed7fb2d5bb931bae4"
+    },
+    {
+      "path": "tw_valuation_latest_20261014.json",
+      "mirror": "https://github.com/roseamyclara/tw-stock-valuation/blob/main/docs/data/latest.json",
+      "metadata_file": "tw_valuation_metadata_20261014.json",
+      "provider_as_of": "2026-10-14",
+      "records": 2351,
+      "listed": 1088,
+      "otc": 892,
+      "esb": 371,
+      "warning": "Derived valuation dataset; do not include ESB (emerging) in listed/OTC scope. Suitable current names/sector cross-check only; record membership may omit profiles without valuations.",
+      "retrieved_utf8_lf_sha256": "d6367598cdb0118c44489c36afd0d4d5fbe4b2367696fef7130df80fd3ca6b2c"
+    }
+  ],
+  "official_attempts_failed": [
+    "TWSE ISIN pages timed out in web tool",
+    "TWSE/TPEx OpenAPI could not be fetched by web tool",
+    "MOPS CSV endpoint rejected by web tool as unsupported text/csv content-type"
+  ],
+  "no_permissions_requested": true,
+  "no_local_git_commands": true,
+  "bundled_files": {
+    "nasdaqlisted.txt": "cece78c91189d426a8ecc7bee687c9d15f6eab766c99c93ed8093468e77cb335",
+    "otherlisted.txt": "f3f7bb285ec0b89121ea798c301d6016de7bb34808f7450b7084e61bafc58088",
+    "tpex_equities_common_20260326.csv": "47bbe3017ae368319d08f17e7e2a43085318daa22a0a35a054b9cc2a9dd47457",
+    "tw_names_20261014.json": "f17f0f145b15c5fd2f880f312cbe31843e919b9be9e7c9b8c71dd36a0c03b663",
+    "tw_stock_list_20261006.csv": "85c8ef83a660f31e11aa0244f80cbaf3a35641f018643451495317f714d99f26",
+    "twse_equities_common_20260326.csv": "f7ecc8e40661e6e357cd997d44f4435fcc1eee4bc22a5610df7b0470a0d619f6"
+  },
+  "derivations": {
+    "twse_equities_common_20260326.csv": "twse_equities.csv: code four digits and CFI starts ES; retain only code/name/market/group/CFI.",
+    "tpex_equities_common_20260326.csv": "tpex_equities.csv: same four-digit/ES selection.",
+    "tw_names_20261014.json": "tw_valuation_latest_20261014.json: only listed/otc identity fields c/n/m/i; no prices, capitalization or indicators."
+  }
+}

@@ -104,7 +104,7 @@ class ReminderService {
         hour: 8,
         minute: 45,
         title: '美股盤前評估提醒',
-        body: '美東時間 08:45。開啟 App 更新 S&P 500 候選清單；休市日無須評估。',
+        body: '美東時間 08:45。開啟 App 更新美股三大交易所候選清單；休市日無須評估。',
         market: 'us',
       );
       await _scheduleWeekdays(

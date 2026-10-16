@@ -4,14 +4,21 @@ import 'package:flutter/services.dart';
 import '../app_controller.dart';
 import '../models/app_settings.dart';
 import '../models/stock_candidate.dart';
+import '../services/backend_connection_service.dart';
 
 /// User preferences are edited together and persisted by [AppController].
 /// Notification permission is requested only after explicitly enabling the
 /// reminders and pressing save.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.controller});
+  const SettingsScreen({
+    super.key,
+    required this.controller,
+    this.connectionService,
+  });
 
   final AppController controller;
+  /// Optional caller-owned service for tests or custom HTTP transports.
+  final BackendConnectionService? connectionService;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -30,12 +37,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _darkMode;
   late bool _remindersEnabled;
   bool _saving = false;
+  bool _testingApi = false;
+  int _apiRevision = 0;
+  BackendCapabilities? _capabilities;
+  String? _connectionError;
+  late final BackendConnectionService _connectionService;
 
   @override
   void initState() {
     super.initState();
     final settings = widget.controller.settings;
     _apiUrl = TextEditingController(text: settings.apiBaseUrl);
+    _apiUrl.addListener(_invalidateConnection);
+    _connectionService = widget.connectionService ?? BackendConnectionService();
     _twAdr = TextEditingController(text: _number(settings.twAdrThreshold));
     _usAdr = TextEditingController(text: _number(settings.usAdrThreshold));
     _twEquity = TextEditingController(text: _number(settings.twEquity));
@@ -71,6 +85,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    _apiUrl.removeListener(_invalidateConnection);
+    if (widget.connectionService == null) _connectionService.close();
     _apiUrl.dispose();
     _twAdr.dispose();
     _usAdr.dispose();
@@ -95,17 +111,109 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // Direct Yahoo mode works on Android without a backend URL. Validate the
     // optional relay only when it is the selected production data provider.
     if (_useMockData || _dataProvider != 'backend') return null;
-    final uri = Uri.tryParse(value);
-    if (uri == null ||
-        !uri.hasAuthority ||
-        uri.host.isEmpty ||
-        (uri.scheme != 'http' && uri.scheme != 'https') ||
-        uri.userInfo.isNotEmpty ||
-        uri.hasQuery ||
-        uri.hasFragment) {
-      return '請輸入完整的 http:// 或 https:// API 網址';
+    try {
+      BackendConnectionService.parseBaseUri(value);
+    } on BackendConnectionException catch (error) {
+      return error.message;
     }
     return null;
+  }
+
+  void _invalidateConnection() {
+    _apiRevision++;
+    if (!mounted) return;
+    setState(() {
+      _capabilities = null;
+      _connectionError = null;
+    });
+  }
+
+  Future<void> _testApiConnection() async {
+    if (_testingApi || _saving || _useMockData) return;
+    final revision = _apiRevision;
+    final url = _apiUrl.text.trim();
+    setState(() {
+      _testingApi = true;
+      _capabilities = null;
+      _connectionError = null;
+    });
+    try {
+      final result = await _connectionService.testConnection(url);
+      if (!mounted || _apiRevision != revision) return;
+      setState(() => _capabilities = result);
+    } catch (error) {
+      if (!mounted || _apiRevision != revision) return;
+      setState(() => _connectionError = '$error');
+    } finally {
+      if (mounted) setState(() => _testingApi = false);
+    }
+  }
+
+  Widget _backendSetupPanel() {
+    final capabilities = _capabilities;
+    return Container(
+      key: const ValueKey('settings-backend-setup'),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('尚未部署 Python API？',
+              style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          // Keep the explicit connection action above the longer deployment
+          // instructions so it is easy to reach on a compact phone display.
+          OutlinedButton.icon(
+            key: const ValueKey('settings-test-api'),
+            onPressed: _testingApi || _saving || _useMockData
+                ? null : _testApiConnection,
+            icon: _testingApi
+                ? const SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.wifi_tethering),
+            label: Text(_testingApi ? '正在測試 API…' : '測試 API 連線'),
+          ),
+          const SizedBox(height: 8),
+          if (_connectionError != null)
+            Text(_connectionError!,
+                key: const ValueKey('settings-api-error'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error))
+          else if (capabilities != null)
+            Text(
+              'API 可連線：${capabilities.scopeLabel}；'
+              '每頁 ${capabilities.pageSize} 檔，輪掃頁面設定 '
+              '${capabilities.pageIntervalSeconds.toStringAsFixed(0)} 秒'
+              '（下拉可提早更新）。\n'
+              '僅確認 API 契約相容，尚未驗證行情供應商或真實報價；'
+              '請儲存後回總覽檢查資料時間與掃描狀態。',
+              key: const ValueKey('settings-api-success'),
+            )
+          else
+            const Text('尚未測試 API。儲存設定不代表已取得真實行情。',
+                key: ValueKey('settings-api-unchecked')),
+          const SizedBox(height: 12),
+          const Text(
+            '1. 將完整專案更新到 GitHub，依 CLOUD_API_GUIDE.md 部署 Render 服務。\n'
+            '2. 在 Render 建立 Blueprint，等待部署完成，複製平台實際提供的 HTTPS 網址。\n'
+            '3. 填入上方基底網址，測試 API 連線，再儲存設定並回總覽查看掃描進度。',
+          ),
+          const SizedBox(height: 8),
+          const SelectableText('https://dashboard.render.com/'),
+          const SizedBox(height: 8),
+          const Text(
+            '沒有部署就沒有可填的雲端網址；不會自動建立服務。'
+            '免費服務可能休眠，先在瀏覽器開啟網址加 /health 等待喚醒。\n'
+            '全股票池以分頁輪掃；App 在前台時才持續請求下一頁，'
+            '手機退出後不保證掃完全部股票。推薦清單只呈現最近一頁，並非全市場累積排名。',
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _save() async {
@@ -133,7 +241,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() => _remindersEnabled = persisted.remindersEnabled);
       final error = widget.controller.error;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error ?? '設定已儲存，候選清單已更新')),
+        SnackBar(content: Text(error ?? (widget.controller.waitingForBackendScan
+            ? '設定已儲存，背景掃描已啟動；可回總覽查看進度。'
+            : '設定已儲存，行情讀取已結束'))),
       );
     } catch (error) {
       if (!mounted) return;
@@ -187,7 +297,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Row(children: [
               Icon(icon, color: Theme.of(context).colorScheme.primary),
               const SizedBox(width: 10),
-              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              Expanded(
+                child: Text(title,
+                    style: Theme.of(context).textTheme.titleMedium),
+              ),
             ]),
             const SizedBox(height: 16),
             ...children,
@@ -234,13 +347,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           DropdownButtonFormField<String>(
                             key: const ValueKey('settings-data-provider'),
                             value: _dataProvider,
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: '正式行情來源',
                               border: OutlineInputBorder(),
                             ),
                             items: const [
-                              DropdownMenuItem(value: 'direct', child: Text('Yahoo Finance · 手機直接連線')),
-                              DropdownMenuItem(value: 'backend', child: Text('Python API · 自訂中繼')),
+                              DropdownMenuItem(
+                                value: 'direct',
+                                child: Text('Yahoo Finance · 手機直接連線',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                              ),
+                              DropdownMenuItem(
+                                value: 'backend',
+                                child: Text('Python API · 雲端／自訂中繼',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                              ),
                             ],
                             onChanged: _saving || _useMockData ? null : (value) {
                               if (value != null) setState(() => _dataProvider = value);
@@ -251,7 +375,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ? '示範模式需明確開啟；連線失敗不會自動切換到假資料。'
                               : _dataProvider == 'direct'
                                   ? 'Android 直接取得 Yahoo 日 K 與最新可用報價，並在裝置上計算 ADR、EMA 與動能。行情可能延遲。'
-                                  : '經您的 Python API 取得行情與掃描結果。'),
+                                  : '由 Python API 背景分批掃描，手機快速讀取進度與快照；沒有符合股票時正常顯示 0 檔。'),
+                          if (_dataProvider == 'direct' && !_useMockData) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              '台股直連依上市／上櫃普通股完整名單分頁續掃，不需部署 Python API；'
+                              '前台每次只處理一頁，保留本輪累積候選與各股原行情時間。'
+                              '美股直連仍評估核心精選 30 檔；美股全股票池輪掃可選用 Python API。'
+                              '雲端部署方式見專案 CLOUD_API_GUIDE.md。',
+                              key: ValueKey('settings-direct-scope'),
+                            ),
+                          ],
                           if (_dataProvider == 'backend') ...[
                           const SizedBox(height: 12),
                           TextFormField(
@@ -262,15 +396,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             autocorrect: false,
                             decoration: InputDecoration(
                               labelText: 'Python API 基底網址',
-                              hintText: 'http://192.168.1.100:8000',
+                              hintText: 'https://你的服務名稱.onrender.com',
                               helperText: _useMockData
                                   ? '示範模式不連線；仍可預先儲存 API 網址。'
-                                  : '實機請填伺服器的 HTTPS 網址或同網域電腦 IP。',
-                              helperMaxLines: 3,
+                                  : '5G 請填已部署的公開 HTTPS 基底網址，不加 /v1/candidates。'
+                                      '免費雲端冷啟動若逾時，先用手機瀏覽器開啟網址加 /health，回應後再重試。',
+                              helperMaxLines: 5,
                               border: const OutlineInputBorder(),
                             ),
                             validator: _validateApiUrl,
                           ),
+                          const SizedBox(height: 12),
+                          _backendSetupPanel(),
                           ],
                           const SizedBox(height: 8),
                           SwitchListTile.adaptive(
@@ -278,7 +415,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             contentPadding: EdgeInsets.zero,
                             title: const Text('前台自動更新'),
                             subtitle: const Text(
-                              'App 開啟時每 60 秒更新最新可用報價與持股診斷；背景暫停。下拉更新會強制重新請求。',
+                              'App 前台每 60 秒更新目前市場：台股直連續掃下一頁，美股更新最新可用報價；'
+                              '持股診斷同步更新。'
+                              '背景暫停，手機不開啟時不會繼續輪掃；下拉可立即續掃或更新。',
                             ),
                             value: _autoRefreshEnabled,
                             onChanged: _saving ? null : (value) =>
