@@ -1,0 +1,37 @@
+# Render Blueprint. The repository root must contain this file and Dockerfile.
+# This provisions a free service; no paid plan or persistent disk is requested.
+services:
+  - type: web
+    name: martin-luk-market-api
+    branch: fix/refresh-live-gate-20261014
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: MARTIN_CACHE_DIR
+        value: /tmp/martin_luk
+      - key: MARTIN_PROVIDER_TIMEOUT
+        value: "8"
+      - key: MARTIN_PROVIDER_RETRIES
+        value: "1"
+      - key: MARTIN_FETCH_WORKERS
+        value: "4"
+      - key: MARTIN_SCAN_POOL_LIMIT
+        value: "0"
+      - key: MARTIN_SCAN_PAGE_SIZE
+        value: "60"
+      - key: MARTIN_SCAN_PAGE_INTERVAL
+        value: "60"
+      - key: MARTIN_SCAN_BATCH_SIZE
+        value: "3"
+      - key: MARTIN_SCAN_BATCH_DELAY
+        value: "0.15"
+      - key: MARTIN_SCAN_FAILURE_COOLDOWN
+        value: "30"
+      - key: MARTIN_SCAN_TIMEOUT
+        value: "180"
+      - key: MARTIN_RESPONSE_TTL
+        value: "300"

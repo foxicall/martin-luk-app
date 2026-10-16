@@ -27,7 +27,7 @@
     if (raw.market !== 'TW' && raw.market !== 'US') throw new TypeError(`Invalid market at row ${row}`);
     if (typeof raw.symbol !== 'string' || typeof raw.code !== 'string') throw new TypeError(`Missing symbol/code at row ${row}`);
     const symbol = raw.symbol.trim().toUpperCase(), code = raw.code.trim().toUpperCase();
-    if (raw.market === 'TW' ? !/^\d{4}\.TW$/.test(symbol) || code !== symbol.slice(0, -3)
+    if (raw.market === 'TW' ? !/^\d{4}\.(?:TW|TWO)$/.test(symbol) || code !== symbol.split('.')[0]
       : !/^[A-Z][A-Z0-9]{0,14}(?:-[A-Z])?$/.test(symbol) || code !== symbol) {
       throw new TypeError(`Invalid canonical symbol ${symbol}`);
     }

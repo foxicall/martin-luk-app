@@ -1,11 +1,11 @@
 # Android 建置與簽署
 
-推薦固定 Flutter 3.29.3 / Dart 3.7，避免工具版本漂移。此 App 使用 AGP 8.6.1、Gradle 8.10.2、Kotlin 2.0.21、Java 17、compileSdk 35、**targetSdk 34**、**minSdk 21**，Core Library Desugaring 2.1.4。編譯 SDK 35 用於通知外掛，執行目標仍依需求固定34。
+推薦固定 Flutter 3.29.3 / Dart 3.7，避免工具版本漂移。此 App 使用 AGP 8.9.1、Gradle 8.11.1、Kotlin 2.0.21、Java 17、compileSdk 36、Build Tools 36.0.0、**targetSdk 34**、**minSdk 21**，Core Library Desugaring 2.1.4。`shared_preferences_android` 要求編譯 SDK 36；這項變更不會提高手機最低支援版本。AGP 8.9.1 是 [Android API 36 的最低支援版本](https://developer.android.com/build#api-level-support)，其 [Gradle 版本要求為 8.11.1、JDK 為 17](https://developer.android.com/build/releases/past-releases/agp-8-9-0-release-notes#compatibility)。
 
 ## 準備工具
 
 1. 安裝 Flutter SDK，將 `flutter/bin` 加到 `PATH`。
-2. 以 Android Studio／SDK Manager 安裝 Android Platform 35、Build Tools 35.0.0、Command-line Tools；需要時安裝 NDK 27.0.12077973。
+2. 以 Android Studio／SDK Manager 安裝 Android Platform 36、Build Tools 36.0.0、Command-line Tools；需要時安裝 NDK 27.0.12077973。
 3. 設定 Android SDK 路徑，並接受 SDK 授權：
 
 ```bash
@@ -30,21 +30,24 @@ dart format lib test
 python3 scripts/prepare_android.py
 flutter analyze
 flutter test
-flutter build apk --release --dart-define=USE_MOCK_DATA=true
+flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
 ```
 
 ARM／x86 分 ABI：
 
 ```bash
-flutter build apk --release --split-per-abi --dart-define=USE_MOCK_DATA=true
+flutter build apk --release --split-per-abi --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
 ```
 
-連接正式 HTTPS API：
+以上指令預設直接向 Yahoo Finance 取得台美股行情，在手機上計算指標，不需要自架 Python 後端。未指定旗標時 `USE_MOCK_DATA` 也預設為 `false`。無法連線時顯示失敗及重試提示；有上次正式行情快取時顯示其時間與快取狀態，不自動改載假資料。
+
+已部署自己的 Python 後端時，在 App 設定選擇「後端 API」並輸入 HTTPS 網址；可於建置時提供網址初值：
 
 ```bash
 flutter build apk --release \
   --dart-define=USE_MOCK_DATA=false \
-  --dart-define=API_BASE_URL=https://你的掃描服務.example
+  --dart-define=API_BASE_URL=https://你的掃描服務.example \
+  --android-skip-build-dependency-validation
 ```
 
 輸出路徑 `build/app/outputs/flutter-apk/`。可安裝合併版：
@@ -56,11 +59,13 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 ## 快速 Debug 簽署
 
 ```bash
-flutter build apk --debug --dart-define=USE_MOCK_DATA=true
+flutter build apk --debug --dart-define=USE_MOCK_DATA=false
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
 ```
 
 Flutter／Android 建置工具自動產生並使用 Debug Keystore。可安裝 APK 需要簽署，因此「使用 Debug Keystore」是測試簽署，不是無簽名打包。專案 Release 在沒有 `android/key.properties` 時使用 Debug 簽署，方便側載測試；正式發布需配置自己的 Release Keystore。
+
+需要保留離線展示版本時，明確使用 `--dart-define=USE_MOCK_DATA=true`，或於設定中開啟示範模式。GitHub 工作流不使用此旗標。新增版本代碼為 `1.3.0+4`，以相同金鑰簽署時可更新先前 APK；舊示範偏好會遷移到正式直連模式，帳戶本金與自行新增的持股保留。
 
 ## 正式 Release Keystore
 
@@ -84,8 +89,8 @@ keyPassword=你的金鑰密碼
 
 ## 網路與通知配置
 
-- 主 Manifest 包含 `INTERNET`、`POST_NOTIFICATIONS` 與開機恢復排程權限／通知接收器。
-- Release 使用 HTTPS；Debug 僅對模擬器／USB 反向轉送主機允許 HTTP。
+- 主 Manifest 包含 `INTERNET`、`ACCESS_NETWORK_STATE`、`POST_NOTIFICATIONS` 與開機恢復排程權限／通知接收器。
+- 依本次需求設定 `android:usesCleartextTraffic="true"`，允許自訂 HTTP 中繼；內建 Yahoo Finance 來源使用 HTTPS。
 - 本機提醒使用 `inexactAllowWhileIdle`，不要求精確鬧鐘特殊權限。
 - `ic_stat_momentum` 為通知圖示；本版本關閉 Release 資源縮減，保留通知所需圖示。
 
