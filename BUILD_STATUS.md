@@ -1,4 +1,14 @@
-# 最新交付狀態：1.5.0+12 Android 前景服務
+# 最新修正：1.5.0+12 生命週期測試
+
+2026-10-16（台北時間）。已讀取 run `38877234917`（commit `9b289d0dcd532a39dd6297147db6bdd15aee2b8d`）完整日誌。背景服務測試群44項通過、2項失敗：新fixture漏填必填stale；原前台測試直接從paused跳resumed，違反Flutter listener的轉換契約。
+
+本次只修改兩個測試的完整內容，補齊stale與輪掃指紋、恢復hidden／inactive轉換及安全清理，保留原有全部斷言並新增快照有效性檢查。正式Dart／Kotlin／Manifest、pubspec與工作流均保持失敗commit內容，沒有放寬門禁。
+
+該run先前風控群78項、網路／輪掃群195項、台股備援群39項均通過；真實行情門禁與APK未執行。修正後指定Flutter命令仍因本機缺SDK退出127；尚待新提交Actions。詳見 [BACKGROUND_LIFECYCLE_TEST_FIX.md](BACKGROUND_LIFECYCLE_TEST_FIX.md)。
+
+---
+
+# 1.5.0+12 Android 前景服務交付紀錄
 
 2026-10-16（台北時間）。新增使用者明確啟動的dataSync服務、常駐通知與暫停／繼續／停止。Activity與服務沿用同一FlutterEngine／Controller，不另建掃描isolate或第二個檢查點寫入者。未啟用服務時，既有切背景暫停行為保留。
 

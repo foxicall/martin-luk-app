@@ -1,3 +1,11 @@
+# 最新覆蓋：背景服務生命週期測試修正
+
+版本仍為 **1.5.0+12**。下載 `martin_luk_background_lifecycle_fix_updates_20261016.zip` 解壓後，將 `test/background_scan_app_lifecycle_test.dart` 與 `test/production_lifecycle_test.dart` 完整覆蓋到 `fix/refresh-live-gate-20261014` 分支，再提交新commit觸發Actions。原有全部斷言、正式程式與門禁保留。
+
+更新包另外包含本次指南、狀態與完整性清單；完整專案為 `martin_luk_background_lifecycle_fix_20261016.zip`。這次不需要重複更新原生服務檔。原因、實際CI證據及本機缺SDK的限制見 [BACKGROUND_LIFECYCLE_TEST_FIX.md](BACKGROUND_LIFECYCLE_TEST_FIX.md)。
+
+---
+
 # GitHub 網頁覆蓋：1.5.0+12 Android 背景輪掃
 
 下載 `martin_luk_background_service_updates_20261016.zip`，解壓後依 `UPDATE_FILES.txt` 將完整檔案覆蓋到 `fix/refresh-live-gate-20261014` 分支。需要完整專案時使用 `martin_luk_background_service_20261016.zip`。

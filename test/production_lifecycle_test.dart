@@ -6,6 +6,18 @@ import 'package:martin_luk_app/models/stock_candidate.dart';
 import 'package:martin_luk_app/services/candidate_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// Flutter restores a paused app through hidden and inactive before resumed.
+// Keep this sequence valid for AppLifecycleListener as well as the controller.
+void _resumeApp(WidgetsBinding binding) {
+  if (binding.lifecycleState == AppLifecycleState.paused) {
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+  }
+  if (binding.lifecycleState == AppLifecycleState.hidden) {
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+  }
+  binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+}
+
 class _LifecycleScans implements CandidateRepository {
   int calls = 0;
 
@@ -28,10 +40,13 @@ void main() {
     final scans = _LifecycleScans();
     final controller = AppController(repositoryFactory: (_) => scans,
         pollingInterval: const Duration(seconds: 60));
-    addTearDown(controller.dispose);
-    await controller.initialize(initializeReminders: false);
     final binding = tester.binding;
-    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    addTearDown(() {
+      controller.dispose();
+      _resumeApp(binding);
+    });
+    await controller.initialize(initializeReminders: false);
+    _resumeApp(binding);
     await tester.pumpWidget(MartinLukApp(controller: controller));
     await tester.pumpAndSettle();
     expect(controller.autoRefreshActive, isTrue);
@@ -42,7 +57,7 @@ void main() {
     binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump(const Duration(seconds: 61));
     expect(scans.calls, foregroundCalls);
-    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    _resumeApp(binding);
     await tester.pumpAndSettle();
     expect(controller.autoRefreshActive, isTrue);
     await tester.pump(const Duration(seconds: 61));

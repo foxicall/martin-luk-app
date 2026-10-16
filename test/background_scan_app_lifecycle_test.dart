@@ -12,6 +12,18 @@ import 'package:martin_luk_app/models/stock_candidate.dart';
 import 'package:martin_luk_app/services/background_scan_service.dart';
 import 'package:martin_luk_app/services/candidate_repository.dart';
 
+// Match the transitions delivered by Android/Flutter when an app is restored.
+// Direct paused -> resumed bypasses hidden/inactive and violates listeners.
+void _resumeApp(WidgetsBinding binding) {
+  if (binding.lifecycleState == AppLifecycleState.paused) {
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+  }
+  if (binding.lifecycleState == AppLifecycleState.hidden) {
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+  }
+  binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+}
+
 // Lifecycle fixtures test ownership only, never real quotes or live-gate proof.
 class _Pages implements CandidateRepository {
   _Pages(this.now);
@@ -32,12 +44,14 @@ class _Pages implements CandidateRepository {
     return CandidateSnapshot(
       candidates: const [], fetchedAt: now(), warnings: const [],
       source: 'Explicit lifecycle fixture, not live market data',
+      stale: false,
       universeCount: 300, evaluatedCount: size, scanPoolSize: size,
       adrMatchCount: 0, universeIsComplete: false, universeAsOf: now(),
       scanCompletedAt: now(), candidatesAreCumulative: true,
       coverageTotalCount: 300, coverageScannedCount: attempted,
       coverageEvaluatedCount: attempted, coverageRemainingCount: 300 - attempted,
       coverageRound: 1, scanPageStart: start, scanPageSize: size,
+      universeFingerprint: 'explicit-app-lifecycle-fixture-300',
     );
   }
 }
@@ -111,7 +125,12 @@ void main() {
     final binding = tester.binding;
     try {
       await tester.runAsync(() => controller.initialize(initializeReminders: false));
-      binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      expect(controller.snapshot?.isFallback, isFalse,
+          reason: 'A malformed fixture must not silently become a fallback.');
+      expect(controller.snapshot?.coverageScannedCount, 30);
+      expect(controller.snapshot?.universeFingerprint,
+          'explicit-app-lifecycle-fixture-300');
+      _resumeApp(binding);
       await tester.pumpWidget(MartinLukApp(controller: controller));
       await tester.pumpAndSettle();
       expect(controller.autoRefreshActive, isFalse);
@@ -132,6 +151,9 @@ void main() {
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
       expect(pages.calls, greaterThan(callsBeforeHidden));
+      expect(controller.snapshot?.isFallback, isFalse);
+      expect(controller.snapshot?.coverageScannedCount, pages.attempted,
+          reason: 'Background results must publish validated cumulative progress.');
       expect(repositoryCreations, factoriesBeforeHidden,
           reason: 'A hidden activity must not construct a second scanner.');
 
@@ -161,7 +183,7 @@ void main() {
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
       expect(pages.calls, stoppedCalls);
-      binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      _resumeApp(binding);
       await tester.pumpAndSettle();
       expect(native.starts, 1, reason: 'Returning to the UI does not silently restart the service.');
       expect(controller.backgroundScanActive, isFalse);
@@ -169,9 +191,14 @@ void main() {
           reason: 'The independent foreground-auto-refresh setting was off.');
       expect(tester.takeException(), isNull);
     } finally {
-      await tester.pumpWidget(const SizedBox.shrink());
-      controller.dispose();
-      binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      try {
+        // Paused apps do not schedule frames. Resume before unmounting so
+        // MartinLukApp removes its lifecycle observer even on a failed assert.
+        _resumeApp(binding);
+        await tester.pumpWidget(const SizedBox.shrink());
+      } finally {
+        controller.dispose();
+      }
     }
   });
 }

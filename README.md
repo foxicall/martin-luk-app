@@ -1,5 +1,7 @@
 # Martin Luk 台美股動能策略 App
 
+最新補充：修正兩個生命週期測試的fixture欄位與合法恢復路徑，版本仍為1.5.0+12。正式策略、背景服務與門禁不變；覆蓋檔案及實際驗證狀態見 [BACKGROUND_LIFECYCLE_TEST_FIX.md](BACKGROUND_LIFECYCLE_TEST_FIX.md)。
+
 最新版本為 **1.5.0+12**：新增 Android 前景資料同步服務。設定頁手動啟動並允許通知後，可切到其他 App 沿用同一輪掃流程，通知提供暫停／繼續／停止與實際進度；不會在開機或首次開啟時自行啟動。台股逐頁續掃，美股仍為既有核心池；未啟用服務時保留原本背景暫停行為。操作與系統限制見 [ANDROID_BACKGROUND_SCAN.md](ANDROID_BACKGROUND_SCAN.md)。
 
 既有 1.4.4+11 追加修正保留：名單服務關閉時的例外：取消 HTTP 後統一回傳 `StateError`，保留原有測試、晚到回應阻擋及全部門禁。核心只需覆蓋 `lib/services/stock_universe_service.dart`；操作與實際 CI 紀錄見 [UNIVERSE_CLOSE_FIX.md](UNIVERSE_CLOSE_FIX.md)。

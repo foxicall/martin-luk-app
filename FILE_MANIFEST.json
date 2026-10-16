@@ -3,7 +3,7 @@
   "hash_algorithm": "SHA256",
   "archive_layout": "project files at archive root",
   "manifest_excludes_itself": true,
-  "file_count": 228,
+  "file_count": 229,
   "files": [
     {
       "path": ".dockerignore",
@@ -36,6 +36,11 @@
       "sha256": "62303f6c014cc2503b9be7604ed962819accb734f9f7b75cd7f7ef26c399a549"
     },
     {
+      "path": "BACKGROUND_LIFECYCLE_TEST_FIX.md",
+      "bytes": 3518,
+      "sha256": "a3efe2edda0b8323fb31cf9141faa44b8809fdf386ea57f71712ea5dbb362a36"
+    },
+    {
       "path": "BATCH_PROGRESS_TEST_FIX.md",
       "bytes": 2747,
       "sha256": "7bcd543160e60009cd0b1a91579d0c83d5a017238d0acf104bf9b79cf1573395"
@@ -47,8 +52,8 @@
     },
     {
       "path": "BUILD_STATUS.md",
-      "bytes": 17232,
-      "sha256": "af5899ae9f6f1dd0961b085bbc845c10c056dba22ed10194debbf0187e8b654e"
+      "bytes": 18135,
+      "sha256": "18277bdb573aa77b5126d2693f3facaa4aa40e2c4453b96c14b490818b85b6d0"
     },
     {
       "path": "CLOUD_API_GUIDE.md",
@@ -72,8 +77,8 @@
     },
     {
       "path": "GITHUB_MANUAL_UPDATE.md",
-      "bytes": 9339,
-      "sha256": "b74a14246bff62cba37a39e23d4169a644d57eeb4fdbe66dc45ddc726d6495a1"
+      "bytes": 10044,
+      "sha256": "64a3fa529731fdf61bcc6e0dc6c25dacb62e6897044f678af164ee255d331a0c"
     },
     {
       "path": "MARKET_DEBUG_LOGGING.md",
@@ -112,8 +117,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 10746,
-      "sha256": "6b6fde1ad94622b6a29234f5d9b4ec58f61d58a55928492777451f9aee175c1b"
+      "bytes": 11009,
+      "sha256": "407c52390dfba1cd1364dfeb8c2d0b00f12a381090388609d50ec56490378e88"
     },
     {
       "path": "README_HOW_TO_BUILD.md",
@@ -167,8 +172,8 @@
     },
     {
       "path": "UPDATE_FILES.txt",
-      "bytes": 2064,
-      "sha256": "8a990344dff4b5302b72c68cbab8a15de3ec82394d5279db23a50e1712d0f913"
+      "bytes": 1228,
+      "sha256": "9c86d6cfcefca2d0c9e47fc983f61a38c496b8d2bb7a320451ea88faaa61f2cb"
     },
     {
       "path": "US_UNIVERSE_FIX.md",
@@ -862,8 +867,8 @@
     },
     {
       "path": "test/background_scan_app_lifecycle_test.dart",
-      "bytes": 7023,
-      "sha256": "0d2e2ba6499995d4b565d4ad04f1bb456d2a8da69573eebd5cbff74adfda03db"
+      "bytes": 8222,
+      "sha256": "30567c1ce7c2b848cb086ced7c28c565836859c7a7df7f09f63dc891e9dc7e3a"
     },
     {
       "path": "test/background_scan_controller_test.dart",
@@ -1007,8 +1012,8 @@
     },
     {
       "path": "test/production_lifecycle_test.dart",
-      "bytes": 2359,
-      "sha256": "1285e6e4e6092cba1c9f21f7c2f22f8dcbb28c4970bf7201a4381ffb3f01a387"
+      "bytes": 2855,
+      "sha256": "cbf329b79df4d73c66e5906f92721b69c37ae1ac294cbd5f45a1d405ed8302fb"
     },
     {
       "path": "test/production_ui_test.dart",
