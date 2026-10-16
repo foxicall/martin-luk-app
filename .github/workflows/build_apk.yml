@@ -42,6 +42,33 @@ jobs:
           mkdir -p test_logs
           printf '%s\n' 'CI 開始；真實行情門禁尚未執行。' > test_logs/verification.log
 
+      - name: 檢查測試與畫面檔案是否齊全
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee -a test_logs/verification.log
+          from pathlib import Path
+          import os
+          import re
+          workflow_path = Path('.github/workflows/build_apk.yml')
+          if not workflow_path.is_file():
+              workflow_path = Path(os.environ.get('GITHUB_WORKSPACE', '.')) / workflow_path
+          workflow = workflow_path.read_text(encoding='utf-8')
+          required = {
+              'pubspec.yaml', 'lib/main.dart', 'lib/app_controller.dart',
+              'lib/screens/dashboard_screen.dart', 'lib/screens/calculator_screen.dart',
+          }
+          required.update(re.findall(r'\btest/[A-Za-z0-9_/-]+\.dart\b', workflow))
+          missing = sorted(path for path in required
+                           if not Path(path).is_file() or Path(path).stat().st_size == 0)
+          for path in missing:
+              print(f'::error file={path}::缺少或為空：{path}；請依原路徑補齊完整檔案。')
+          if missing:
+              raise SystemExit(1)
+          print(f'[PASS] 建置畫面及工作流引用的測試檔案齊全（{len(required)} 個）。')
+          PY
+
       - name: 設定 Java 環境 (JDK 17)
         uses: actions/setup-java@v4
         with:
@@ -80,13 +107,37 @@ jobs:
           set -euo pipefail
           flutter pub get 2>&1 | tee -a test_logs/verification.log
 
+      - name: 驗證離線搜尋字典與多市場身份
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/sync_stock_search.py --check 2>&1 | tee -a test_logs/verification.log
+          node scripts/check_stock_search.cjs 2>&1 | tee -a test_logs/verification.log
+
+      - name: 驗證 Python 背景掃描與快照 API
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r backend/requirements-dev.txt 2>&1 | tee -a test_logs/verification.log
+          python3 -m unittest discover -s backend/tests -v 2>&1 | tee -a test_logs/verification.log
+
       - name: 驗證風控、RS 與門禁報告規則
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m unittest discover -s scripts/tests -p 'test_live_scan_evidence.py' -v 2>&1 | tee -a test_logs/verification.log
-          flutter test test/rs_alignment_test.dart test/live_strategy_engine_test.dart test/live_risk_helpers_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v 2>&1 | tee -a test_logs/verification.log
+          flutter test test/rs_alignment_test.dart test/live_strategy_engine_test.dart test/live_risk_helpers_test.dart test/recommendation_trade_levels_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+          flutter test test/us_stock_directory_test.dart test/us_universe_fallback_test.dart test/network_request_test.dart test/expanded_symbol_test.dart test/rolling_scan_snapshot_test.dart test/stock_universe_service_test.dart test/backend_snapshot_repository_test.dart test/backend_scan_controller_test.dart test/candidate_repository_test.dart test/backend_transport_timeout_test.dart test/backend_connection_service_test.dart test/backend_setup_settings_test.dart test/dashboard_scope_test.dart test/mobile_tw_rolling_repository_test.dart test/mobile_tw_polling_test.dart test/core_market_pool_test.dart test/live_repositories_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+
+      - name: 驗證台股名單穩定及跨重啟續掃
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter test test/tw_universe_stability_test.dart test/tw_universe_resume_integration_test.dart --dart-define=USE_MOCK_DATA=false --timeout=60s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
       - name: 執行真實行情與指標門禁測試（允許零推薦）
         id: run-gate-test
@@ -102,6 +153,7 @@ jobs:
           rm -f build/live-scan-evidence.json
           flutter test test/integration_scan_test.dart --dart-define=RUN_LIVE_SCAN_TEST=true --timeout=90s --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
           python3 scripts/validate_live_scan_evidence.py build/live-scan-evidence.json 2>&1 | tee -a test_logs/verification.log
+          flutter test test/us_universe_http_smoke_test.dart --dart-define=RUN_LIVE_UNIVERSE_TEST=true --dart-define=USE_MOCK_DATA=false --timeout=30s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
       - name: 保存實測紀錄
         if: always()
