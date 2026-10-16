@@ -38,6 +38,9 @@ EXCLUDED_FILE_PATTERNS = (
     "apply_market_scan_fix.py", "apply_market_scan_timeout_fix.py",
 )
 REQUIRED_FILES = (
+    "US_UNIVERSE_FIX.md", "lib/services/us_stock_directory.dart",
+    "test/us_stock_directory_test.dart", "test/us_universe_fallback_test.dart",
+    "test/us_universe_http_smoke_test.dart",
     "ALL_STOCKS_UPDATE.md", "scripts/import_bundled_metadata.py",
     "backend/engine/listed_universe.py", "backend/tests/test_listed_universe.py",
     "backend/tests/test_expanded_symbols.py", "backend/tests/test_rolling_scan.py",

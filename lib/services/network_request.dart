@@ -11,7 +11,9 @@ class NetworkRequest {
   NetworkRequest({
     http.Client? client,
     this.timeout = defaultTimeout,
-  }) : _client = client ?? http.Client(),
+    String acceptedContentTypes = 'application/json',
+  }) : _acceptedContentTypes = _validateAcceptedContentTypes(acceptedContentTypes),
+       _client = client ?? http.Client(),
        _ownsClient = client == null {
     validateTimeout(timeout);
   }
@@ -32,9 +34,13 @@ class NetworkRequest {
 
   final http.Client _client;
   final bool _ownsClient;
+  final String _acceptedContentTypes;
   final Duration timeout;
-  /// Immutable instance alias for callers that inspect the default headers.
-  final Map<String, String> defaultHeaders = requestHeaders;
+  /// The actual enforced headers, including this service's response formats.
+  Map<String, String> get defaultHeaders => Map<String, String>.unmodifiable({
+    ...requestHeaders,
+    'Accept': _acceptedContentTypes,
+  });
   final Set<_PendingRequest> _active = {};
   bool _closed = false;
 
@@ -43,6 +49,14 @@ class NetworkRequest {
       throw ArgumentError.value(value, 'requestTimeout',
           'HTTP 逾時必須大於零且不得超過 10 秒。');
     }
+  }
+
+  static String _validateAcceptedContentTypes(String value) {
+    if (value.trim().isEmpty || value.contains('\r') || value.contains('\n')) {
+      throw ArgumentError.value(value, 'acceptedContentTypes',
+          'Accept 標頭不得為空或包含換行字元。');
+    }
+    return value.trim();
   }
 
   Future<http.Response> get(Uri uri, {
@@ -91,6 +105,9 @@ class NetworkRequest {
     request.headers.addAll(headers);
     // Standard headers cannot be lost on retries or individual service calls.
     request.headers.addAll(requestHeaders);
+    // A service may explicitly negotiate plain text; per-call headers cannot
+    // override that choice or weaken the browser User-Agent/language defaults.
+    request.headers['Accept'] = _acceptedContentTypes;
     return _client.send(request)
         .then<http.Response>(http.Response.fromStream);
   }

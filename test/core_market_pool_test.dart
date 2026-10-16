@@ -159,7 +159,7 @@ void main() {
     expect(snapshot.scanCompletedAt, isNull);
     expect(snapshot.evaluatedCount, 1);
     final persisted = jsonDecode(
-        preferences.getString('martin-live-scan-v1-us-5.0')!) as Map;
+        preferences.getString('martin-live-scan-v2-directory-us-5.0')!) as Map;
     expect(persisted['scan_complete'], isFalse);
     expect(persisted['scan_completed_at'], isNull);
     // An incomplete scan may be viewed offline, but its fresh quote timestamp

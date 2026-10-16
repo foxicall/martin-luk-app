@@ -27,7 +27,7 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
     this.interBatchDelay = const Duration(milliseconds: 150)})
       : _api = api ?? MarketDataApi(preferences: preferences, now: now),
         _universe = universe ?? StockUniverseService(preferences: preferences, now: now,
-          requestTimeout: const Duration(seconds: 2),
+          requestTimeout: const Duration(seconds: 4),
           storageTimeout: const Duration(milliseconds: 500)),
         _ownsApi = api == null, _ownsUniverse = universe == null,
         scanBudget = _boundedBudget(scanBudget, 'scanBudget'),
@@ -551,7 +551,7 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
   }
 
   String _cacheKey(StockMarket market, double threshold) =>
-      'martin-live-scan-v1-${market.name}-$threshold';
+      'martin-live-scan-v2-directory-${market.name}-$threshold';
   Future<SharedPreferences> _prefs() async => _preferences ??=
       await SharedPreferences.getInstance().timeout(const Duration(seconds: 2));
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/stock_candidate.dart';
 import '../models/stock_item.dart';
 import 'network_request.dart';
+import 'us_stock_directory.dart';
 
 typedef DateTimeFunction = DateTime Function();
 
@@ -21,6 +23,7 @@ class UniverseSnapshot {
     required this.isComplete,
     List<String> warnings = const [],
     this.isCached = false,
+    this.retrievedAt,
   })  : stocks = List.unmodifiable(stocks),
         warnings = List.unmodifiable(warnings);
 
@@ -30,6 +33,8 @@ class UniverseSnapshot {
   final bool isComplete;
   final List<String> warnings;
   final bool isCached;
+  /// Retrieval time is distinct from the source file date.
+  final DateTime? retrievedAt;
 
   int get totalCount => stocks.length;
 }
@@ -46,9 +51,11 @@ class StockUniverseService {
     SharedPreferences? preferences,
     Future<SharedPreferences> Function()? preferencesLoader,
     DateTimeFunction? now,
+    this.useUsMirrorFallback = true,
     this.requestTimeout = NetworkRequest.defaultTimeout,
     this.storageTimeout = NetworkRequest.defaultStorageTimeout,
-  })  : _network = NetworkRequest(client: client, timeout: requestTimeout),
+  })  : _network = NetworkRequest(client: client, timeout: requestTimeout,
+            acceptedContentTypes: 'text/plain,application/json;q=0.9,*/*;q=0.8'),
         _preferences = preferences,
         _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance,
         _now = now ?? DateTime.now {
@@ -71,6 +78,17 @@ class StockUniverseService {
   static final Uri twOtcEndpoint = Uri.parse(
     'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O',
   );
+  // Public copies of the exchange directories, not price feeds. Their file
+  // dates are checked before use; unavailable/stale mirrors never become a
+  // successful official source or replace a quote with demonstration data.
+  static final Uri usMirrorEndpoint = Uri.parse(
+    'https://raw.githubusercontent.com/Cperkin/CanadianStats/main/data/sources/nasdaqlisted.txt',
+  );
+  static final Uri usOtherMirrorEndpoint = Uri.parse(
+    'https://raw.githubusercontent.com/Cperkin/CanadianStats/main/data/sources/otherlisted.txt',
+  );
+  static const Duration maximumMirrorAge = Duration(days: 7);
+  final bool useUsMirrorFallback;
   static const Duration cacheLifetime = Duration(hours: 24);
   static const Duration maximumStaleAge = Duration(days: 30);
   final Duration requestTimeout;
@@ -84,7 +102,7 @@ class StockUniverseService {
   bool _closed = false;
 
   static String cacheKey(StockMarket market) =>
-      'martin_luk.universe.v2.all_common.${market.name}';
+      'martin_luk.universe.v3.directory.${market.name}';
 
   Future<UniverseSnapshot> load(
     StockMarket market, {
@@ -109,9 +127,10 @@ class StockUniverseService {
     final now = _now().toUtc();
     final warnings = <String>[];
     final preferences = await _getPreferences(warnings);
+    if (_closed) throw StateError('股票池服務已關閉。');
     final cached = _readCache(preferences, market, now, warnings);
     if (!forceRefresh && cached != null &&
-        now.difference(cached.asOf) <=
+        now.difference(cached.retrievedAt ?? cached.asOf) <=
             (cached.isComplete ? cacheLifetime : const Duration(minutes: 5))) {
       return _cachedCopy(cached, warnings);
     }
@@ -126,34 +145,23 @@ class StockUniverseService {
       warnings.add('本機中文別名字典無法讀取；連網清單仍使用資料源名稱。');
     }
 
+    if (_closed) throw StateError('股票池服務已關閉。');
     try {
-      // Exactly two metadata feeds per market, independent failure isolation.
-      // This is not an unbounded market-price request fan-out.
+      // Two independent exchange feeds. Each US feed may use one dated
+      // public mirror within the SAME request budget, never a second 8s wait.
       final endpoints = market == StockMarket.us
-          ? [usEndpoint, usOtherEndpoint]
-          : [twEndpoint, twOtcEndpoint];
+          ? [usEndpoint, usOtherEndpoint] : [twEndpoint, twOtcEndpoint];
       final requestBudget = requestTimeout < NetworkRequest.defaultTimeout
           ? requestTimeout : NetworkRequest.defaultTimeout;
-      final replies = await Future.wait(endpoints.asMap().entries.map((entry) async {
-        try {
-          final response = await _network.get(entry.value, timeout: requestBudget);
-          if (response.statusCode != 200) {
-            throw http.ClientException('HTTP ${response.statusCode}', entry.value);
-          }
-          final body = utf8.decode(response.bodyBytes);
-          final parsed = market == StockMarket.us
-              ? _parseUs(body, master, nasdaq: entry.key == 0)
-              : _parseTw(body, master, otc: entry.key == 1);
-          if (parsed.stocks.isEmpty) {
-            throw const FormatException('資料源沒有可識別的普通股。');
-          }
-          return parsed;
-        } catch (error) {
-          return _SourceStocks.failure(
-            '${entry.value.host}/${entry.value.pathSegments.last}：${_errorLabel(error)}',
-          );
+      final replies = await Future.wait(endpoints.asMap().entries.map((entry) {
+        if (market == StockMarket.us) {
+          return _loadUsSource(entry.value, nasdaq: entry.key == 0,
+              master: master, budget: requestBudget, now: now);
         }
+        return _loadTwSource(entry.value, otc: entry.key == 1,
+            master: master, budget: requestBudget);
       }));
+      if (_closed) throw StateError('股票池服務已關閉。');
       final successful = replies.where((reply) => reply.success).length;
       final bySymbol = <String, StockItem>{};
       for (final reply in replies) {
@@ -171,11 +179,11 @@ class StockUniverseService {
       }
       final stocks = bySymbol.values.toList()
         ..sort((a, b) => a.symbol.compareTo(b.symbol));
-      final complete = successful == 2 && (market == StockMarket.us
+      final complete = successful == 2 && replies.every((reply) => reply.isComplete) && (market == StockMarket.us
           ? stocks.length >= 2500 && stocks.length <= 15000
           : stocks.length >= 1500 && stocks.length <= 3500);
       if (!complete) {
-        warnings.add('僅取得 $successful/2 個交易所清單、${stocks.length} 檔普通股；全市場覆蓋不足。');
+        warnings.add('已取得 $successful/2 個交易所清單、${stocks.length} 檔可確認普通股；全市場覆蓋不足，請查看來源與排除提示。');
       }
       if (market == StockMarket.us) {
         warnings.add('美股目錄沒有完整 CFI；以普通股名稱保守分類，未能確認的證券已排除，非百分之百分類認證。');
@@ -183,25 +191,36 @@ class StockUniverseService {
       if (market == StockMarket.tw) {
         warnings.add('台股使用官方上市／上櫃發行公司清單，並保守排除91開頭存託憑證及非四碼證券；此為啟發式分類，未逐筆取得證券 CFI 認證。');
       }
+      final sourceDates = replies.where((reply) => reply.success)
+          .map((reply) => reply.fileDate).whereType<DateTime>().toList();
+      final asOf = sourceDates.isEmpty ? now :
+          sourceDates.reduce((a, b) => a.isBefore(b) ? a : b);
+      final mirrored = replies.any((reply) => reply.mirrored);
       final snapshot = UniverseSnapshot(
         stocks: stocks,
-        asOf: now,
+        asOf: asOf,
+        retrievedAt: now,
         source: market == StockMarket.us
             ? 'Nasdaq Trader symbol directories: Nasdaq / NYSE / NYSE American common stocks'
+                '${mirrored ? ' / dated public mirror (partial)' : ''}'
             : 'TWSE / TPEx official ordinary-stock issuers',
         isComplete: complete,
         warnings: warnings,
       );
+      if (_closed) throw StateError('股票池服務已關閉。');
       if (preferences != null) {
         try {
           final written = await preferences.setString(
             cacheKey(market), jsonEncode(_encode(snapshot, market)),
           ).timeout(storageTimeout);
+          if (_closed) throw StateError('股票池服務已關閉。');
           if (!written) throw StateError('快取儲存失敗。');
         } catch (_) {
+          if (_closed) rethrow;
           return UniverseSnapshot(
             stocks: snapshot.stocks,
             asOf: snapshot.asOf,
+            retrievedAt: snapshot.retrievedAt,
             source: snapshot.source,
             isComplete: snapshot.isComplete,
             warnings: [...snapshot.warnings, '最新股票池已取得，但無法儲存本機快取。'],
@@ -210,6 +229,7 @@ class StockUniverseService {
       }
       return snapshot;
     } catch (error) {
+      if (_closed) rethrow;
       warnings.add('股票池更新失敗（${_errorLabel(error)}）；沒有使用示範行情。');
       if (cached != null) {
         warnings.add('使用 ${cached.asOf.toIso8601String()} 的股票池快取，成分可能已變更。');
@@ -224,7 +244,7 @@ class StockUniverseService {
         stocks: fallback,
         // Build-time dictionary date is intentionally distinct from retrieval
         // time: opening the app does not refresh constituent membership.
-        asOf: DateTime.utc(2026, 10, 13),
+        asOf: DateTime.utc(2026, 10, 6),
         source: 'bundled stock metadata dictionary (partial, unverified membership)',
         isComplete: false,
         isCached: true,
@@ -256,12 +276,17 @@ class StockUniverseService {
       final raw = preferences.getString(cacheKey(market));
       if (raw == null) return null;
       final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic> || decoded['version'] != 2 ||
+      if (decoded is! Map<String, dynamic> || decoded['version'] != 3 ||
           decoded['scope'] != 'all_common' || decoded['market'] != market.name || decoded['source'] is! String ||
           decoded['is_complete'] is! bool || decoded['stocks'] is! List) {
         throw const FormatException('股票池快取結構無效。');
       }
       final asOf = parseApiTimestamp(decoded['as_of'], 'as_of');
+      final retrievedAt = decoded['retrieved_at'] == null ? asOf :
+          parseApiTimestamp(decoded['retrieved_at'], 'retrieved_at');
+      if (retrievedAt.isAfter(now) || retrievedAt.isBefore(asOf)) {
+        throw const FormatException('股票池取得時間與來源日期不一致。');
+      }
       final age = now.difference(asOf);
       if (age.isNegative || age > maximumStaleAge) {
         warnings.add('股票池快取日期無效或已超過 30 天；不以它當作現行成分。');
@@ -286,6 +311,7 @@ class StockUniverseService {
       return UniverseSnapshot(
         stocks: stocks,
         asOf: asOf,
+        retrievedAt: retrievedAt,
         source: decoded['source'] as String,
         isComplete: decoded['is_complete'] as bool,
         warnings: storedWarnings.cast<String>(),
@@ -298,10 +324,11 @@ class StockUniverseService {
   }
 
   static Map<String, dynamic> _encode(UniverseSnapshot snapshot, StockMarket market) => {
-    'version': 2,
+    'version': 3,
     'scope': 'all_common',
     'market': market.name,
     'as_of': snapshot.asOf.toUtc().toIso8601String(),
+    'retrieved_at': (snapshot.retrievedAt ?? snapshot.asOf).toUtc().toIso8601String(),
     'source': snapshot.source,
     'is_complete': snapshot.isComplete,
     'warnings': snapshot.warnings,
@@ -312,6 +339,7 @@ class StockUniverseService {
       UniverseSnapshot(
         stocks: snapshot.stocks,
         asOf: snapshot.asOf,
+        retrievedAt: snapshot.retrievedAt,
         source: snapshot.source,
         isComplete: snapshot.isComplete,
         isCached: true,
@@ -335,75 +363,94 @@ class StockUniverseService {
     return index;
   }
 
-  static _SourceStocks _parseUs(
-    String body,
-    Map<String, StockItem> master, {
-    required bool nasdaq,
-  }) {
-    final lines = const LineSplitter().convert(body.replaceFirst('\ufeff', ''));
-    if (lines.isEmpty) throw const FormatException('美股交易所目錄為空。');
-    final headers = lines.first.split('|').map((cell) => cell.trim()).toList();
-    final expected = nasdaq
-        ? ['Symbol', 'Security Name', 'Test Issue', 'ETF']
-        : ['ACT Symbol', 'Security Name', 'Exchange', 'Test Issue', 'ETF'];
-    if (expected.any((name) => !headers.contains(name))) {
-      throw const FormatException('美股目錄缺少代碼、證券名稱或分類欄位。');
+  Future<_SourceStocks> _loadUsSource(Uri official, {required bool nasdaq,
+      required Map<String, StockItem> master, required Duration budget,
+      required DateTime now}) async {
+    final elapsed = Stopwatch()..start();
+    final warnings = <String>[];
+    final label = nasdaq ? 'Nasdaq' : 'NYSE/NYSE American';
+    final firstBudget = useUsMirrorFallback
+        ? Duration(microseconds: (budget.inMicroseconds ~/ 2).clamp(1, budget.inMicroseconds).toInt())
+        : budget;
+    Future<_SourceStocks> read(Uri url, Duration timeout, {required bool mirror}) async {
+      if (_closed) throw StateError('股票池服務已關閉。');
+      debugPrint('[StockUniverse] >>> $label ${url.host}${url.path}');
+      final response = await _network.get(url, timeout: timeout);
+      final contentType = response.headers['content-type'] ?? '';
+      debugPrint('[StockUniverse] <<< $label HTTP ${response.statusCode} '
+          'type=$contentType bytes=${response.bodyBytes.length}');
+      if (response.statusCode != 200) {
+        throw http.ClientException('HTTP ${response.statusCode}；'
+            '${_preview(response.bodyBytes)}', url);
+      }
+      try {
+        final parsed = UsStockDirectory.parseBytes(response.bodyBytes,
+            nasdaq: nasdaq, contentType: contentType, master: master);
+        final date = parsed.fileDate;
+        final today = DateTime.utc(now.year, now.month, now.day);
+        if (date == null || date.isAfter(today)) {
+          throw const FormatException('名錄檔案日期缺失或超前，請確認手機時間。');
+        }
+        if (mirror && today.difference(date) > maximumMirrorAge) {
+          throw FormatException('公開鏡像日期 ${date.toIso8601String().substring(0, 10)} '
+              '超過 7 天，不採用過期名單。');
+        }
+        debugPrint('[StockUniverse] [SUCCESS] $label ${parsed.stocks.length} identities '
+            'fileDate=${date.toIso8601String()} mirror=$mirror');
+        return _SourceStocks(parsed.stocks, warnings: [
+          ...parsed.warnings,
+          '$label 名錄日期：${date.toIso8601String().substring(0, 10)}（原檔未提供時區）。',
+          if (mirror) '$label 官方來源暫不可用，改讀公開備援鏡像；'
+              '這是有日期的股票身份名單，不是交易所即時行情，不能保證目前完整成分。',
+        ], isComplete: parsed.isComplete && !mirror,
+            mirrored: mirror, fileDate: date);
+      } catch (error) {
+        debugPrint('[StockUniverse] [ERROR] $label ${url.host} '
+            '${_errorLabel(error)} body=${_preview(response.bodyBytes)}');
+        rethrow;
+      }
     }
-    final stocks = <StockItem>[];
-    final seen = <String>{};
-    var unknown = 0;
-    var footerSeen = false;
-    for (final line in lines.skip(1)) {
-      if (line.trim().isEmpty) continue;
-      if (line.startsWith('File Creation Time:')) {
-        footerSeen = true;
-        continue;
-      }
-      if (footerSeen) throw const FormatException('美股目錄結尾後含未知紀錄。');
-      final cells = line.split('|');
-      if (cells.length != headers.length) {
-        throw const FormatException('美股目錄欄位數不一致。');
-      }
-      String field(String name) => cells[headers.indexOf(name)].trim();
-      if (field('Test Issue') != 'N' || field('ETF') != 'N') continue;
-      // Nasdaq is this file; otherlisted also includes exchanges outside scope.
-      if (!nasdaq && !{'N', 'A'}.contains(field('Exchange'))) continue;
-      final name = field('Security Name');
-      if (RegExp(
-        r'\b(?:preferred|preference|pfd|depositary|depository|ADR|ADS|warrants?|units?|rights?|ET[FN]|funds?|notes?|bonds?)\b|exchange[- ]traded|\bshares?\s+of\s+beneficial\s+interest\b',
-        caseSensitive: false,
-      ).hasMatch(name)) continue;
-      // Corporate REIT ordinary shares remain in scope. An investment trust
-      // or beneficial-interest fund is not made ordinary by its name alone.
-      final withoutCorporateReit = name.replaceAll(
-        RegExp(r'\breal\s+estate\s+investment\s+trust\b', caseSensitive: false), '',
-      );
-      if (RegExp(r'\binvestment\s+trust\b', caseSensitive: false)
-          .hasMatch(withoutCorporateReit)) continue;
-      if (!RegExp(r'\bcommon\s+(?:stock|shares?)\b|\bordinary\s+(?:stock|shares?)\b|\bcapital\s+stock\b', caseSensitive: false)
-          .hasMatch(name)) {
-        unknown++;
-        continue;
-      }
-      final rawSymbol = field(nasdaq ? 'Symbol' : 'ACT Symbol');
-      final symbol = rawSymbol.toUpperCase().replaceAll('.', '-');
-      if (!RegExp(r'^[A-Z][A-Z0-9]{0,14}(?:-[A-Z])?$').hasMatch(symbol) || name.isEmpty) {
-        unknown++;
-        continue;
-      }
-      if (!seen.add(symbol)) throw const FormatException('美股目錄含重複普通股代碼。');
-      final known = master['us:$symbol'];
-      stocks.add(StockItem(
-        market: StockMarket.us, symbol: symbol, code: symbol,
-        nameZh: known?.nameZh ?? '', nameFullZh: known?.nameFullZh ?? '',
-        nameEn: name, abbrEn: known?.abbrEn ?? '',
-        aliases: known?.aliases ?? const [], shortCodes: known?.shortCodes ?? const [],
-      ));
+    try {
+      return await read(official, firstBudget, mirror: false);
+    } catch (error) {
+      final reason = '$label 官方來源 ${official.host}：${_errorLabel(error)}';
+      debugPrint('[StockUniverse] [WARN] $reason');
+      warnings.add(reason);
     }
-    if (!footerSeen) throw const FormatException('美股目錄缺少檔案完成標記，可能下載不完整。');
-    return _SourceStocks(stocks, warnings: [
-      if (unknown > 0) '美股${nasdaq ? ' Nasdaq' : ' NYSE/NYSE American'}目錄 $unknown 筆未能確認為普通股，未納入。',
-    ]);
+    final remaining = budget - elapsed.elapsed;
+    if (useUsMirrorFallback && !_closed && remaining > Duration.zero) {
+      final mirror = nasdaq ? usMirrorEndpoint : usOtherMirrorEndpoint;
+      try {
+        final result = await read(mirror, remaining, mirror: true);
+        return _SourceStocks(result.stocks,
+            warnings: [...warnings, ...result.warnings], isComplete: false,
+            mirrored: true, fileDate: result.fileDate);
+      } catch (error) {
+        warnings.add('$label 備援 ${mirror.host}：${_errorLabel(error)}');
+      }
+    }
+    return _SourceStocks.failure(warnings.join('；'));
+  }
+
+  Future<_SourceStocks> _loadTwSource(Uri url, {required bool otc,
+      required Map<String, StockItem> master, required Duration budget}) async {
+    try {
+      final response = await _network.get(url, timeout: budget);
+      if (response.statusCode != 200) {
+        throw http.ClientException('HTTP ${response.statusCode}', url);
+      }
+      return _parseTw(utf8.decode(response.bodyBytes), master, otc: otc);
+    } catch (error) {
+      return _SourceStocks.failure('${url.host}/${url.pathSegments.last}：${_errorLabel(error)}');
+    }
+  }
+
+  static String _preview(List<int> bytes) => _short(
+      utf8.decode(bytes.take(400).toList(), allowMalformed: true), 180);
+
+  static String _short(String text, int limit) {
+    final value = text.replaceAll(RegExp(r'[\x00-\x1f\x7f]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    return value.length <= limit ? value : '${value.substring(0, limit)}…';
   }
 
   static _SourceStocks _parseTw(
@@ -462,8 +509,8 @@ class StockUniverseService {
 
   static String _errorLabel(Object error) {
     if (error is TimeoutException) return '連線逾時';
-    if (error is FormatException) return '資料格式無效';
-    if (error is http.ClientException && error.message.startsWith('HTTP ')) return error.message;
+    if (error is FormatException) return '資料格式無效：${_short(error.message.toString(), 140)}';
+    if (error is http.ClientException && error.message.startsWith('HTTP ')) return _short(error.message, 180);
     return '網路或資料源不可用';
   }
 
@@ -476,10 +523,15 @@ class StockUniverseService {
 
 /// A source failure is data, never an uncaught rejection of the other source.
 class _SourceStocks {
-  _SourceStocks(this.stocks, {this.warnings = const []}) : success = true;
+  _SourceStocks(this.stocks, {this.warnings = const [], this.isComplete = true,
+      this.mirrored = false, this.fileDate}) : success = true;
   _SourceStocks.failure(String warning)
-      : stocks = const [], warnings = [warning], success = false;
+      : stocks = const [], warnings = [warning], success = false,
+        isComplete = false, mirrored = false, fileDate = null;
   final List<StockItem> stocks;
   final List<String> warnings;
   final bool success;
+  final bool isComplete;
+  final bool mirrored;
+  final DateTime? fileDate;
 }

@@ -242,7 +242,7 @@ void main() {
     expect(partial.universeCount, 5);
     expect(partial.missingSymbols.toSet(), gates.keys.toSet());
     expect(partial.warnings.any((warning) => warning.contains('整批掃描期限')), true);
-    final partialCache = jsonDecode(preferences.getString('martin-live-scan-v1-us-5.0')!) as Map;
+    final partialCache = jsonDecode(preferences.getString('martin-live-scan-v2-directory-us-5.0')!) as Map;
     expect(partialCache['evaluated_count'], 1,
         reason: 'The scan reserves time to persist a partial offline snapshot inside its budget.');
 
@@ -255,7 +255,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(api.intradayCalls, intradayCalls,
         reason: 'Late daily replies must not schedule another intraday request.');
-    final persisted = jsonDecode(preferences.getString('martin-live-scan-v1-us-5.0')!) as Map;
+    final persisted = jsonDecode(preferences.getString('martin-live-scan-v2-directory-us-5.0')!) as Map;
     expect(persisted['evaluated_count'], 5,
         reason: 'The expired batch must not overwrite a successful retry cache.');
     repository.close(); api.close(); universe.close();
@@ -660,7 +660,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(progress.length, countAtClose);
     expect(api.intradayCalls, intradayAtClose);
-    expect(preferences.getString('martin-live-scan-v1-us-5.0'), isNull);
+    expect(preferences.getString('martin-live-scan-v2-directory-us-5.0'), isNull);
     api.close(); universe.close();
   });
 
@@ -677,7 +677,7 @@ void main() {
     expect(progress.last.failedCount, 2);
     expect(progress.last.completedCount, 2);
     expect(progress.last.stage, contains('評估失敗'));
-    expect(preferences.getString('martin-live-scan-v1-us-5.0'), isNull);
+    expect(preferences.getString('martin-live-scan-v2-directory-us-5.0'), isNull);
     repository.close(); api.close(); universe.close();
   });
 

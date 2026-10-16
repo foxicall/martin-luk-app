@@ -24,6 +24,41 @@ void main() {
       'Accept-Language': 'fr', 'X-Trace': 'holdings',
     });
     expect(response.body, 'ok');
+    expect(network.defaultHeaders['Accept'], 'application/json');
+    expect(NetworkRequest.requestHeaders['Accept'], 'application/json');
+  });
+
+  test('explicit response formats override Accept while browser headers stay enforced', () async {
+    const accepted = 'text/plain,application/json;q=0.9,*/*;q=0.8';
+    final client = ControllableHttpClient((request) async {
+      expect(request.headers['accept'], accepted);
+      expect(request.headers['user-agent'], NetworkRequest.requestHeaders['User-Agent']);
+      expect(request.headers['accept-language'], 'en-US,en;q=0.9');
+      expect(request.headers['x-trace'], 'universe');
+      return streamedText('Symbol|Security Name');
+    });
+    final network = NetworkRequest(client: client, acceptedContentTypes: accepted);
+    addTearDown(network.close);
+    final response = await network.get(uri, headers: {
+      'Accept': 'text/html', 'User-Agent': 'Dart client',
+      'Accept-Language': 'fr', 'X-Trace': 'universe',
+    });
+    expect(response.body, 'Symbol|Security Name');
+    expect(network.defaultHeaders['Accept'], accepted);
+    expect(network.defaultHeaders['User-Agent'], NetworkRequest.requestHeaders['User-Agent']);
+    expect(NetworkRequest.requestHeaders['Accept'], 'application/json');
+    expect(() => network.defaultHeaders['Accept'] = 'text/html', throwsUnsupportedError);
+  });
+
+  test('Accept configuration rejects empty values and every CR/LF form', () {
+    final client = ControllableHttpClient((_) async => streamedText('unexpected'));
+    for (final accepted in ['', ' ', '\t', '\r', '\n',
+      'application/json\r\nX-Injected: true', 'text/plain\r', 'text/plain\n']) {
+      expect(() => NetworkRequest(client: client, acceptedContentTypes: accepted),
+          throwsArgumentError, reason: 'Invalid Accept: ${accepted.codeUnits}');
+    }
+    expect(client.requests, isEmpty);
+    expect(client.closeCalls, 0);
   });
 
   test('default is eight seconds and explicit timeouts cannot exceed ten seconds', () {

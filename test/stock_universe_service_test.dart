@@ -35,7 +35,7 @@ void main() {
 
   test('both US directories produce the three exchanges, Yahoo classes and real names', () async {
     final urls = <Uri>[];
-    final service = StockUniverseService(
+    final service = StockUniverseService(useUsMirrorFallback: false, 
       client: MockClient((request) async {
         urls.add(request.url);
         return text(request.url == StockUniverseService.usEndpoint ? usBody : otherBody);
@@ -54,7 +54,7 @@ void main() {
   });
 
   test('US rejects ETF, test, preferred, ADR, units, unknown class and out-of-scope exchanges', () async {
-    final service = StockUniverseService(
+    final service = StockUniverseService(useUsMirrorFallback: false, 
       client: MockClient((request) async => text(request.url == StockUniverseService.usEndpoint
           ? nasdaq([
               'NVDA|NVIDIA Corporation - Common Stock|Q|N|N|100|N|N',
@@ -84,7 +84,7 @@ void main() {
   });
 
   test('TWSE and TPEx issuer feeds add TW and TWO and exclude funds/TDR/preferred', () async {
-    final service = StockUniverseService(
+    final service = StockUniverseService(useUsMirrorFallback: false, 
       client: MockClient((request) async => request.url == StockUniverseService.twEndpoint
           ? twRows([
               {'公司代號': '2330', '公司簡稱': '台積電', '公司名稱': '台灣積體電路製造股份有限公司', '產業別': '24'},
@@ -111,7 +111,7 @@ void main() {
   });
 
   test('one broken exchange does not discard the successful exchange', () async {
-    final service = StockUniverseService(
+    final service = StockUniverseService(useUsMirrorFallback: false, 
       client: MockClient((request) async => request.url == StockUniverseService.usEndpoint
           ? text(usBody) : http.Response('blocked', 403)), now: () => now,
     );
@@ -125,7 +125,7 @@ void main() {
   });
 
   test('a truncated directory is rejected rather than considered a complete list', () async {
-    final service = StockUniverseService(
+    final service = StockUniverseService(useUsMirrorFallback: false, 
       client: MockClient((request) async => text(request.url == StockUniverseService.usEndpoint
           ? '$nasdaqHeader\nNVDA|NVIDIA Common Stock|Q|N|N|100|N|N'
           : otherBody)), now: () => now,
@@ -137,20 +137,20 @@ void main() {
     service.close();
   });
 
-  test('fresh v2 all-common cache is reused and force refresh requests both feeds', () async {
+  test('fresh v3 directory cache is reused and force refresh requests both feeds', () async {
     final preferences = await SharedPreferences.getInstance();
     var requests = 0;
     final client = MockClient((request) async {
       requests++;
       return text(request.url == StockUniverseService.usEndpoint ? usBody : otherBody);
     });
-    final first = StockUniverseService(client: client, preferences: preferences, now: () => now);
+    final first = StockUniverseService(useUsMirrorFallback: false, client: client, preferences: preferences, now: () => now);
     await first.load(StockMarket.us);
     first.close();
     final stored = jsonDecode(preferences.getString(StockUniverseService.cacheKey(StockMarket.us))!) as Map<String, dynamic>;
-    expect(stored['version'], 2);
+    expect(stored['version'], 3);
     expect(stored['scope'], 'all_common');
-    final second = StockUniverseService(client: client, preferences: preferences,
+    final second = StockUniverseService(useUsMirrorFallback: false, client: client, preferences: preferences,
         now: () => now.add(const Duration(minutes: 4)));
     expect((await second.load(StockMarket.us)).isCached, isTrue);
     expect(requests, 2);
@@ -160,7 +160,7 @@ void main() {
   });
 
   test('only both substantial exchange lists satisfy full-directory coverage', () async {
-    final service = StockUniverseService(client: MockClient((request) async => text(
+    final service = StockUniverseService(useUsMirrorFallback: false, client: MockClient((request) async => text(
         request.url == StockUniverseService.usEndpoint
             ? nasdaq(List.generate(2498, (index) =>
                 'N$index|Issuer $index Common Stock|Q|N|N|100|N|N'))
@@ -179,10 +179,10 @@ void main() {
       requests++;
       return text(request.url == StockUniverseService.usEndpoint ? usBody : otherBody);
     });
-    final first = StockUniverseService(client: client(), preferences: preferences, now: () => now);
+    final first = StockUniverseService(useUsMirrorFallback: false, client: client(), preferences: preferences, now: () => now);
     await first.load(StockMarket.us);
     first.close();
-    final next = StockUniverseService(client: client(), preferences: preferences,
+    final next = StockUniverseService(useUsMirrorFallback: false, client: client(), preferences: preferences,
         now: () => now.add(const Duration(minutes: 6)));
     expect((await next.load(StockMarket.us)).isCached, isFalse);
     expect(requests, 4);
@@ -192,7 +192,7 @@ void main() {
   test('old S&P-only cache key cannot masquerade as the expanded market', () async {
     SharedPreferences.setMockInitialValues({'martin_luk.universe.v1.us': '{"version":1}'});
     var requests = 0;
-    final service = StockUniverseService(client: MockClient((request) async {
+    final service = StockUniverseService(useUsMirrorFallback: false, client: MockClient((request) async {
       requests++;
       return text(request.url == StockUniverseService.usEndpoint ? usBody : otherBody);
     }), now: () => now);
@@ -203,21 +203,21 @@ void main() {
 
   test('dated genuine cache lasts at most 30 days and does not invent market prices', () async {
     final preferences = await SharedPreferences.getInstance();
-    final service = StockUniverseService(preferences: preferences,
+    final service = StockUniverseService(useUsMirrorFallback: false, preferences: preferences,
         client: MockClient((request) async => text(request.url == StockUniverseService.usEndpoint ? usBody : otherBody)),
         now: () => now);
     await service.load(StockMarket.us);
     service.close();
-    final failing = StockUniverseService(preferences: preferences,
+    final failing = StockUniverseService(useUsMirrorFallback: false, preferences: preferences,
         client: MockClient((_) async => http.Response('unavailable', 503)),
         now: () => now.add(const Duration(days: 5)));
     final stale = await failing.load(StockMarket.us);
     expect(stale.isCached, isTrue);
-    expect(stale.asOf, now);
+    expect(stale.asOf, DateTime.utc(now.year, now.month, now.day));
     expect(stale.stocks.first.toJson().containsKey('price'), isFalse);
     expect(stale.warnings.join(' '), contains('成分可能已變更'));
     failing.close();
-    final expired = StockUniverseService(preferences: preferences,
+    final expired = StockUniverseService(useUsMirrorFallback: false, preferences: preferences,
         client: MockClient((_) async => http.Response('unavailable', 503)),
         now: () => now.add(const Duration(days: 31)));
     final fallback = await expired.load(StockMarket.us);
@@ -229,7 +229,7 @@ void main() {
 
   test('parallel callers share two source requests and close is idempotent', () async {
     var requests = 0;
-    final service = StockUniverseService(client: MockClient((request) async {
+    final service = StockUniverseService(useUsMirrorFallback: false, client: MockClient((request) async {
       requests++;
       await Future<void>.delayed(const Duration(milliseconds: 2));
       return text(request.url == StockUniverseService.usEndpoint ? usBody : otherBody);
@@ -246,7 +246,7 @@ void main() {
   test('hung exchange reaches its deadline and never blocks a successful peer or retry', () async {
     final late = Completer<http.Response>();
     var first = true;
-    final service = StockUniverseService(requestTimeout: const Duration(milliseconds: 20),
+    final service = StockUniverseService(useUsMirrorFallback: false, requestTimeout: const Duration(milliseconds: 20),
         client: MockClient((request) async {
           if (request.url == StockUniverseService.usOtherEndpoint && first) return late.future;
           return text(request.url == StockUniverseService.usEndpoint ? usBody : otherBody);
@@ -267,7 +267,7 @@ void main() {
 
   test('a missing preferences plugin does not stop live exchange retrieval', () async {
     final never = Completer<SharedPreferences>();
-    final service = StockUniverseService(
+    final service = StockUniverseService(useUsMirrorFallback: false, 
         preferencesLoader: () => never.future,
         storageTimeout: const Duration(milliseconds: 10), now: () => now,
         client: MockClient((request) async => text(request.url == StockUniverseService.usEndpoint ? usBody : otherBody)));
