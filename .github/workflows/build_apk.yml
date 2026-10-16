@@ -58,6 +58,12 @@ jobs:
           required = {
               'pubspec.yaml', 'lib/main.dart', 'lib/app_controller.dart',
               'lib/screens/dashboard_screen.dart', 'lib/screens/calculator_screen.dart',
+              'lib/services/background_scan_service.dart',
+              'android/app/src/main/AndroidManifest.xml',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/MainActivity.kt',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanServiceBridge.kt',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanForegroundService.kt',
+              'android/app/src/main/res/drawable/ic_stat_scan.xml',
           }
           required.update(re.findall(r'\btest/[A-Za-z0-9_/-]+\.dart\b', workflow))
           missing = sorted(path for path in required
@@ -138,6 +144,13 @@ jobs:
         run: |
           set -euo pipefail
           flutter test test/tw_issuer_csv_test.dart test/tw_official_fallback_test.dart test/tw_universe_stability_test.dart test/tw_universe_resume_integration_test.dart --dart-define=USE_MOCK_DATA=false --timeout=60s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+
+      - name: 驗證 Android 背景服務與前台生命週期
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter test test/background_scan_uninitialized_test.dart test/background_scan_service_test.dart test/background_scan_controller_test.dart test/background_scan_settings_test.dart test/background_scan_app_lifecycle_test.dart test/production_lifecycle_test.dart test/portfolio_controller_test.dart --dart-define=USE_MOCK_DATA=false --timeout=90s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
       - name: 執行真實行情與指標門禁測試（允許零推薦）
         id: run-gate-test
