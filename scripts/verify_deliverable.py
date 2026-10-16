@@ -38,6 +38,13 @@ EXCLUDED_FILE_PATTERNS = (
     "apply_market_scan_fix.py", "apply_market_scan_timeout_fix.py",
 )
 REQUIRED_FILES = (
+    "ANDROID_BACKGROUND_SCAN.md", "lib/services/background_scan_service.dart",
+    "test/background_scan_uninitialized_test.dart",
+    "test/background_scan_service_test.dart", "test/background_scan_controller_test.dart",
+    "test/background_scan_settings_test.dart", "test/background_scan_app_lifecycle_test.dart",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanServiceBridge.kt",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanForegroundService.kt",
+    "android/app/src/main/res/drawable/ic_stat_scan.xml",
     "R_TARGET_DISPLAY_FIX.md", "lib/widgets/manual_trade_levels.dart",
     "test/trade_levels_test.dart", "test/manual_trade_levels_test.dart",
     "TW_OFFICIAL_CSV_FALLBACK.md", "lib/services/tw_issuer_csv.dart",
@@ -292,6 +299,7 @@ def validate_contents(files: dict[str, bytes]) -> None:
         "test/backend_snapshot_repository_test.dart test/backend_scan_controller_test.dart",
         "test/tw_issuer_csv_test.dart test/tw_official_fallback_test.dart",
         "test/trade_levels_test.dart test/manual_trade_levels_test.dart",
+        "test/background_scan_uninitialized_test.dart test/background_scan_service_test.dart",
     ):
         require(marker in workflow, f"Actions 工作流缺少：{marker}")
     android_app = files["android/app/build.gradle"].decode("utf-8")
@@ -317,6 +325,23 @@ def validate_contents(files: dict[str, bytes]) -> None:
     json.loads(files["web/manifest.json"])
     android = files["android/app/src/main/AndroidManifest.xml"].decode("utf-8")
     require("android.permission.INTERNET" in android, "Android 缺少網路權限")
+    ns = "{http://schemas.android.com/apk/res/android}"
+    manifest = ET.fromstring(android)
+    permissions = {entry.get(ns + "name") for entry in manifest.findall("uses-permission")}
+    require({"android.permission.FOREGROUND_SERVICE",
+             "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+             "android.permission.WAKE_LOCK", "android.permission.POST_NOTIFICATIONS"}
+            <= permissions, "Android 背景輪掃缺少前景服務／通知／喚醒權限")
+    services = [entry for entry in manifest.findall("application/service")
+                if (entry.get(ns + "name") or "").endswith(".ScanForegroundService")]
+    require(len(services) == 1 and services[0].get(ns + "exported") == "false"
+            and services[0].get(ns + "foregroundServiceType") == "dataSync",
+            "Android 必須宣告唯一、非匯出的 dataSync 輪掃服務")
+    channel_name = "martin_luk/background_scan"
+    require(channel_name in files["lib/services/background_scan_service.dart"].decode("utf-8")
+            and channel_name in files[
+                "android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanServiceBridge.kt"
+            ].decode("utf-8"), "Android／Dart 背景服務通道名稱不一致")
 
 
 def make_manifest(files: dict[str, bytes]) -> dict[str, Any]:

@@ -1,3 +1,17 @@
+# GitHub 網頁覆蓋：1.5.0+12 Android 背景輪掃
+
+下載 `martin_luk_background_service_updates_20261016.zip`，解壓後依 `UPDATE_FILES.txt` 將完整檔案覆蓋到 `fix/refresh-live-gate-20261014` 分支。需要完整專案時使用 `martin_luk_background_service_20261016.zip`。
+
+這次包含原生 Android 服務，**不能只覆蓋 Dart**。務必上傳兩個新 Kotlin 檔、修改後 MainActivity／Manifest、`ic_stat_scan.xml`、Dart通道／控制器／設定頁、全部新測試與 `.github/workflows/build_apk.yml`。版本為1.5.0+12；先前名單關閉例外修正保留。
+
+提交新commit後等Actions通過所有固定測試與真實行情門禁，再下載 `martin-luk-app-release` 安裝。新功能不會自動啟動；安裝後請到設定手動啟動背景服務並允許通知。詳見 [ANDROID_BACKGROUND_SCAN.md](ANDROID_BACKGROUND_SCAN.md)。
+
+尚無本環境的Flutter／Kotlin／APK成功結果，ZIP或靜態檢查不代表實機已通過。保留舊輪掃進度，不必清除App資料。
+
+---
+
+以下為歷史更新紀錄，以本頁上方版本與包名為準。
+
 # 本次最小覆蓋：名單服務關閉例外
 
 版本仍為 **1.4.4+11**。這次核心只需覆蓋 `lib/services/stock_universe_service.dart` 的完整檔案，讓關閉後的JSON／CSV取消一致回傳StateError。兩個測試、工作流及所有門禁不改動。

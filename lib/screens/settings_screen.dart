@@ -310,6 +310,114 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Starting is an immediate, explicit action rather than a persisted
+  /// preference. In particular, editing an unsaved data-source switch must
+  /// not start a service with a different source than the one on screen.
+  Widget _backgroundScanSection() {
+    final controller = widget.controller;
+    final active = controller.backgroundScanActive;
+    final paused = controller.backgroundScanPaused;
+    final busy = controller.backgroundScanBusy;
+    final supported = controller.backgroundScanSupported;
+    final saved = controller.settings;
+    final direct = !saved.useMockData && saved.dataProvider == 'direct';
+    final sourceUnsaved = _useMockData != saved.useMockData ||
+        _dataProvider != saved.dataProvider;
+    final canStart = supported && direct && !sourceUnsaved && !_saving && !busy;
+    final state = busy ? '正在處理背景服務…'
+        : active ? (paused ? '已暫停背景更新' : '背景持續更新中')
+        : '背景服務未啟動';
+    final market = controller.market;
+    final progress = controller.marketScanProgress;
+    return _section(
+      title: '背景持續更新（Android）',
+      icon: Icons.sync,
+      children: [
+        Semantics(
+          liveRegion: true,
+          child: Text(state, key: const ValueKey('settings-background-state'),
+              style: Theme.of(context).textTheme.titleSmall),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '目前市場：${market.label}；行情來源：'
+          '${saved.useMockData ? '離線示範' : saved.dataProvider == 'direct' ? 'Yahoo Finance 直連' : 'Python API'}。',
+          key: const ValueKey('settings-background-market'),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          '手動啟動後以常駐通知維持更新，可切換其他 App 或鎖螢幕。'
+          '台股依保存進度分頁續掃；美股仍使用核心精選池，並非全市場掃描。'
+          '掃描跟隨總覽目前選取市場；切換行情來源或 ADR 門檻會先停止服務，需重新啟動。',
+        ),
+        if (active && progress != null && progress.market == market) ...[
+          const SizedBox(height: 8),
+          Text(progress.label,
+              key: const ValueKey('settings-background-progress')),
+        ],
+        if (!supported) ...[
+          const SizedBox(height: 8),
+          const Text('此裝置不支援 Android 背景服務；Web、iOS 與桌面版仍僅在前台更新。',
+              key: ValueKey('settings-background-unavailable')),
+        ] else if (!direct || sourceUnsaved) ...[
+          const SizedBox(height: 8),
+          const Text('請先關閉離線示範、選擇手機直接連線並儲存設定，再啟動此服務。Python API 仍使用原有前台讀取方式。',
+              key: ValueKey('settings-background-requires-direct')),
+        ],
+        if (controller.backgroundScanMessage != null) ...[
+          const SizedBox(height: 8),
+          Text(controller.backgroundScanMessage!,
+              key: const ValueKey('settings-background-message')),
+        ],
+        if (controller.backgroundScanError != null) ...[
+          const SizedBox(height: 8),
+          Text(controller.backgroundScanError!,
+              key: const ValueKey('settings-background-error'),
+              style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        ],
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          children: [
+            if (!active)
+              FilledButton.icon(
+                key: const ValueKey('settings-background-start'),
+                onPressed: canStart ? controller.startBackgroundScan : null,
+                icon: busy
+                    ? const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.play_arrow),
+                label: const Text('啟動背景更新'),
+              )
+            else ...[
+              OutlinedButton.icon(
+                key: const ValueKey('settings-background-pause-resume'),
+                onPressed: busy || _saving ? null
+                    : paused ? controller.resumeBackgroundScan
+                        : controller.pauseBackgroundScan,
+                icon: Icon(paused ? Icons.play_arrow : Icons.pause),
+                label: Text(paused ? '繼續更新' : '暫停更新'),
+              ),
+              OutlinedButton.icon(
+                key: const ValueKey('settings-background-stop'),
+                onPressed: busy ? null : controller.stopBackgroundScan,
+                icon: const Icon(Icons.stop),
+                label: const Text('停止服務'),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          '第一次啟動請允許通知。服務可從此頁或常駐通知暫停／停止；'
+          '從最近使用清單移除 App、強制停止、系統省電或重新開機仍可能中斷，不會自動重新啟動。'
+          '背景更新會使用網路與電量；未啟動本服務時，原有前台更新行為不變。',
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -417,7 +525,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             subtitle: const Text(
                               'App 前台每 60 秒更新目前市場：台股直連續掃下一頁，美股更新最新可用報價；'
                               '持股診斷同步更新。'
-                              '背景暫停，手機不開啟時不會繼續輪掃；下拉可立即續掃或更新。',
+                              '未啟動下方 Android 背景服務時，離開 App 會暫停；下拉可立即續掃或更新。'
+                              '背景服務需另外手動啟動，不受此開關控制。',
                             ),
                             value: _autoRefreshEnabled,
                             onChanged: _saving ? null : (value) =>
@@ -435,6 +544,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ],
                       ),
+                      _backgroundScanSection(),
                       _section(
                         title: '波幅門檻與分市場帳戶資金',
                         icon: Icons.tune,
@@ -513,7 +623,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(height: 8),
                           const Text(
                             '週一至週五提醒，休市請以交易日曆為準。'
-                            '通知提醒您開啟 App 更新；手機不會在背景執行金融掃描。'
+                            '此排程僅提醒開啟 App，不會自行啟動行情掃描；'
+                            '背景持續更新需另行手動啟動上方 Android 服務。'
                             '省電限制可能讓通知延後。',
                           ),
                         ],

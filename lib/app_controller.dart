@@ -9,6 +9,7 @@ import 'models/app_settings.dart';
 import 'models/backend_scan_status.dart';
 import 'models/stock_candidate.dart';
 import 'models/portfolio_position.dart';
+import 'services/background_scan_service.dart';
 import 'services/candidate_repository.dart';
 import 'services/exit_advisory_engine.dart';
 import 'services/live_candidate_repository.dart';
@@ -72,6 +73,7 @@ class AppController extends ChangeNotifier {
     RepositoryFactory? repositoryFactory,
     PortfolioRepositoryFactory? portfolioRepositoryFactory,
     ReminderService? reminders,
+    BackgroundScanService? backgroundScanService,
     bool? forceMockPreview,
     Duration pollingInterval = const Duration(seconds: 60),
     Duration? scanUpdateTimeout,
@@ -85,6 +87,8 @@ class AppController extends ChangeNotifier {
       : _repositoryFactory = repositoryFactory ?? _defaultRepository,
         _portfolioRepositoryFactory = portfolioRepositoryFactory ?? _defaultPortfolioRepository,
         _reminders = reminders ?? ReminderService(),
+        _backgroundScanService = backgroundScanService ??
+            MethodChannelBackgroundScanService(),
         _forceMockPreview = forceMockPreview ?? AppConfig.forceMockPreview,
         _pollingInterval = pollingInterval,
         _scanUpdateTimeout = _boundedMarketTimeout(
@@ -101,6 +105,18 @@ class AppController extends ChangeNotifier {
         .any((duration) => duration <= Duration.zero)) {
       throw ArgumentError('更新間隔與逾時必須大於零。');
     }
+    // The Android service starts only after the user explicitly asks. Merely
+    // opening settings/initializing the app never starts a service or request.
+    _backgroundState = _backgroundScanService.state;
+    _backgroundSubscription = _backgroundScanService.states.listen(
+      _acceptBackgroundState,
+      onError: (Object error, StackTrace stack) {
+        if (_disposed) return;
+        debugPrint('[BackgroundScan] 狀態監聽失敗：$error\n$stack');
+        _backgroundError = '背景掃描狀態讀取失敗：$error';
+        _notify();
+      },
+    );
   }
 
   /// Includes repository construction, metadata, requests and validation. A
@@ -124,6 +140,28 @@ class AppController extends ChangeNotifier {
               ? RealPortfolioRepository(baseUrl: settings.apiBaseUrl)
               : DirectLivePortfolioRepository();
   final ReminderService _reminders;
+  final BackgroundScanService _backgroundScanService;
+  StreamSubscription<BackgroundScanState>? _backgroundSubscription;
+  BackgroundScanState _backgroundState = BackgroundScanState.inactive;
+  bool _backgroundBusy = false;
+  String? _backgroundError;
+  int _backgroundCommandVersion = 0;
+  bool _notificationBusy = false;
+  DateTime? _lastNotificationAt;
+  String? _lastNotificationText;
+  String? _lastNotificationMode;
+  bool get backgroundScanSupported => _backgroundScanService.supported;
+  bool get backgroundScanActive => _backgroundState.active;
+  bool get backgroundScanPaused => _backgroundState.paused;
+  bool get backgroundScanBusy => _backgroundBusy;
+  String? get backgroundScanError => _backgroundError;
+  /// Native start/pause/stop explanations are informational. Only a failed
+  /// command belongs in the settings screen's error presentation.
+  String? get backgroundScanMessage => _backgroundState.message;
+  bool get _backgroundRunning => _backgroundState.running &&
+      !_settings.useMockData && _settings.dataProvider == 'direct';
+  bool get _canPoll => _foreground || _backgroundRunning;
+  bool get _pollingEnabled => _settings.autoRefreshEnabled || _backgroundRunning;
   final bool _forceMockPreview;
   final Duration _pollingInterval;
   final Duration _scanUpdateTimeout;
@@ -958,11 +996,96 @@ class AppController extends ChangeNotifier {
         scanPageSize: value.scanPageSize,
         universeFingerprint: value.universeFingerprint);
 
-  /// The Flutter lifecycle owner explicitly enables polling only while visible.
+  /// Starts the existing controller's poller under Android's visible data-sync
+  /// notification. No second Flutter isolate/repository writes this checkpoint.
+  Future<void> startBackgroundScan() => _runBackgroundCommand(
+      _backgroundScanService.start, starting: true);
+
+  Future<void> stopBackgroundScan() =>
+      _runBackgroundCommand(_backgroundScanService.stop);
+
+  Future<void> pauseBackgroundScan() =>
+      _runBackgroundCommand(_backgroundScanService.pause);
+
+  Future<void> resumeBackgroundScan() =>
+      _runBackgroundCommand(_backgroundScanService.resume, resuming: true);
+
+  Future<void> _runBackgroundCommand(
+      Future<BackgroundScanState> Function() command,
+      {bool starting = false, bool resuming = false}) async {
+    if (_disposed || _backgroundBusy) return;
+    _backgroundError = null;
+    if (!backgroundScanSupported) {
+      _backgroundError = '背景掃描服務僅支援 Android；其他平台可維持前台更新。';
+      _notify();
+      return;
+    }
+    if ((starting || resuming) && (!_initialized ||
+        _settings.useMockData || _settings.dataProvider != 'direct')) {
+      _backgroundError = '請先完成初始化並使用正式直接行情；手機背景更新目前僅支援直接行情。';
+      _notify();
+      return;
+    }
+    if (starting && !_foreground) {
+      _backgroundError = '請在 App 顯示於前台時啟動背景掃描。';
+      _notify();
+      return;
+    }
+    _backgroundBusy = true;
+    final version = ++_backgroundCommandVersion;
+    _notify();
+    try {
+      final state = await command();
+      if (_disposed || version != _backgroundCommandVersion) return;
+      _backgroundError = null;
+      _acceptBackgroundState(state);
+      if ((starting || resuming) && state.running) {
+        // Start/resume is explicit user intent; it can resume a manually
+        // stopped Taiwan round. An ordinary minute tick still cannot do so.
+        _mobileScanPaused = false;
+      }
+    } catch (error, stack) {
+      if (_disposed || version != _backgroundCommandVersion) return;
+      debugPrint('[BackgroundScan] Android 服務操作失敗：$error\n$stack');
+      _backgroundError = '背景掃描未完成：$error。請確認通知權限後重試。';
+    } finally {
+      if (!_disposed && version == _backgroundCommandVersion) {
+        _backgroundBusy = false;
+        _notify();
+      }
+    }
+  }
+
+  void _acceptBackgroundState(BackgroundScanState value) {
+    if (_disposed) return;
+    final wasRunning = _backgroundRunning;
+    final wasActive = _backgroundState.active;
+    _backgroundState = value;
+    final running = _backgroundRunning;
+    if (!wasRunning && running) {
+      // Native notification resume/start is also an explicit user action.
+      _mobileScanPaused = false;
+      _lastNotificationAt = null;
+      _lastNotificationText = null;
+      _lastNotificationMode = null;
+    }
+    if (!_foreground && !running && (wasRunning || wasActive)) {
+      _cancelScan();
+      _cancelPortfolio();
+      _pollVersion++;
+      _pollBusy = false;
+    }
+    _syncPolling();
+    if (!wasRunning && running && _initialized) unawaited(pollNow());
+  }
+
+  /// The lifecycle owner pauses hidden work unless the user explicitly started
+  /// Android's foreground service. A service's notification is the permission
+  /// to keep this very same controller alive while its activity is hidden.
   void setForeground(bool value) {
     if (_disposed || _foreground == value) return;
     _foreground = value;
-    if (!value) {
+    if (!value && !_backgroundRunning) {
       _cancelBackendTimer();
       _syncBackendWaitDeadline();
       // Stop this phone's in-flight status request on backgrounding. The
@@ -983,7 +1106,7 @@ class AppController extends ChangeNotifier {
     if (value && _backendScanWaiting) {
       _syncBackendWaitDeadline();
       _scheduleBackendStatusPoll(immediately: true);
-    } else if (value && _initialized && _settings.autoRefreshEnabled &&
+    } else if (value && _initialized && _pollingEnabled &&
         !_settings.useMockData && (_lastAutoRefreshAt == null ||
           _now().difference(_lastAutoRefreshAt!) >= _pollingInterval)) {
       unawaited(pollNow());
@@ -993,8 +1116,8 @@ class AppController extends ChangeNotifier {
   void _syncPolling() {
     _pollTimer?.cancel();
     _pollTimer = null;
-    if (!_disposed && _initialized && _foreground &&
-        _settings.autoRefreshEnabled && !_settings.useMockData) {
+    if (!_disposed && _initialized && _canPoll &&
+        _pollingEnabled && !_settings.useMockData) {
       _pollTimer = Timer.periodic(_pollingInterval, (_) => unawaited(pollNow()));
     }
     _notify();
@@ -1003,8 +1126,8 @@ class AppController extends ChangeNotifier {
   /// Public for lifecycle tests and a manual foreground update. Concurrent
   /// ticks and pull-to-refresh requests never start overlapping poll batches.
   Future<void> pollNow() async {
-    if (_disposed || !_initialized || !_foreground ||
-        !_settings.autoRefreshEnabled || _settings.useMockData ||
+    if (_disposed || !_initialized || !_canPoll ||
+        !_pollingEnabled || _settings.useMockData ||
         _pollBusy || _loading || _portfolioLoading || _backendScanWaiting ||
         (_backendScanStatus?.isRunning ?? false) ||
         (_backendScanStatus?.isFailed ?? false)) return;
@@ -1088,6 +1211,34 @@ class AppController extends ChangeNotifier {
     final previousSettings = _settings;
     final oldSource = _portfolioSource(previousSettings);
     final nextSource = _portfolioSource(next);
+    if ((oldSource != nextSource ||
+        previousSettings.twAdrThreshold != next.twAdrThreshold ||
+        previousSettings.usAdrThreshold != next.usAdrThreshold) &&
+        (_backgroundState.active || _backgroundBusy)) {
+      // Do not let a notification keep scanning an outdated source/threshold.
+      // This stop supersedes even a still-pending start command before any
+      // settings are mutated. A failed stop leaves the existing config intact.
+      final version = ++_backgroundCommandVersion;
+      _backgroundBusy = true;
+      _notify();
+      try {
+        final state = await _backgroundScanService.stop();
+        if (_disposed || version != _backgroundCommandVersion) return;
+        _acceptBackgroundState(state);
+        if (state.active) throw StateError('Android 背景掃描尚未停止。');
+      } catch (error) {
+        if (!_disposed && version == _backgroundCommandVersion) {
+          _backgroundError = '請先停止背景掃描再切換行情來源或 ADR：$error';
+        }
+        rethrow;
+      } finally {
+        if (!_disposed && version == _backgroundCommandVersion) {
+          _backgroundBusy = false;
+          _notify();
+        }
+      }
+    }
+    if (_disposed) return;
     _cancelScan();
     _resetBackendWaiting();
     _cancelPortfolio();
@@ -1635,12 +1786,84 @@ class AppController extends ChangeNotifier {
   }
 
   void _notify() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    notifyListeners();
+    _updateBackgroundNotification();
+  }
+
+  void _updateBackgroundNotification() {
+    if (_disposed || !_backgroundState.active || _notificationBusy) return;
+    final snapshot = _snapshot;
+    final progress = _marketScanProgress;
+    // Use only the active operation's validated partial. A preceding page's
+    // global snapshot otherwise masks cumulative progress (30 + 5 -> 35).
+    final partial = _scanOperation?.partialSnapshot;
+    final twSnapshot = _isMobileTwScan &&
+        partial?.coverageScannedCount != null ? partial : snapshot;
+    final tw = _market == StockMarket.tw;
+    final total = tw
+        ? twSnapshot?.coverageTotalCount ?? progress?.universeCount ??
+            twSnapshot?.universeCount
+        : progress?.poolSize ?? snapshot?.scanPoolSize;
+    final attempted = tw
+        ? twSnapshot?.coverageScannedCount ?? progress?.attemptedCount
+        : progress?.attemptedCount ??
+            (snapshot?.scanCompletedAt != null ? snapshot?.scanPoolSize : null);
+    final evaluated = tw
+        ? twSnapshot?.coverageEvaluatedCount ?? progress?.evaluatedCount ??
+            twSnapshot?.evaluatedCount
+        : progress?.evaluatedCount ?? snapshot?.evaluatedCount;
+    final remaining = tw ? twSnapshot?.coverageRemainingCount : null;
+    final marketLabel = _market == StockMarket.tw ? '台股輪掃' : '美股核心精選池';
+    final stage = _backgroundState.paused ? '背景掃描已暫停' :
+        _mobileScanPaused && _isMobileTwScan ? '台股輪掃已暫停' :
+        _loading ? '正在分批評估' : '等待下一次更新';
+    final text = '$marketLabel · $stage'
+        '${attempted != null && total != null ? ' · 已嘗試 $attempted/$total' : ''}'
+        '${evaluated != null ? ' · 已評估 $evaluated' : ''}'
+        '${remaining != null ? ' · 剩餘 $remaining' : ''}';
+    final instant = _now();
+    final mode = '${_market.name}:${_backgroundState.paused}:'
+        '${_mobileScanPaused && _isMobileTwScan}';
+    if (_lastNotificationText == text ||
+        (_lastNotificationMode == mode && _lastNotificationAt != null &&
+          instant.difference(_lastNotificationAt!) < const Duration(seconds: 1))) {
+      return;
+    }
+    _lastNotificationText = text;
+    _lastNotificationMode = mode;
+    _lastNotificationAt = instant;
+    _notificationBusy = true;
+    unawaited(_backgroundScanService.update(
+      title: 'Martin Luk 動能掃描', text: text, market: _market.name,
+      attempted: attempted, total: total, evaluated: evaluated,
+      remaining: remaining,
+    ).catchError((Object error, StackTrace stack) {
+      // Notification delivery never aborts HTTP work or recursively notifies.
+      if (!_disposed) {
+        debugPrint('[BackgroundScan] 通知進度更新失敗：$error\n$stack');
+        _lastNotificationText = null;
+      }
+    }).whenComplete(() => _notificationBusy = false));
   }
 
   @override
   void dispose() {
     _disposed = true;
+    final stopBackground = _backgroundBusy || _backgroundState.active ||
+        _backgroundScanService.state.active;
+    _backgroundCommandVersion++;
+    _backgroundBusy = false;
+    _backgroundSubscription?.cancel();
+    _backgroundSubscription = null;
+    if (stopBackground) {
+      // Invoke native stop before detaching the channel; completion/cancellation
+      // is consumed and cannot mutate an already disposed controller.
+      unawaited(_backgroundScanService.stop().catchError(
+        (Object _) => BackgroundScanState.inactive));
+    }
+    _backgroundScanService.dispose();
+    _backgroundState = BackgroundScanState.inactive;
     _pollTimer?.cancel();
     _pollTimer = null;
     _resetBackendWaiting();

@@ -1,3 +1,19 @@
+# 最新交付狀態：1.5.0+12 Android 前景服務
+
+2026-10-16（台北時間）。新增使用者明確啟動的dataSync服務、常駐通知與暫停／繼續／停止。Activity與服務沿用同一FlutterEngine／Controller，不另建掃描isolate或第二個檢查點寫入者。未啟用服務時，既有切背景暫停行為保留。
+
+原生加入前景服務與WakeLock權限、通知圖示、引擎所有權及啟動授權／取消時限；Dart加入安全平台橋接、單一poll擁有者、設定及通知進度。Mock、Python API、不支援平台不允許啟動；台股完整已取得名單續掃、美股核心池範圍不變。前台開關與明確背景服務分開。
+
+加入平台通道、無Binding建構、Controller、設定頁及主App生命週期測試，CI同時執行既有前台生命週期與庫存Controller測試。名單服務關閉例外修正及原有全部門禁保留，允許零推薦。
+
+本機已通過：YAML解析、12段Bash語法檢查、實際工作流48個必要檔案預檢、340個專案Dart import路徑、Android Manifest／通知圖示XML、服務權限及通道名稱一致性。已嘗試上述Flutter測試命令，因`flutter: command not found`退出127；靜態檢查不能替代Dart或Kotlin編譯。
+
+本環境沒有Flutter／Dart／Kotlin／Android SDK，尚不能宣稱新增測試、原生APK或鎖屏實機通過。需要新提交Actions編譯與手機驗收。Doze、廠商省電、強制停止及關機仍可能中止工作，不保證每60秒準點。操作、架構及驗證限制見 [ANDROID_BACKGROUND_SCAN.md](ANDROID_BACKGROUND_SCAN.md)。
+
+---
+
+以下為歷史交付及已讀取的GitHub結果；不當作本版新增服務的驗證結果。
+
 # 最新修正：名單服務關閉例外契約（仍為1.4.4+11）
 
 2026-10-16（台北時間）。已讀取 GitHub run `38862604909` 完整日誌：3R／5R及風控群78項通過，網路／控制器／輪掃群195項通過，台股官方備援群37項通過、2項失敗。兩項都預期關閉服務回傳StateError，實際卻收到已取消HTTP的RequestAbortedException。

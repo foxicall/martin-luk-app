@@ -470,7 +470,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
           if (!controller.settings.useMockData) ...[
             const SizedBox(height: 8),
-            Text(_isMobileTwScan
+            if (controller.backgroundScanActive) ...[
+              Text(controller.backgroundScanPaused
+                      ? 'Android 背景服務已暫停；前台更新依原設定執行'
+                      : 'Android 背景服務已啟用 · 切換 App 後可續掃 · 通知可暫停或停止',
+                  key: const ValueKey('dashboard-background-scan-status'),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onPrimaryContainer,
+                  )),
+              const SizedBox(height: 4),
+            ],
+            Text(controller.backgroundScanActive && !controller.backgroundScanPaused
+                ? _isMobileTwScan
+                    ? controller.mobileScanPaused
+                        ? '台股輪掃已手動暫停 · 下拉可繼續'
+                        : '服務約每 60 秒續掃下一頁；系統省電可能延後'
+                    : '服務約每 60 秒更新美股核心池報價；系統省電可能延後'
+                : _isMobileTwScan
                 ? controller.mobileScanPaused
                     ? '台股輪掃已暫停 · 下拉可繼續'
                     : controller.autoRefreshActive

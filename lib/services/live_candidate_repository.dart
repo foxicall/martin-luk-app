@@ -550,7 +550,8 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
               '部分盤中行情未取得：${_failureSummary(intradayFailures)}；只保留已驗證日 K，不確認突破。',
             if (intradayPending.isNotEmpty)
               '有 ${intradayPending.length} 檔盤中資料尚未完成；僅供觀察，不確認突破。',
-            '前台定期更新與下拉刷新會續掃下一頁；關閉或切到背景後暫停，下次由已保存進度繼續。',
+            '前台定期更新、下拉刷新或已啟用的 Android 背景服務會續掃下一頁；'
+                '未啟用服務時切到背景暫停，下次由已保存進度繼續。',
             if (storageFailed)
               '本機進度未儲存，僅暫存在記憶體，重啟可能重掃；行情計算結果仍可查看。',
           ]);

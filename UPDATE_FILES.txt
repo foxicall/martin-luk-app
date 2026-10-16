@@ -1,23 +1,44 @@
-2026-10-16 / App仍為1.4.4+11 / 名單服務關閉例外最小修正
-GitHub基線commit: 042af225e8450c8ccc5719aa97032042ed278faf
+2026-10-16 / App 1.5.0+12 / Android 背景持續輪掃完整覆蓋包
+GitHub基線commit: 2f32f29eded0c69c18873876b123e6e2bf391530
 目標分支: fix/refresh-live-gate-20261014
 
-核心只修改 lib/services/stock_universe_service.dart：在共用_load邊界將關閉後的取消統一回傳StateError。
-兩個測試及斷言、NetworkRequest、pubspec、工作流完全不變，已比對失敗commit雜湊。
-其餘為本次指南、狀態與完整性清單，以及GitHub仍缺的隱藏配置檔。
-全部為完整可覆蓋檔案；解壓後依原路徑合併。不要只上傳ZIP，不多套一層目錄。
-若只要最小核心修正，單獨覆蓋上述Dart檔即可觸發既有CI測試；完整清單更新可一併上傳。
-原有3R／5R顯示、手動試算、台股輪掃與官方CSV備援保留。
-本機Flutter命令退出127，修正後結果仍需新提交Actions確認。
-詳細日誌證據及操作見 UNIVERSE_CLOSE_FIX.md。
+所有檔案都是完整內容，解壓後依原路徑合併覆蓋；不要只上傳ZIP，不多套一層目錄。
+務必包含.github、原生Kotlin服務及圖示，不能只更新Dart。
+提交新commit後由Actions執行固定測試與真實行情門禁，再建置正式APK。
+此包未包含已編譯APK；本機Flutter命令因未安裝SDK退出127。
+安裝新APK後：正式直接行情 → 背景持續更新（Android）→ 啟動背景更新 → 允許通知。
+同一引擎／控制器續掃，不另開第二套請求；通知可暫停、繼續或停止。
+台股續掃已取得的上市＋上櫃名單，美股維持核心池；沒有擴大選股門檻或假造行情。
+Doze、廠商省電與強制停止仍可能延後／停止工作，不保證每60秒準點。
+前次名單關閉StateError修正已在基線，完整專案仍保留。
+操作、限制及手機驗收見 ANDROID_BACKGROUND_SCAN.md。
 
 .dockerignore
+.github/workflows/build_apk.yml
 .gitignore
 .metadata
+ANDROID_BACKGROUND_SCAN.md
 BUILD_STATUS.md
 FILE_MANIFEST.json
 GITHUB_MANUAL_UPDATE.md
+MOBILE_TW_SCAN.md
 README.md
-UNIVERSE_CLOSE_FIX.md
 UPDATE_FILES.txt
-lib/services/stock_universe_service.dart
+android/app/src/main/AndroidManifest.xml
+android/app/src/main/kotlin/com/martinluk/martin_luk_app/MainActivity.kt
+android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanForegroundService.kt
+android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanServiceBridge.kt
+android/app/src/main/res/drawable/ic_stat_scan.xml
+lib/app_controller.dart
+lib/main.dart
+lib/screens/dashboard_screen.dart
+lib/screens/settings_screen.dart
+lib/services/background_scan_service.dart
+lib/services/live_candidate_repository.dart
+pubspec.yaml
+scripts/verify_deliverable.py
+test/background_scan_app_lifecycle_test.dart
+test/background_scan_controller_test.dart
+test/background_scan_service_test.dart
+test/background_scan_settings_test.dart
+test/background_scan_uninitialized_test.dart
