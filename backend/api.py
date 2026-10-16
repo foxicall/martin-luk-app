@@ -38,6 +38,43 @@ LOGGER = logging.getLogger(__name__)
 MarketCode = Literal["tw", "us"]
 
 
+class ScanCapabilities(BaseModel):
+    """Configured scan scope, not evidence that any market data was fetched."""
+
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid", strict=True)
+    pool_limit: int = Field(ge=0)
+    scope: Literal["full_universe", "limited"]
+    page_size: int = Field(ge=1, le=100)
+    page_interval_seconds: float = Field(gt=0)
+    background_jobs: Literal[True] = True
+    continuation: Literal["client_driven"] = "client_driven"
+    recommendations: Literal["latest_page_only"] = "latest_page_only"
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> ScanCapabilities:
+        expected = "full_universe" if self.pool_limit == 0 else "limited"
+        if self.scope != expected:
+            raise ValueError("掃描範圍必須符合實際股票池上限。")
+        return self
+
+
+class CapabilitiesResponse(BaseModel):
+    """Cheap deployment handshake; a separate live request verifies providers.
+
+    ``data_mode`` identifies the default production protocol. An explicit
+    ``demo=true`` remains available on the existing demonstration endpoints.
+    No provider availability or complete universe coverage is claimed here.
+    """
+
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid", strict=True)
+    service: Literal["martin-luk-market-api"] = "martin-luk-market-api"
+    api_version: Literal[1] = 1
+    data_mode: Literal["live"] = "live"
+    markets: list[MarketCode]
+    scan: ScanCapabilities
+    requires_market_data_verification: Literal[True] = True
+
+
 class CandidateResponse(BaseModel):
     """JSON-safe prices are in the market's native currency (TWD or USD)."""
 
@@ -832,6 +869,21 @@ def create_app(service: RecommendationService | None = None,
         # Liveness does not imply upstream finance providers are available.
         return {"status": "ok", "version": "1.2.0", "background_scan": True,
                 "provider_verified": False}
+
+    @application.get("/v1/capabilities", response_model=CapabilitiesResponse)
+    async def capabilities() -> CapabilitiesResponse:
+        # Read only immutable runtime settings: this handshake must finish even
+        # when calendars, exchange directories or price providers are offline.
+        # Full-universe scope is configured eligibility, not completed coverage.
+        return CapabilitiesResponse(
+            markets=["tw", "us"],
+            scan=ScanCapabilities(
+                pool_limit=settings.scan_pool_limit,
+                scope="full_universe" if settings.scan_pool_limit == 0 else "limited",
+                page_size=settings.scan_page_size,
+                page_interval_seconds=settings.scan_page_interval_seconds,
+            ),
+        )
 
     @application.get("/v1/candidates", response_model=CandidatesResponse)
     async def candidates(

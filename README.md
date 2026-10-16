@@ -1,6 +1,6 @@
 # Martin Luk 台美股動能策略 App
 
-最新美股名錄修正版本為 **1.3.1+5**，包含文字回應解析、具體錯誤與限時備援。請依 [US_UNIVERSE_FIX.md](US_UNIVERSE_FIX.md) 套用本次完整覆蓋檔並重建 APK。
+最新版本為 **1.3.2+6**：總覽明示手機精選池與實際評估數，推薦清單下方收合來源提示，設定頁新增 Python API 連線與掃描範圍檢查。你目前尚未部署 API，請依 [FULL_MARKET_SETUP.md](FULL_MARKET_SETUP.md) 完成雲端部署，再設定 App；APK 更新本身不會建立伺服器。美股名錄解析與取消測試修正一併保留。
 
 本版將股票池擴充為**台灣上市＋上櫃普通股**，以及 **NYSE、Nasdaq、NYSE American 的可確認普通股**。Flutter 提供動能總覽、個股風控、庫存診斷與離線搜尋；Python API 以有界背景工作逐頁掃描已取得的股票名單。全市場輪掃請在 App 設定選擇「Python API」，並填入實際部署的 HTTPS 根網址。
 

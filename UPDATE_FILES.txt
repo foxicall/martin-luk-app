@@ -1,41 +1,31 @@
-美股股票池格式與備援修正（1.3.1+5）
+2026-10-16 / App 1.3.2+6 / 全股票池設定與推薦畫面更新
+本包每個檔案均為完整內容，解壓後依原路徑覆蓋 GitHub 分支 fix/refresh-live-gate-20261014。
+包括上一版美股來源及取消測試修正；新增 API 相容性端點須同時更新 Python 服務。
+目前尚未部署 API，請依 FULL_MARKET_SETUP.md 建立實際 HTTPS 服務；ZIP 與 APK 不會自動建立服務。
+依 2026-10-15 美股修正完整包比對，並額外包含四個既有部署入口。
 
-本次更新包：martin_luk_us_universe_fix_20261015.zip
-最新完整包：martin_luk_all_stocks_us_fix_20261015.zip
-
-更新包是相對前次 polling_fix_v2 完整包的新增／修改完整檔案。
-不確定現有版本時使用完整包。沒有補丁安裝器或 Git 指令。
-
-解壓後將所有項目依原相對路徑覆蓋到 GitHub
-fix/refresh-live-gate-20261014 分支含 pubspec.yaml 的根目錄，
-保留隱藏 .github；不要只上傳 ZIP。需等待新提交通過 Actions，
-下載安裝新版 APK，再於美股頁下拉強制刷新。
-
-新增解析器 us_stock_directory.dart 與網路層 acceptedContentTypes 是
-必要相依；不可只覆蓋 stock_universe_service.dart。
-完整說明與驗證限制見 US_UNIVERSE_FIX.md。
-
-完整包 FILE_MANIFEST.json 是全部來源的 SHA256，不僅這份更新清單。
-
-共 20 個更新項目：
-
+.dockerignore
 .github/workflows/build_apk.yml
 BUILD_STATUS.md
+CLOUD_API_GUIDE.md
+Dockerfile
 FILE_MANIFEST.json
+FULL_MARKET_SETUP.md
 GITHUB_MANUAL_UPDATE.md
+NETWORK_DISPOSE_TEST_FIX.md
 README.md
 UPDATE_FILES.txt
-US_UNIVERSE_FIX.md
-lib/services/live_candidate_repository.dart
-lib/services/network_request.dart
-lib/services/stock_universe_service.dart
-lib/services/us_stock_directory.dart
+backend/api.py
+backend/requirements.txt
+backend/tests/test_capabilities.py
+lib/screens/dashboard_screen.dart
+lib/screens/settings_screen.dart
+lib/services/backend_connection_service.dart
 pubspec.yaml
+render.yaml
 scripts/verify_deliverable.py
-test/core_market_pool_test.dart
-test/live_repositories_test.dart
+test/backend_connection_service_test.dart
+test/backend_setup_settings_test.dart
+test/dashboard_scope_test.dart
 test/network_request_test.dart
-test/stock_universe_service_test.dart
-test/us_stock_directory_test.dart
-test/us_universe_fallback_test.dart
-test/us_universe_http_smoke_test.dart
+test/production_ui_test.dart

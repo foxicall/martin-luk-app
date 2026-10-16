@@ -8,6 +8,7 @@ import '../services/strategy_engine.dart';
 import '../widgets/stock_search_field.dart';
 import 'calculator_screen.dart';
 import 'portfolio_screen.dart';
+import 'settings_screen.dart';
 
 /// Market overview. All snapshots retain their source and timestamps; an API
 /// failure is displayed explicitly and never relabelled as live mock prices.
@@ -150,6 +151,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             children: [
                               if (controller.filteredCount > 0)
                                 _buildPagination(context),
+                              if (controller.snapshot?.warnings.isNotEmpty ?? false) ...[
+                                const SizedBox(height: 18),
+                                _buildSourceDisclosures(context),
+                              ],
                               const SizedBox(height: 18),
                               Text(
                                 '資料更新時間與延遲依來源而異。策略訊號供研究與評估，'
@@ -320,12 +325,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 10),
           Text('Martin Luk 動能框架 · ADR × 相對強勢 × 突破',
               style: TextStyle(color: colors.onPrimaryContainer)),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
+          _buildScanScope(context),
+          const SizedBox(height: 16),
           Wrap(
             spacing: 28,
             runSpacing: 16,
             children: [
-              _summary(context, '股票池',
+              _summary(context, '股票字典',
                   '${backend?.universeCount ?? currentProgress?.universeCount ?? snapshot?.universeCount ?? '—'}'),
               if ((backend?.totalCount ?? currentProgress?.poolSize ?? snapshot?.scanPoolSize) != null)
                 _summary(context, controller.settings.dataProvider == 'direct' ? '本次核心池' : '本頁掃描池',
@@ -386,7 +393,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     color: colors.onPrimaryContainer,
                   )),
             if (snapshot.universeAsOf != null)
-              Text('股票池時間：${_date(snapshot.universeAsOf!)}',
+              Text('股票名單時間：${_date(snapshot.universeAsOf!)}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.onPrimaryContainer,
                   )),
@@ -401,15 +408,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ? '正在取得本次評估，完成後儲存快照。'
                     : '尚未取得評估快照',
                 style: TextStyle(color: colors.onPrimaryContainer)),
-          if (!controller.settings.useMockData &&
-              controller.settings.dataProvider == 'direct' &&
-              (currentProgress?.poolSize ?? snapshot?.scanPoolSize) != null) ...[
-            const SizedBox(height: 6),
-            Text('每批最多 5 檔；本次先評估核心股票池，排名不代表全市場排名。',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.onPrimaryContainer,
-                )),
-          ],
           if (controller.settings.useMockData) ...[
             const SizedBox(height: 8),
             Text('示範數值為合成資料，未執行全市場掃描。',
@@ -426,6 +424,85 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colors.onPrimaryContainer,
                 )),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// A directory's member count is not a claim that all members were scanned.
+  /// Only a server response with matching rolling-coverage metadata can label
+  /// its scope as the whole verified directory. Completion remains separate.
+  Widget _buildScanScope(BuildContext context) {
+    final snapshot = controller.snapshot;
+    final backend = controller.backendScanStatus;
+    final progress = controller.marketScanProgress;
+    final currentProgress = (controller.loading || snapshot == null) &&
+            progress?.market == controller.market
+        ? progress
+        : null;
+    final universe = backend?.universeCount ?? currentProgress?.universeCount ??
+        snapshot?.universeCount;
+    final pool = backend?.totalCount ?? currentProgress?.poolSize ??
+        snapshot?.scanPoolSize;
+    final evaluated = backend?.evaluatedCount ?? currentProgress?.evaluatedCount ??
+        snapshot?.evaluatedCount;
+    final coverage = backend?.coverageTotalCount ?? snapshot?.coverageTotalCount;
+    final coverageEvaluated = backend?.coverageEvaluatedCount ??
+        snapshot?.coverageEvaluatedCount;
+    final coverageRemaining = backend?.coverageRemainingCount ??
+        snapshot?.coverageRemainingCount;
+    final isMock = controller.settings.useMockData;
+    final isDirect = controller.settings.dataProvider == 'direct';
+    final hasFullScope = !isMock && !isDirect && universe != null &&
+        universe > 0 && coverage == universe && coverageEvaluated != null &&
+        coverageRemaining != null;
+    final title = isMock
+        ? '離線示範（非真實掃描）'
+        : isDirect
+            ? '手機精選掃描'
+            : hasFullScope
+                ? 'Python 全股票池輪掃（分頁）'
+                : 'Python 分批掃描';
+    final detail = isMock
+        ? '示範卡片與真實市場評估分開；未執行全市場掃描。'
+        : isDirect
+            ? '本次精選 ${pool ?? '待取得'} 檔 · 已評估 ${evaluated ?? '待取得'} 檔。'
+                '股票字典不等於全部已評估，RS 僅比較已取得行情的精選股。'
+            : hasFullScope
+                ? '本輪成功評估 $coverageEvaluated/$coverage 檔；'
+                    '尚未嘗試 $coverageRemaining 檔。覆蓋範圍以可確認的普通股名單為限，'
+                    '不代表全部已完成；推薦與 RS 仍以本頁行情計算。'
+                : '本頁 ${pool ?? '待取得'} 檔 · 已評估 ${evaluated ?? '待取得'} 檔。'
+                    '伺服器尚未提供完整市場輪巡範圍，不宣稱已掃描全部股票。';
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('dashboard-scan-scope'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.surface.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text(detail, style: Theme.of(context).textTheme.bodySmall),
+          if (!isMock) ...[
+            if (isDirect) ...[
+              const SizedBox(height: 4),
+              Text('全市場需先部署 Python API，再填入 HTTPS 網址。',
+                  style: Theme.of(context).textTheme.bodySmall),
+            ],
+            TextButton.icon(
+              key: const ValueKey('dashboard-api-settings'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => SettingsScreen(controller: controller),
+              )),
+              icon: const Icon(Icons.cloud_outlined, size: 18),
+              label: Text(isDirect ? '設定全市場 API' : '查看 API 設定'),
+            ),
           ],
         ],
       ),
@@ -537,12 +614,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ));
     }
     if (snapshot != null) {
-      for (final warning in snapshot.warnings) {
-        widgets.add(Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: _warning(context, '資料提示', warning),
-        ));
-      }
       if (snapshot.missingSymbols.isNotEmpty) {
         final shown = snapshot.missingSymbols.take(5).join('、');
         final extra = snapshot.missingSymbols.length > 5 ? ' 等' : '';
@@ -554,6 +625,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
     return widgets;
+  }
+
+  /// Keep informational source disclosures accessible without placing a long
+  /// stack of identical cards ahead of the actual recommendations. Failures,
+  /// stale/fallback snapshots and missing quotes remain outside this collapse.
+  Widget _buildSourceDisclosures(BuildContext context) {
+    final warnings = {...?controller.snapshot?.warnings}.toList();
+    return Card(
+      margin: EdgeInsets.zero,
+      child: ExpansionTile(
+        key: const ValueKey('dashboard-source-disclosures'),
+        leading: const Icon(Icons.info_outline),
+        title: Text('資料來源與限制（${warnings.length} 則）'),
+        subtitle: const Text('點開查看名單來源、分類排除與更新範圍'),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var index = 0; index < warnings.length; index++)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text('${index + 1}. ${warnings[index]}',
+                  style: const TextStyle(height: 1.5)),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildSorting(BuildContext context) => Wrap(

@@ -1,5 +1,7 @@
 # Render 雲端 API：全市場逐頁掃描與手機 5G
 
+**尚未部署服務請先依 [FULL_MARKET_SETUP.md](FULL_MARKET_SETUP.md) 操作。** 新版提供 `/v1/capabilities` 與 App 的「測試 API 連線」，可確認你部署的分支與掃描上限。API 可達不等於行情已驗證，仍需實際觸發掃描。以下完整說明保留所有輪掃與主機限制。
+
 本版以單一 Python API 服務支援台灣上市＋上櫃、美股 Nasdaq／NYSE／NYSE American 可確認普通股。手機使用短 HTTP 請求讀取背景工作與當頁快照，不等待整池。這份交付沒有代為建立 Render 服務、部署、付費或產生實際網址。
 
 ## 1. 先更新 GitHub 原始碼
