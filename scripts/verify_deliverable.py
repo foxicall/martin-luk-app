@@ -38,6 +38,8 @@ EXCLUDED_FILE_PATTERNS = (
     "apply_market_scan_fix.py", "apply_market_scan_timeout_fix.py",
 )
 REQUIRED_FILES = (
+    "MOBILE_TW_SCAN.md", "lib/services/mobile_scan_checkpoint.dart",
+    "test/mobile_tw_rolling_repository_test.dart", "test/mobile_tw_polling_test.dart",
     "FULL_MARKET_SETUP.md", "lib/services/backend_connection_service.dart",
     "test/backend_connection_service_test.dart", "test/backend_setup_settings_test.dart",
     "test/dashboard_scope_test.dart", "backend/tests/test_capabilities.py",

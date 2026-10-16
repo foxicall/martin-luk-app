@@ -11,18 +11,20 @@ import 'live_batch_deadline.dart';
 import 'live_strategy_engine.dart';
 import 'market_data_api.dart';
 import 'market_scan_progress.dart';
+import 'mobile_scan_checkpoint.dart';
 import 'stock_universe_service.dart';
 
-/// Serverless core-market scanner. Membership still comes from the current
-/// universe, but at most 30 genuine members are evaluated per scan. Five-stock
-/// chunks and cancellable pauses protect the public provider from request
-/// bursts. Partial coverage and individual failures are always disclosed.
+/// Serverless scanner: Taiwan resumes pages across every returned listed/OTC
+/// member; the US keeps its bounded 30-stock priority pool. Five-stock chunks
+/// and cancellable pauses protect the public provider from request bursts.
+/// Partial coverage, page-local RS and individual failures are disclosed.
 class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
   DirectLiveCandidateRepository({MarketDataApi? api, StockUniverseService? universe,
     SharedPreferences? preferences, DateTime Function()? now,
     Duration scanBudget = const Duration(seconds: 9),
     Duration quoteRefreshBudget = const Duration(seconds: 6),
     this.corePoolSize = 30,
+    this.twPageSize = 30,
     this.batchSize = 5,
     this.interBatchDelay = const Duration(milliseconds: 150)})
       : _api = api ?? MarketDataApi(preferences: preferences, now: now),
@@ -35,6 +37,7 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
         _preferences = preferences, _now = now ?? DateTime.now {
     if (batchSize < 1 || batchSize > 5) throw ArgumentError.value(batchSize, 'batchSize');
     if (corePoolSize < 1 || corePoolSize > 30) throw ArgumentError.value(corePoolSize, 'corePoolSize');
+    if (twPageSize < 1 || twPageSize > 30) throw ArgumentError.value(twPageSize, 'twPageSize');
     if (interBatchDelay < Duration.zero) throw ArgumentError.value(interBatchDelay, 'interBatchDelay');
   }
 
@@ -54,6 +57,7 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
   final Duration scanBudget;
   final Duration quoteRefreshBudget;
   final int corePoolSize;
+  final int twPageSize;
   final int batchSize;
   final Duration interBatchDelay;
   SharedPreferences? _preferences;
@@ -63,6 +67,8 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
   final Map<StockMarket, Map<String, StockItem>> _members = {};
   final Set<LiveBatchDeadline> _runs = {};
   bool _closed = false;
+  final Map<String, MobileScanCheckpoint> _twCheckpoints = {};
+  double? _activeTwThreshold;
 
   @override
   Future<CandidateSnapshot> fetch(StockMarket market, {required double adrThreshold,
@@ -92,6 +98,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
 
   Future<CandidateSnapshot> _fetch(StockMarket market, double threshold,
       bool force, bool quotesOnly, void Function(MarketScanProgress)? onProgress) async {
+    if (market == StockMarket.tw) {
+      return _fetchTw(threshold, force, onProgress);
+    }
     final key = '${market.name}:$threshold';
     final budget = quotesOnly && !force ? quoteRefreshBudget : scanBudget;
     final cacheReserve = budget ~/ 10 < const Duration(seconds: 2)
@@ -361,6 +370,329 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
     }
   }
 
+  /// Taiwan uses the COMPLETE returned listed/OTC member list. A page is only
+  /// a foreground work budget, never a fixed priority/allow list. Each call
+  /// resumes the first unattempted member; failures advance and are disclosed.
+  Future<CandidateSnapshot> _fetchTw(double threshold, bool force,
+      void Function(MarketScanProgress)? onProgress) async {
+    const market = StockMarket.tw;
+    final key = '${market.name}:$threshold';
+    final reserve = scanBudget ~/ 10;
+    final run = LiveBatchDeadline(scanBudget, reserve: reserve);
+    _runs.add(run);
+    MobileScanCheckpoint? checkpoint = _twCheckpoints[key];
+    CandidateSnapshot? previous = _snapshots[key] ?? checkpoint?.toSnapshot();
+    try {
+      checkpoint ??= await run.wait(_loadTwCheckpoint(threshold, run),
+          maximum: const Duration(milliseconds: 500));
+      if (_closed || !run.active) throw TimeoutException('台股輪掃已取消或逾時。');
+      previous ??= checkpoint?.toSnapshot(fromDisk: true);
+      final thresholdChanged = _activeTwThreshold != null &&
+          _activeTwThreshold != threshold;
+      final today = MobileScanCheckpoint.dayFor(_now());
+      // Progress/quote refreshes may renew updatedAt. Only the immutable round
+      // completion stamp can authorize a cooldown; an interrupted final chunk
+      // must start a new round instead of refreshing itself forever.
+      final completedAt = checkpoint?.roundCompletedAt;
+      final completedAge = completedAt == null ? null :
+          _now().toUtc().difference(completedAt);
+      // Only a complete current-day round may enter the old hot-quote path.
+      // Incomplete rounds ignore both quotesOnly and the 15-minute cooldown.
+      if (checkpoint != null && checkpoint.remaining == 0 && !force &&
+          !thresholdChanged && checkpoint.day == today &&
+          completedAge != null && !completedAge.isNegative &&
+          completedAge < const Duration(minutes: 15) && previous != null) {
+        _twCheckpoints[key] = checkpoint;
+        run.capTo(quoteRefreshBudget);
+        return await _refreshHotQuotes(market, threshold, previous, run, onProgress);
+      }
+      _emitProgress(onProgress, MarketScanProgress(market: market,
+        universeCount: previous?.universeCount ?? 0, poolSize: 0,
+        attemptedCount: 0, completedCount: 0, evaluatedCount: 0,
+        adrMatchCount: 0, confirmedCount: 0, failedCount: 0,
+        finished: false, stage: '正在取得台股完整名單與大盤'));
+      final prerequisites = await run.wait(Future.wait<Object>([
+        _loadUniverse(market, force), _loadBenchmark(market, force),
+      ], eagerError: true));
+      if (_closed || !run.active) throw TimeoutException('台股名單或大盤取得逾時。');
+      final universe = prerequisites[0] as UniverseSnapshot;
+      final benchmark = prerequisites[1] as MarketChart;
+      if (benchmark.isStale) {
+        throw const RepositoryException('大盤行情為過期快取，無法建立新的 RS 排名。');
+      }
+      final bySymbol = <String, StockItem>{
+        for (final stock in universe.stocks)
+          if (stock.market == market &&
+              RegExp(r'^\d{4}\.(TW|TWO)$').hasMatch(stock.symbol))
+            stock.symbol: stock,
+      };
+      final symbols = bySymbol.keys.toList()..sort();
+      if (symbols.isEmpty) {
+        throw const RepositoryException('台股來源未提供可掃描的上市／上櫃普通股。');
+      }
+      _members[market] = bySymbol;
+      final oldRound = checkpoint?.round ?? 0;
+      final reset = checkpoint == null || thresholdChanged ||
+          !checkpoint.matches(symbols, threshold, _now()) ||
+          checkpoint.remaining == 0;
+      if (reset) {
+        checkpoint = MobileScanCheckpoint(symbols: symbols,
+          threshold: threshold, day: today, round: oldRound + 1,
+          attempted: const <String>{}, evaluated: const <String>{}, candidates: const [],
+          updatedAt: _now().toUtc(), universeAsOf: universe.asOf,
+          universeIsComplete: universe.isComplete, warnings: universe.warnings);
+      }
+      final initial = checkpoint!;
+      final start = initial.attempted.length;
+      final pool = symbols.skip(start).take(twPageSize)
+          .map((symbol) => bySymbol[symbol]!).toList();
+      final attempted = <String>{};
+      final evaluations = <String, LiveEvaluation>{};
+      final failures = <String, String>{};
+      final intradayFailures = <String, String>{};
+      final intradayPending = <String>{};
+      CandidateSnapshot? partial;
+      var storageFailed = false;
+
+      MobileScanCheckpoint buildCheckpoint({bool finalPage = false}) {
+        final pageCandidates = _engine.rank(evaluations.values.toList())
+            .where((row) => row.adrPercent >= threshold)
+            .map(_withPageRankingNote).toList();
+        final candidates = <String, StockCandidate>{
+          for (final row in initial.candidates) row.symbol: row,
+        };
+        // A newly attempted stock replaces its former round observation, even
+        // if this attempt failed or no longer meets ADR. No old entry is sold
+        // as a newly verified member of this page.
+        for (final symbol in attempted) { candidates.remove(symbol); }
+        for (final row in pageCandidates) { candidates[row.symbol] = row; }
+        final accumulated = candidates.values.toList()
+          ..sort((left, right) => left.symbol.compareTo(right.symbol));
+        final allAttempted = {...initial.attempted, ...attempted};
+        final allEvaluated = {...initial.evaluated, ...evaluations.keys};
+        final pageComplete = attempted.length == pool.length &&
+            evaluations.length == pool.length && intradayPending.isEmpty;
+        final now = _now().toUtc();
+        return MobileScanCheckpoint(symbols: symbols, threshold: threshold,
+          day: today, round: initial.round, attempted: allAttempted,
+          evaluated: allEvaluated, candidates: accumulated, updatedAt: now,
+          universeAsOf: universe.asOf, universeIsComplete: universe.isComplete,
+          roundCompletedAt: finalPage && allAttempted.length == symbols.length
+              ? now : null,
+          pageStart: start, pageSize: pool.length,
+          pageEvaluated: evaluations.length, pageAdrMatches: pageCandidates.length,
+          pageScanCompletedAt: finalPage && pageComplete ? now : null,
+          pageStale: evaluations.isEmpty,
+          warnings: [
+            ...universe.warnings,
+            '手機台股完整名單分批輪掃：第 ${initial.round} 輪已嘗試 '
+              '${allAttempted.length}/${symbols.length} 檔，成功評估 '
+              '${allEvaluated.length} 檔，剩餘 ${symbols.length - allAttempted.length} 檔。',
+            '本頁股票 ${start + 1}–${start + pool.length}，已嘗試 ${attempted.length} 檔、'
+              '成功 ${evaluations.length} 檔；每批最多 $batchSize 檔，失敗跳過後繼續。',
+            '候選跨頁累積並保留各卡原始行情時間；RS 為原掃描頁內排名，非全市場同步排名。',
+            if (evaluations.isEmpty)
+              '本頁尚無成功的真實日 K／RS 評估；此為失敗或未完成狀態，不是成功的零候選結果。',
+            if (evaluations.isNotEmpty && pageCandidates.isEmpty)
+              '本頁已評估的真實行情沒有標的符合 ADR ≥ $threshold%；零候選為有效結果。',
+            if (attempted.length < pool.length)
+              '整批期限已到；尚未嘗試的 ${pool.length - attempted.length} 檔保留至下次，不會跳過。',
+            if (failures.isNotEmpty) '個股錯誤摘要：${_failureSummary(failures)}。',
+            if (intradayFailures.isNotEmpty)
+              '部分盤中行情未取得：${_failureSummary(intradayFailures)}；只保留已驗證日 K，不確認突破。',
+            if (intradayPending.isNotEmpty)
+              '有 ${intradayPending.length} 檔盤中資料尚未完成；僅供觀察，不確認突破。',
+            '前台定期更新與下拉刷新會續掃下一頁；關閉或切到背景後暫停，下次由已保存進度繼續。',
+            if (storageFailed)
+              '本機進度未儲存，僅暫存在記憶體，重啟可能重掃；行情計算結果仍可查看。',
+          ]);
+      }
+
+      void report({bool finished = false}) {
+        if (_closed || (!run.active && !finished)) return;
+        final matches = evaluations.values.where((row) => row.adr >= threshold).length;
+        final confirmed = evaluations.values.where((row) =>
+            row.adr >= threshold && row.stop != null).length;
+        partial = buildCheckpoint(finalPage: finished).toSnapshot();
+        _emitProgress(onProgress, MarketScanProgress(market: market,
+          universeCount: symbols.length, poolSize: pool.length,
+          attemptedCount: attempted.length,
+          completedCount: evaluations.length + failures.length,
+          evaluatedCount: evaluations.length, adrMatchCount: matches,
+          confirmedCount: confirmed, failedCount: failures.length,
+          finished: finished, stage: finished ? '台股本頁輪掃完成' : '台股完整名單分批輪掃',
+          partialSnapshot: partial));
+      }
+
+      Future<void> persistProgress() async {
+        if (_closed || !run.active) return;
+        final value = buildCheckpoint();
+        _twCheckpoints[key] = value;
+        _activeTwThreshold = threshold;
+        if (!await _saveTwCheckpoint(value, budget: run.remaining)) {
+          storageFailed = true;
+        }
+      }
+
+      void record(LiveEvaluation value) {
+        if (_closed || !run.active) return;
+        evaluations[value.stock.symbol] = value;
+        report();
+      }
+
+      Future<void> evaluateStock(StockItem stock) async {
+        if (_closed || !run.active) return;
+        attempted.add(stock.symbol);
+        try {
+          final daily = await run.wait(_api.fetchDaily(stock.symbol, market,
+              forceRefresh: force));
+          if (_closed || !run.active) return;
+          if (daily.isStale) throw const FormatException('日 K 為過期快取。');
+          final adr = _engine.adrPercent(daily.completedDailyBars);
+          var bundle = ChartBundle(daily: daily, intradayError: adr >= threshold
+              ? '盤中資料尚未完成；僅供觀察，不確認突破。' : null);
+          final dailyEvaluation = _engine.evaluate(stock: stock, data: bundle,
+              benchmark: benchmark, now: _now().toUtc());
+          if (_closed || !run.active) return;
+          if (adr < threshold) { record(dailyEvaluation); return; }
+          intradayPending.add(stock.symbol);
+          record(dailyEvaluation);
+          try {
+            final intraday = await run.wait(_api.fetchIntraday(stock.symbol, market,
+                forceRefresh: force));
+            if (_closed || !run.active) return;
+            if (intraday.isStale) throw const FormatException('盤中行情為過期快取。');
+            bundle = ChartBundle(daily: daily, intraday: intraday);
+          } catch (error) {
+            if (_closed || !run.active) return;
+            intradayFailures[stock.symbol] = _errorReason(error);
+            bundle = ChartBundle(daily: daily,
+                intradayError: '盤中資料取得失敗：${_errorReason(error)}');
+          }
+          if (_closed || !run.active) return;
+          intradayPending.remove(stock.symbol);
+          record(_engine.evaluate(stock: stock, data: bundle,
+              benchmark: benchmark, now: _now().toUtc()));
+        } catch (error) {
+          if (_closed || !run.active) return;
+          if (evaluations.containsKey(stock.symbol)) {
+            intradayPending.remove(stock.symbol);
+            intradayFailures[stock.symbol] = _errorReason(error);
+          } else {
+            failures[stock.symbol] = _errorReason(error);
+          }
+        } finally {
+          if (!_closed && run.active) report();
+        }
+      }
+
+      report();
+      try {
+        for (var offset = 0; offset < pool.length; offset += batchSize) {
+          if (_closed || !run.active) break;
+          final chunk = pool.skip(offset).take(batchSize).toList();
+          // Start at most five real symbols. Record that actual attempted
+          // prefix immediately, so background/disposal can resume correctly.
+          final work = Future.wait(chunk.map(evaluateStock));
+          // Observe both futures in this event turn. A slow storage plugin
+          // cannot leave an aggregate network failure temporarily unhandled.
+          await Future.wait<void>([
+            persistProgress(), run.wait(work).then<void>((_) {}),
+          ]);
+          if (_closed || !run.active) break;
+          await persistProgress();
+          report();
+          if (offset + chunk.length < pool.length) {
+            await run.pause(interBatchDelay);
+          }
+        }
+      } on TimeoutException {
+        // The prefix already includes only actually started calls. Late
+        // workers are observed by Future.wait, sealed below, and cannot write.
+      }
+      run.seal();
+      if (_closed) throw const RepositoryException('台股輪掃已取消。');
+      for (final symbol in attempted.difference(evaluations.keys.toSet())) {
+        failures.putIfAbsent(symbol, () => '整批期限內未完成日 K 或 RS 評估。');
+      }
+      var result = buildCheckpoint(finalPage: true);
+      _twCheckpoints[key] = result;
+      _activeTwThreshold = threshold;
+      if (!await _saveTwCheckpoint(result, budget: run.remaining)) {
+        storageFailed = true;
+        result = buildCheckpoint(finalPage: true);
+        _twCheckpoints[key] = result;
+      }
+      if (_closed) throw const RepositoryException('台股輪掃已取消。');
+      final snapshot = result.toSnapshot();
+      _snapshots[key] = snapshot;
+      report(finished: true);
+      return snapshot;
+    } catch (error) {
+      if (_closed) throw const RepositoryException('台股輪掃已取消。');
+      final fallback = _twCheckpoints[key]?.toSnapshot() ?? previous;
+      if (fallback != null) {
+        return _stale(fallback, '台股輪掃未完成，保留目前進度；${_errorReason(error)}');
+      }
+      if (error is RepositoryException) rethrow;
+      throw RepositoryException('台股完整名單輪掃失敗：${_errorReason(error)}');
+    } finally {
+      run.seal();
+      _runs.remove(run);
+    }
+  }
+
+  StockCandidate _withPageRankingNote(StockCandidate value) =>
+      StockCandidate.fromJson({...value.toJson(), 'notes': [
+        ...value.notes.where((note) => !note.startsWith('RS 百分位') &&
+            note != 'RS 為原掃描頁內排名，非全市場同步排名。'),
+        'RS 為原掃描頁內排名，非全市場同步排名。',
+      ]});
+
+  String _twCheckpointKey(double threshold) =>
+      'martin-mobile-tw-rolling-v1-$threshold';
+  static const _twActiveThresholdKey = 'martin-mobile-tw-rolling-v1-active-threshold';
+
+  Future<MobileScanCheckpoint?> _loadTwCheckpoint(double threshold,
+      LiveBatchDeadline run) async {
+    try {
+      final preferences = await _prefs().timeout(const Duration(milliseconds: 400));
+      if (_closed || !run.active) return null;
+      _activeTwThreshold ??= double.tryParse(
+          preferences.getString(_twActiveThresholdKey) ?? '');
+      final text = preferences.getString(_twCheckpointKey(threshold));
+      if (text == null || text.length > 32 * 1024 * 1024) return null;
+      final value = MobileScanCheckpoint.fromJson(
+          jsonDecode(text) as Map<String, dynamic>);
+      if (value.threshold != threshold || value.updatedAt.isAfter(_now().toUtc()) ||
+          _now().toUtc().difference(value.updatedAt) > const Duration(days: 7)) return null;
+      if (_closed || !run.active) return null;
+      return value;
+    } catch (_) { return null; }
+  }
+
+  Future<bool> _saveTwCheckpoint(MobileScanCheckpoint value,
+      {required Duration budget}) async {
+    if (_closed || budget <= Duration.zero) return false;
+    final limit = budget < const Duration(milliseconds: 400)
+        ? budget : const Duration(milliseconds: 400);
+    final watch = Stopwatch()..start();
+    try {
+      final preferences = await _prefs().timeout(limit);
+      var left = limit - watch.elapsed;
+      if (_closed || left <= Duration.zero ||
+          !identical(_twCheckpoints['tw:${value.threshold}'], value)) return false;
+      final saved = await preferences.setString(_twCheckpointKey(value.threshold),
+          jsonEncode(value.toJson())).timeout(left);
+      if (!saved) return false;
+      left = limit - watch.elapsed;
+      if (_closed || left <= Duration.zero ||
+          !identical(_twCheckpoints['tw:${value.threshold}'], value)) return false;
+      return await preferences.setString(_twActiveThresholdKey,
+          value.threshold.toString()).timeout(left);
+    } catch (_) { return false; }
+  }
+
   Future<CandidateSnapshot> _refreshHotQuotes(StockMarket market, double threshold,
       CandidateSnapshot previous, LiveBatchDeadline run,
       void Function(MarketScanProgress)? onProgress) async {
@@ -411,8 +743,10 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
           if (_closed || !run.active) return;
           // Quote refresh never re-ranks a small hot list as if it were the
           // full evaluated universe. Keep the last complete scan ranking.
-          updated[candidate.symbol] = evaluated.toCandidate(
+          final refreshed = evaluated.toCandidate(
               rsScore: candidate.rsScore, rsRank: candidate.rsRank);
+          updated[candidate.symbol] = previous.candidatesAreCumulative
+              ? _withPageRankingNote(refreshed) : refreshed;
         } catch (error) {
           if (_closed || !run.active) return;
           failures[candidate.symbol] = _errorReason(error);
@@ -447,12 +781,24 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
             '候選報價更新 0/${hot.length}；保留上次真實快取。錯誤摘要：${_failureSummary(failures)}。');
       }
       final snapshot = CandidateSnapshot(
-        candidates: previous.candidates.map((candidate) => updated[candidate.symbol] ?? candidate).toList(),
+        candidates: previous.candidates
+            .map((candidate) => updated[candidate.symbol] ?? candidate)
+            .where((candidate) => !previous.candidatesAreCumulative ||
+                candidate.adrPercent >= threshold).toList(),
         fetchedAt: _now().toUtc(), scanCompletedAt: previous.scanCompletedAt,
         source: previous.source, universeCount: previous.universeCount,
         evaluatedCount: previous.evaluatedCount, universeIsComplete: previous.universeIsComplete,
         scanPoolSize: previous.scanPoolSize, adrMatchCount: previous.adrMatchCount,
         universeAsOf: previous.universeAsOf, stale: failed.isNotEmpty,
+        candidatesAreCumulative: previous.candidatesAreCumulative,
+        coverageTotalCount: previous.coverageTotalCount,
+        coverageScannedCount: previous.coverageScannedCount,
+        coverageEvaluatedCount: previous.coverageEvaluatedCount,
+        coverageRemainingCount: previous.coverageRemainingCount,
+        coverageRound: previous.coverageRound,
+        scanPageStart: previous.scanPageStart,
+        scanPageSize: previous.scanPageSize,
+        universeFingerprint: previous.universeFingerprint,
         missingSymbols: previous.missingSymbols, warnings: [
           ...previous.warnings.where((warning) => !warning.startsWith('本次即時更新')),
           '本次即時更新 ${updated.length}/${hot.length} 個候選；其餘保留卡片原始行情時間。',
@@ -558,6 +904,14 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
   Future<void> _saveCache(StockMarket market, double threshold, CandidateSnapshot snapshot,
       {required Duration budget}) async {
     if (_closed || budget <= Duration.zero) return;
+    if (market == StockMarket.tw && snapshot.candidatesAreCumulative) {
+      final previous = _twCheckpoints['tw:$threshold'];
+      if (previous == null) return;
+      final next = previous.withCandidates(snapshot.candidates, snapshot.fetchedAt);
+      _twCheckpoints['tw:$threshold'] = next;
+      await _saveTwCheckpoint(next, budget: budget);
+      return;
+    }
     final limit = budget < const Duration(seconds: 2) ? budget : const Duration(seconds: 2);
     final storage = Stopwatch()..start();
     try {
@@ -616,6 +970,15 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
     universeCount: previous.universeCount, evaluatedCount: previous.evaluatedCount,
     scanPoolSize: previous.scanPoolSize, adrMatchCount: previous.adrMatchCount,
     universeIsComplete: previous.universeIsComplete, universeAsOf: previous.universeAsOf,
+    candidatesAreCumulative: previous.candidatesAreCumulative,
+    coverageTotalCount: previous.coverageTotalCount,
+    coverageScannedCount: previous.coverageScannedCount,
+    coverageEvaluatedCount: previous.coverageEvaluatedCount,
+    coverageRemainingCount: previous.coverageRemainingCount,
+    coverageRound: previous.coverageRound,
+    scanPageStart: previous.scanPageStart,
+    scanPageSize: previous.scanPageSize,
+    universeFingerprint: previous.universeFingerprint,
     stale: true, missingSymbols: previous.missingSymbols,
     warnings: [...previous.warnings, warning]);
 

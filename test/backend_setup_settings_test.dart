@@ -68,6 +68,11 @@ Future<AppController> _mount(WidgetTester tester,
 Future<void> _tapCheck(WidgetTester tester) async {
   final button = find.byKey(const ValueKey('settings-test-api'));
   await tester.ensureVisible(button);
+  // A zero-duration scroll changes the viewport offset immediately, but the
+  // button's render position is not current until the next layout frame.
+  await tester.pump();
+  expect(button.hitTestable(), findsOneWidget);
+  expect(tester.widget<OutlinedButton>(button).onPressed, isNotNull);
   await tester.tap(button);
   await tester.pump();
 }
@@ -89,6 +94,7 @@ void main() {
       expect(controller.settings.dataProvider, 'direct');
       expect(calls, 0);
     } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
       service.close();
       client.close();
@@ -117,6 +123,7 @@ void main() {
       expect(controller.settings.twAdrThreshold, 3.5);
       expect(controller.settings.usAdrThreshold, 5);
     } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
       service.close();
       client.close();
@@ -137,6 +144,7 @@ void main() {
     final controller = await _mount(tester, service);
     try {
       await _tapCheck(tester);
+      expect(calls, 1);
       expect(find.text('正在測試 API…'), findsOneWidget);
       await tester.pump(const Duration(milliseconds: 41));
       await tester.pump();
@@ -153,6 +161,7 @@ void main() {
       expect(find.textContaining('API 可連線：全股票池分頁輪掃'), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
       service.close();
       client.close();
@@ -161,13 +170,21 @@ void main() {
 
   testWidgets('editing URL rejects the old response and leaves new URL unchecked', (tester) async {
     final pending = Completer<http.Response>();
-    final client = MockClient((_) => pending.future);
+    var calls = 0;
+    final client = MockClient((_) {
+      calls++;
+      return pending.future;
+    });
     final service = BackendConnectionService(client: client);
     final controller = await _mount(tester, service);
     try {
       await _tapCheck(tester);
+      // The test must invalidate an actual pending request, rather than pass
+      // because the connection button was never hit.
+      expect(calls, 1);
       final url = find.byKey(const ValueKey('settings-backend-url'));
       await tester.ensureVisible(url);
+      await tester.pump();
       await tester.enterText(url, 'https://new.provider.test');
       pending.complete(http.Response(jsonEncode(_contract()), 200));
       await tester.pumpAndSettle();
@@ -176,6 +193,7 @@ void main() {
       expect(find.text('正在測試 API…'), findsNothing);
       expect(tester.takeException(), isNull);
     } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
       service.close();
       client.close();
@@ -184,11 +202,18 @@ void main() {
 
   testWidgets('disposed setup screen ignores late network completion', (tester) async {
     final pending = Completer<http.Response>();
-    final client = MockClient((_) => pending.future);
+    var calls = 0;
+    final client = MockClient((_) {
+      calls++;
+      return pending.future;
+    });
     final service = BackendConnectionService(client: client);
     final controller = await _mount(tester, service);
     try {
       await _tapCheck(tester);
+      // Completing an unobserved Completer with an error would test neither
+      // disposal nor the service's handling of a late HTTP failure.
+      expect(calls, 1);
       await tester.pumpWidget(const MaterialApp(home: SizedBox()));
       pending.completeError(http.ClientException('late failure'));
       await tester.pump();
@@ -196,6 +221,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byKey(const ValueKey('settings-api-error')), findsNothing);
     } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
       service.close();
       client.close();

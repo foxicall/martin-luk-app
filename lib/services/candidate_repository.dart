@@ -34,6 +34,7 @@ class CandidateSnapshot {
     this.scanPageStart,
     this.scanPageSize,
     this.universeFingerprint,
+    this.candidatesAreCumulative = false,
   })  : candidates = List<StockCandidate>.unmodifiable(candidates),
         warnings = List<String>.unmodifiable(warnings),
         missingSymbols = List<String>.unmodifiable(missingSymbols) {
@@ -99,6 +100,8 @@ class CandidateSnapshot {
   final int? scanPageStart;
   final int? scanPageSize;
   final String? universeFingerprint;
+  /// Mobile rolling scans retain candidates from previously evaluated pages.
+  final bool candidatesAreCumulative;
 
   DateTime get generatedAt => fetchedAt;
   bool get isStale => stale;

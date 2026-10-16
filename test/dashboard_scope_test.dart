@@ -17,10 +17,13 @@ const _secondWarning = '原始名單沒有完整 CFI；不代表百分之百分�
 /// These injected prices exercise presentation, not the live API gate. The
 /// ordinary widget suite never depends on a provider or an open market.
 class _ScopeRepository implements CandidateRepository {
-  _ScopeRepository({this.fullCoverage = false, this.stale = false});
+  _ScopeRepository({this.fullCoverage = false, this.stale = false,
+    this.mobileRolling = false});
 
   final bool fullCoverage;
   final bool stale;
+  final bool mobileRolling;
+  int calls = 0;
 
   @override
   Future<CandidateSnapshot> fetch(StockMarket market, {
@@ -28,8 +31,11 @@ class _ScopeRepository implements CandidateRepository {
     bool forceRefresh = false,
     bool refreshQuotesOnly = false,
   }) async {
+    calls++;
     final now = DateTime.now().toUtc();
     final isUs = market == StockMarket.us;
+    final isMobileRolling = !isUs && mobileRolling;
+    final hasCoverage = fullCoverage || isMobileRolling;
     final symbol = isUs ? 'NVDA' : '2330.TW';
     final total = isUs ? 5118 : 1978;
     return CandidateSnapshot(
@@ -40,21 +46,30 @@ class _ScopeRepository implements CandidateRepository {
         patterns: const ['PDH 突破'], entryPrice: 100, stopPrice: 98,
         isLargeLiquid: true, status: 'confirmed', dataTimestamp: now,
         signalTimestamp: now, triggerType: 'PDH', dayLow: 98,
+      ), if (isMobileRolling) StockCandidate(
+        id: 'tw:6488.TWO', symbol: '6488.TWO', name: '環球晶', sector: '半導體',
+        market: market, adrPercent: 6, rsScore: 90, rsRank: 2,
+        patterns: const ['均線收斂'], entryPrice: 110, stopPrice: null,
+        isLargeLiquid: false, status: 'watchlist',
+        dataTimestamp: now.subtract(const Duration(minutes: 2)),
       )],
       fetchedAt: now,
       warnings: const [_firstWarning, _secondWarning, _firstWarning],
       source: 'Yahoo Finance · widget fixture', universeCount: total,
-      scanPoolSize: 30, evaluatedCount: 30, adrMatchCount: 1,
-      universeIsComplete: false, stale: stale, scanCompletedAt: now,
+      scanPoolSize: isMobileRolling ? 10 : 30,
+      evaluatedCount: isMobileRolling ? 8 : 30, adrMatchCount: 1,
+      universeIsComplete: false, stale: stale,
+      scanCompletedAt: isMobileRolling ? null : now,
       missingSymbols: stale ? const ['AAPL'] : const [],
-      coverageTotalCount: fullCoverage ? total : null,
-      coverageScannedCount: fullCoverage ? 30 : null,
-      coverageEvaluatedCount: fullCoverage ? 30 : null,
-      coverageRemainingCount: fullCoverage ? total - 30 : null,
-      coverageRound: fullCoverage ? 1 : null,
-      scanPageStart: fullCoverage ? 0 : null,
-      scanPageSize: fullCoverage ? 30 : null,
-      universeFingerprint: fullCoverage ? 'widget-fixture-universe' : null,
+      candidatesAreCumulative: isMobileRolling,
+      coverageTotalCount: hasCoverage ? total : null,
+      coverageScannedCount: hasCoverage ? (isMobileRolling ? 70 : 30) : null,
+      coverageEvaluatedCount: hasCoverage ? (isMobileRolling ? 68 : 30) : null,
+      coverageRemainingCount: hasCoverage ? total - (isMobileRolling ? 70 : 30) : null,
+      coverageRound: hasCoverage ? 1 : null,
+      scanPageStart: hasCoverage ? (isMobileRolling ? 60 : 0) : null,
+      scanPageSize: hasCoverage ? (isMobileRolling ? 10 : 30) : null,
+      universeFingerprint: hasCoverage ? 'widget-fixture-universe' : null,
     );
   }
 }
@@ -63,6 +78,8 @@ Future<AppController> _loadController(WidgetTester tester, {
   String provider = 'direct',
   bool fullCoverage = false,
   bool stale = false,
+  StockMarket market = StockMarket.us,
+  _ScopeRepository? fixtureRepository,
 }) async {
   SharedPreferences.setMockInitialValues({
     'martin_luk_settings_v1': jsonEncode(AppSettings(
@@ -71,13 +88,14 @@ Future<AppController> _loadController(WidgetTester tester, {
       autoRefreshEnabled: false,
     ).toJson()),
   });
-  final repository = _ScopeRepository(fullCoverage: fullCoverage, stale: stale);
+  final repository = fixtureRepository ??
+      _ScopeRepository(fullCoverage: fullCoverage, stale: stale);
   final controller = AppController(
     forceMockPreview: false, repositoryFactory: (_) => repository,
   );
   await tester.runAsync(() async {
     await controller.initialize(initializeReminders: false);
-    await controller.setMarket(StockMarket.us);
+    await controller.setMarket(market);
   });
   addTearDown(controller.dispose);
   await tester.pumpWidget(MaterialApp(
@@ -106,11 +124,57 @@ void main() {
     expect(find.text('Python 全股票池輪掃（分頁）'), findsNothing);
     final button = find.byKey(const ValueKey('dashboard-api-settings'));
     await tester.ensureVisible(button);
-    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(button.hitTestable(), findsOneWidget);
+    await tester.tap(button.hitTestable());
     await tester.pumpAndSettle();
     expect(find.byType(SettingsScreen), findsOneWidget);
     expect(controller.settings.dataProvider, 'direct');
     expect(controller.settings.apiBaseUrl, isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('TW mobile scan exposes cumulative coverage and pauses between pages without an API',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = _ScopeRepository(mobileRolling: true);
+    final controller = await _loadController(tester,
+        market: StockMarket.tw, fixtureRepository: repository);
+    expect(controller.error, isNull);
+    expect(controller.loading, isFalse);
+    expect(controller.settings.dataProvider, 'direct');
+    expect(controller.settings.apiBaseUrl, isEmpty);
+    expect(find.text('手機全台股分批輪掃'), findsOneWidget);
+    expect(find.textContaining('本輪已嘗試 70/1978 檔，成功 68 檔'), findsOneWidget);
+    expect(find.textContaining('尚未嘗試 1908 檔'), findsWidgets);
+    expect(find.text('本頁掃描池'), findsOneWidget);
+    expect(find.text('本頁已評估'), findsOneWidget);
+    expect(find.text('本輪累積候選'), findsOneWidget);
+    expect(find.text('本輪累積推薦與觀察名單'), findsOneWidget);
+    expect(find.textContaining('各卡保留原行情時間與原掃描頁內 RS'), findsOneWidget);
+    expect(find.text('市場評估僅部分完成'), findsNothing);
+    expect(find.textContaining('全市場需先部署 Python API'), findsNothing);
+    final pause = find.byKey(const ValueKey('dashboard-mobile-scan-toggle'));
+    await tester.ensureVisible(pause);
+    await tester.pumpAndSettle();
+    expect(pause.hitTestable(), findsOneWidget);
+    final callsBeforePause = repository.calls;
+    await tester.tap(pause.hitTestable());
+    await tester.pumpAndSettle();
+    expect(controller.mobileScanPaused, isTrue);
+    expect(repository.calls, callsBeforePause);
+    expect(controller.visibleCandidates.length, 2);
+    expect(find.text('繼續台股輪掃'), findsOneWidget);
+    await tester.ensureVisible(pause);
+    await tester.pumpAndSettle();
+    await tester.tap(pause.hitTestable());
+    await tester.pumpAndSettle();
+    expect(controller.mobileScanPaused, isFalse);
+    expect(repository.calls, callsBeforePause + 1);
+    expect(controller.visibleCandidates.length, 2);
+    expect(find.text('暫停台股輪掃'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

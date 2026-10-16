@@ -1,5 +1,7 @@
 # Render 雲端 API：全市場逐頁掃描與手機 5G
 
+**1.4.0+7 台股可直接在手機輪掃，不需雲端部署；操作見 [MOBILE_TW_SCAN.md](MOBILE_TW_SCAN.md)。** 本文件僅適用選擇 Python API 方案的使用者。
+
 **尚未部署服務請先依 [FULL_MARKET_SETUP.md](FULL_MARKET_SETUP.md) 操作。** 新版提供 `/v1/capabilities` 與 App 的「測試 API 連線」，可確認你部署的分支與掃描上限。API 可達不等於行情已驗證，仍需實際觸發掃描。以下完整說明保留所有輪掃與主機限制。
 
 本版以單一 Python API 服務支援台灣上市＋上櫃、美股 Nasdaq／NYSE／NYSE American 可確認普通股。手機使用短 HTTP 請求讀取背景工作與當頁快照，不等待整池。這份交付沒有代為建立 Render 服務、部署、付費或產生實際網址。
@@ -88,7 +90,7 @@ https://你的服務名稱.onrender.com/v1/candidates?market=us&background=true
 
 台灣名單使用 TWSE ISIN 上市／上櫃 CFI 普通股篩選，代碼為 `.TW`／`.TWO`。美股 NasdaqTrader 沒有完整 CFI，採保守名稱分類，ADR／特別股／ETF 等及未知類型被排除並披露；不是百分之百官方分類認證。台灣上市與上櫃的 RS 目前共用 `^TWII`，不是櫃買指數。
 
-Flutter 直接連線可載入擴充元資料，但價格評估仍限最多 30 檔核心或指定個股；台股直連官方發行公司 JSON 也未逐筆 CFI 核證。要逐頁推進整個已取得池，必須選 Python API。
+Flutter 台股直接連線已支援對取得名單逐頁評估與本機續掃；美股直連仍限最多 30 檔核心或指定個股。台股直連官方發行公司 JSON 未逐筆 CFI 核證。Python API 仍提供其既有的伺服器端分頁輪掃。
 
 Render 免費服務休眠後可能超過 App 單次 8 秒 HTTP 期限。先用瀏覽器開 `/health` 等待喚醒，再回 App 重試。若服務可達而掃描失敗，看 Render Logs、`scan.error`、單檔缺漏及來源警告；公開資料商仍可能對雲端 IP 回 403／429，部署成功不保證金融資料可用。
 

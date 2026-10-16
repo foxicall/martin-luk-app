@@ -585,27 +585,39 @@ void main() {
     repository.close(); api.close(); universe.close();
   });
 
-  test('TW core selection requests only current TW members and uses Taiwan priorities', () async {
+  test('TW sorted pages eventually request every current member without a fixed core ceiling', () async {
     StockItem tw(String code) => StockItem(market: StockMarket.tw,
       symbol: '$code.TW', code: code, nameZh: code, nameFullZh: '',
       nameEn: '', abbrEn: '');
     final rows = [
       ...List.generate(34, (index) => tw('${4000 + index}')),
-      tw('2603'), tw('2330'),
+      tw('2603'), tw('2330'), tw('1101'),
     ];
     universe = _Universe(rows, preferences);
     final repository = DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, now: () => _now, interBatchDelay: Duration.zero);
     final snapshot = await repository.fetch(StockMarket.tw, adrThreshold: 100,
       forceRefresh: true);
-    expect(snapshot.universeCount, 36);
+    expect(snapshot.universeCount, 37);
     expect(snapshot.scanPoolSize, 30);
     expect(snapshot.evaluatedCount, 30);
     expect(snapshot.adrMatchCount, 0);
-    expect(api.dailyStarted.keys.take(2), ['2330.TW', '2603.TW']);
+    expect(api.dailyStarted.keys.take(3), ['1101.TW', '2330.TW', '2603.TW']);
     expect(api.dailyStarted.containsKey('2454.TW'), false,
-      reason: 'Priority symbols absent from actual membership must not be invented.');
+      reason: 'Stocks absent from actual membership must not be invented.');
     expect(api.dailyCalls, 30);
+    expect(api.intradayCalls, 0);
+    expect(snapshot.coverageScannedCount, 30);
+    expect(snapshot.coverageRemainingCount, 7);
+    expect(snapshot.candidatesAreCumulative, isTrue);
+    final next = await repository.fetch(StockMarket.tw, adrThreshold: 100,
+      refreshQuotesOnly: true);
+    expect(api.dailyCalls, 37);
+    expect(api.dailyStarted.keys.toSet(), rows.map((row) => row.symbol).toSet());
+    expect(next.scanPoolSize, 7);
+    expect(next.coverageScannedCount, 37);
+    expect(next.coverageEvaluatedCount, 37);
+    expect(next.coverageRemainingCount, 0);
     expect(api.intradayCalls, 0);
     repository.close(); api.close(); universe.close();
   });

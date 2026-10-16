@@ -164,21 +164,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Text('尚未部署 Python API？',
               style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
-          const Text(
-            '1. 將完整專案更新到 GitHub，依 CLOUD_API_GUIDE.md 部署 Render 服務。\n'
-            '2. 在 Render 建立 Blueprint，等待部署完成，複製平台實際提供的 HTTPS 網址。\n'
-            '3. 填入上方基底網址，測試 API 連線，再儲存設定並回總覽查看掃描進度。',
-          ),
-          const SizedBox(height: 8),
-          const SelectableText('https://dashboard.render.com/'),
-          const SizedBox(height: 8),
-          const Text(
-            '沒有部署就沒有可填的雲端網址；不會自動建立服務。'
-            '免費服務可能休眠，先在瀏覽器開啟網址加 /health 等待喚醒。\n'
-            '全股票池以分頁輪掃；App 在前台時才持續請求下一頁，'
-            '手機退出後不保證掃完全部股票。推薦清單只呈現最近一頁，並非全市場累積排名。',
-          ),
-          const SizedBox(height: 12),
+          // Keep the explicit connection action above the longer deployment
+          // instructions so it is easy to reach on a compact phone display.
           OutlinedButton.icon(
             key: const ValueKey('settings-test-api'),
             onPressed: _testingApi || _saving || _useMockData
@@ -209,6 +196,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           else
             const Text('尚未測試 API。儲存設定不代表已取得真實行情。',
                 key: ValueKey('settings-api-unchecked')),
+          const SizedBox(height: 12),
+          const Text(
+            '1. 將完整專案更新到 GitHub，依 CLOUD_API_GUIDE.md 部署 Render 服務。\n'
+            '2. 在 Render 建立 Blueprint，等待部署完成，複製平台實際提供的 HTTPS 網址。\n'
+            '3. 填入上方基底網址，測試 API 連線，再儲存設定並回總覽查看掃描進度。',
+          ),
+          const SizedBox(height: 8),
+          const SelectableText('https://dashboard.render.com/'),
+          const SizedBox(height: 8),
+          const Text(
+            '沒有部署就沒有可填的雲端網址；不會自動建立服務。'
+            '免費服務可能休眠，先在瀏覽器開啟網址加 /health 等待喚醒。\n'
+            '全股票池以分頁輪掃；App 在前台時才持續請求下一頁，'
+            '手機退出後不保證掃完全部股票。推薦清單只呈現最近一頁，並非全市場累積排名。',
+          ),
         ],
       ),
     );
@@ -295,7 +297,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Row(children: [
               Icon(icon, color: Theme.of(context).colorScheme.primary),
               const SizedBox(width: 10),
-              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              Expanded(
+                child: Text(title,
+                    style: Theme.of(context).textTheme.titleMedium),
+              ),
             ]),
             const SizedBox(height: 16),
             ...children,
@@ -342,13 +347,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           DropdownButtonFormField<String>(
                             key: const ValueKey('settings-data-provider'),
                             value: _dataProvider,
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: '正式行情來源',
                               border: OutlineInputBorder(),
                             ),
                             items: const [
-                              DropdownMenuItem(value: 'direct', child: Text('Yahoo Finance · 手機直接連線')),
-                              DropdownMenuItem(value: 'backend', child: Text('Python API · 雲端／自訂中繼')),
+                              DropdownMenuItem(
+                                value: 'direct',
+                                child: Text('Yahoo Finance · 手機直接連線',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                              ),
+                              DropdownMenuItem(
+                                value: 'backend',
+                                child: Text('Python API · 雲端／自訂中繼',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                              ),
                             ],
                             onChanged: _saving || _useMockData ? null : (value) {
                               if (value != null) setState(() => _dataProvider = value);
@@ -363,9 +379,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           if (_dataProvider == 'direct' && !_useMockData) ...[
                             const SizedBox(height: 8),
                             const Text(
-                              '手機直連只評估精選池；全股票池輪掃請先部署 Python API，'
-                              '再將正式行情來源切換為 Python API。'
-                              '部署方式見專案 CLOUD_API_GUIDE.md。',
+                              '台股直連依上市／上櫃普通股完整名單分頁續掃，不需部署 Python API；'
+                              '前台每次只處理一頁，保留本輪累積候選與各股原行情時間。'
+                              '美股直連仍評估核心精選 30 檔；美股全股票池輪掃可選用 Python API。'
+                              '雲端部署方式見專案 CLOUD_API_GUIDE.md。',
                               key: ValueKey('settings-direct-scope'),
                             ),
                           ],
@@ -398,7 +415,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             contentPadding: EdgeInsets.zero,
                             title: const Text('前台自動更新'),
                             subtitle: const Text(
-                              'App 開啟時每 60 秒更新最新可用報價與持股診斷；背景暫停。下拉更新會強制重新請求。',
+                              'App 前台每 60 秒更新目前市場：台股直連續掃下一頁，美股更新最新可用報價；'
+                              '持股診斷同步更新。'
+                              '背景暫停，手機不開啟時不會繼續輪掃；下拉可立即續掃或更新。',
                             ),
                             value: _autoRefreshEnabled,
                             onChanged: _saving ? null : (value) =>

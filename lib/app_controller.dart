@@ -155,6 +155,12 @@ class AppController extends ChangeNotifier {
   bool _foreground = false;
   bool _initialized = false;
   bool _pollBusy = false;
+  bool _mobileScanPaused = false;
+  /// Manual stop pauses the phone's Taiwan round between pages as well as
+  /// during an active page. Pull-to-refresh explicitly resumes it.
+  bool get mobileScanPaused => _mobileScanPaused;
+  bool get _isMobileTwScan => !_settings.useMockData &&
+      _settings.dataProvider == 'direct' && _market == StockMarket.tw;
   int _pollVersion = 0;
   DateTime? _lastAutoRefreshAt;
   bool get autoRefreshActive => _pollTimer != null;
@@ -372,6 +378,7 @@ class AppController extends ChangeNotifier {
   /// deadline; repeated pulls cannot extend one continuously visible spinner.
   Future<void> refresh({bool forceRefresh = true, bool refreshQuotesOnly = false}) {
     if (_disposed) return Future<void>.value();
+    if (forceRefresh && _isMobileTwScan) _mobileScanPaused = false;
     final key = _scanKey();
     final active = _scanOperation;
     if (active != null && active.key == key && active.version == _requestVersion) {
@@ -492,6 +499,16 @@ class AppController extends ChangeNotifier {
   /// Retiring request ownership also prevents a late HTTP reply from committing.
   void cancelMarketEvaluation() {
     if (_disposed) return;
+    if (_isMobileTwScan) {
+      _mobileScanPaused = true;
+      // A round may be waiting for the next minute tick with no active page.
+      // Stopping in that interval must still suppress future automatic pages.
+      if (_scanOperation == null) {
+        _finishMarketProgress('台股輪掃已暫停；下拉更新可續掃');
+        _notify();
+        return;
+      }
+    }
     final operation = _scanOperation;
     if (_backendScanWaiting ||
         (_backendScanStatus?.isRunning ?? false)) {
@@ -812,6 +829,23 @@ class AppController extends ChangeNotifier {
     final evaluated = response.evaluatedCount;
     final poolSize = response.scanPoolSize;
     final adrMatches = response.adrMatchCount;
+    // Only the phone's Taiwan scanner accumulates candidates across pages.
+    // Page counts remain page counts; coverage is separately validated by the
+    // immutable snapshot constructor. A server/US/mock flag cannot opt out of
+    // the original candidate-versus-evaluated-count protection.
+    final cumulative = response.candidatesAreCumulative && !allowMock &&
+        !_settings.useMockData && _settings.dataProvider == 'direct' &&
+        market == StockMarket.tw && response.backendScan == null &&
+        response.coverageTotalCount == response.universeCount &&
+        response.universeCount > 0 &&
+        response.coverageScannedCount != null &&
+        response.coverageEvaluatedCount != null &&
+        response.coverageRemainingCount != null &&
+        evaluated != null && poolSize != null &&
+        response.coverageEvaluatedCount! >= evaluated;
+    if (response.candidatesAreCumulative && !cumulative) {
+      throw const RepositoryException('累積候選僅允許具完整輪掃統計的手機台股來源。');
+    }
     if (response.source.trim().isEmpty || response.universeCount < 0 ||
         (evaluated != null && (evaluated < 0 || evaluated > response.universeCount)) ||
         (poolSize != null && (poolSize < 0 || poolSize > response.universeCount ||
@@ -823,6 +857,10 @@ class AppController extends ChangeNotifier {
     }
     if (!response.stale && response.universeCount > 0 && evaluated == 0) {
       throw const RepositoryException('本次股票池未成功評估任何股票；這並非「沒有符合條件的候選」，請檢查行情來源後重試。');
+    }
+    if (cumulative && evaluated == 0 &&
+        (response.coverageScannedCount == 0 || response.warnings.isEmpty)) {
+      throw const RepositoryException('失敗頁面必須標示已嘗試進度與診斷警告，不能宣稱成功評估。');
     }
     final accepted = <StockCandidate>[];
     final seenSymbols = <String>{};
@@ -857,7 +895,9 @@ class AppController extends ChangeNotifier {
       seenIds.add(candidate.id);
     }
     if (accepted.length > response.universeCount ||
-        (evaluated != null && accepted.length > evaluated)) {
+        (cumulative
+            ? accepted.length > response.coverageEvaluatedCount!
+            : evaluated != null && accepted.length > evaluated)) {
       throw const RepositoryException('有效候選數量超過股票池或成功評估數量。');
     }
     if (response.candidates.isNotEmpty && accepted.isEmpty) {
@@ -871,6 +911,7 @@ class AppController extends ChangeNotifier {
       stale: response.stale, missingSymbols: missing.toList()..sort(),
       evaluatedCount: evaluated, scanPoolSize: poolSize, adrMatchCount: adrMatches,
       universeIsComplete: response.universeIsComplete,
+      candidatesAreCumulative: response.candidatesAreCumulative,
       universeAsOf: response.universeAsOf, scanCompletedAt: response.scanCompletedAt,
       isFallback: response.isFallback, attemptedAt: response.attemptedAt,
       backendScan: response.backendScan, isPending: response.isPending,
@@ -890,6 +931,7 @@ class AppController extends ChangeNotifier {
     _resetBackendWaiting();
     _marketScanProgress = null;
     _market = value;
+    _mobileScanPaused = false;
     _page = 0;
     final saved = _candidateSnapshots['${_portfolioSource(_settings)}:${value.name}'];
     _snapshot = saved == null ? null : _staleSnapshot(saved, '市場切換中，暫顯示上次快取。');
@@ -903,6 +945,7 @@ class AppController extends ChangeNotifier {
         missingSymbols: value.missingSymbols, evaluatedCount: value.evaluatedCount,
         scanPoolSize: value.scanPoolSize, adrMatchCount: value.adrMatchCount,
         universeIsComplete: value.universeIsComplete, universeAsOf: value.universeAsOf,
+        candidatesAreCumulative: value.candidatesAreCumulative,
         scanCompletedAt: value.scanCompletedAt, isFallback: value.isFallback,
         attemptedAt: _now().toUtc(), backendScan: value.backendScan,
         isPending: value.isPending,
@@ -924,8 +967,16 @@ class AppController extends ChangeNotifier {
       _syncBackendWaitDeadline();
       // Stop this phone's in-flight status request on backgrounding. The
       // server continues independently; its job is not cancelled by the phone.
-      if (!_settings.useMockData && _settings.dataProvider == 'backend') {
+      if ((!_settings.useMockData && _settings.dataProvider == 'backend') ||
+          _isMobileTwScan) {
         _cancelScan();
+      }
+      if (_isMobileTwScan) {
+        // A suspended page is not a completed auto refresh. Its detached
+        // continuation must neither retain the poll lock nor move the last
+        // successful foreground-update timestamp forward.
+        _pollVersion++;
+        _pollBusy = false;
       }
     }
     _syncPolling();
@@ -973,9 +1024,12 @@ class AppController extends ChangeNotifier {
       // scan must still recover automatically. Never treat a clock anomaly or
       // a stale fallback as a recent successful universe scan.
       final quotesOnly = scan != null && !scan.stale && age != null &&
-          !age.isNegative && age < const Duration(minutes: 15);
+          !age.isNegative && age < const Duration(minutes: 15) &&
+          !(_isMobileTwScan && (scan.coverageRemainingCount ?? 0) > 0);
       await Future.wait([
-        refresh(forceRefresh: false, refreshQuotesOnly: quotesOnly),
+        _isMobileTwScan && _mobileScanPaused
+            ? Future<void>.value()
+            : refresh(forceRefresh: false, refreshQuotesOnly: quotesOnly),
         refreshPortfolio(forceRefresh: false),
       ]);
       if (!_disposed && version == _pollVersion) {
@@ -1058,6 +1112,7 @@ class AppController extends ChangeNotifier {
     _loading = false;
     _page = 0;
     _settings = next;
+    _mobileScanPaused = false;
     _syncPolling();
     _notify();
     String? reminderError;

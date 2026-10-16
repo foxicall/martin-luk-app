@@ -1,8 +1,8 @@
 # Martin Luk 台美股動能策略 App
 
-最新版本為 **1.3.2+6**：總覽明示手機精選池與實際評估數，推薦清單下方收合來源提示，設定頁新增 Python API 連線與掃描範圍檢查。你目前尚未部署 API，請依 [FULL_MARKET_SETUP.md](FULL_MARKET_SETUP.md) 完成雲端部署，再設定 App；APK 更新本身不會建立伺服器。美股名錄解析與取消測試修正一併保留。
+最新版本為 **1.4.0+7**：手機直接連線可對取得的台股上市／上櫃完整名單逐頁輪掃，保存進度、跳過失敗並累積本輪觀察候選，無需部署 API。操作見 [MOBILE_TW_SCAN.md](MOBILE_TW_SCAN.md)。本版也修正四個設定／總覽元件測試失敗；美股手機模式仍為最多 30 檔核心池，Python API 分頁方案保留。
 
-本版將股票池擴充為**台灣上市＋上櫃普通股**，以及 **NYSE、Nasdaq、NYSE American 的可確認普通股**。Flutter 提供動能總覽、個股風控、庫存診斷與離線搜尋；Python API 以有界背景工作逐頁掃描已取得的股票名單。全市場輪掃請在 App 設定選擇「Python API」，並填入實際部署的 HTTPS 根網址。
+本版將股票池擴充為**台灣上市＋上櫃普通股**，以及 **NYSE、Nasdaq、NYSE American 的可確認普通股**。Flutter 提供動能總覽、個股風控、庫存診斷與離線搜尋；台股可由手機直接分頁輪掃。Python API 保留有界背景逐頁掃描，供選擇中繼或美股完整名單輪掃時使用；使用此模式才需要填入實際部署的 HTTPS 根網址。
 
 這份交付包含原始碼、Android 建置設定、GitHub Actions 與 Render 設定。尚未由本環境完成 Flutter／APK 建置或雲端部署，也沒有已建立的上線網址。更新步驟見 [ALL_STOCKS_UPDATE.md](ALL_STOCKS_UPDATE.md)，部署見 [CLOUD_API_GUIDE.md](CLOUD_API_GUIDE.md)，APK 見 [README_HOW_TO_BUILD.md](README_HOW_TO_BUILD.md)。
 
@@ -12,12 +12,12 @@
 |---|---|---|
 | Python 台股 | TWSE ISIN `strMode=2` 上市、`strMode=4` 上櫃，四位數代碼及 CFI `ES` 普通股 | 上市加 `.TW`，上櫃加 `.TWO`；排除存託憑證、特別股、ETF 等 |
 | Python 美股 | NasdaqTrader `nasdaqlisted.txt`、`otherlisted.txt`，限 Nasdaq／NYSE／NYSE American | 目錄沒有完整 CFI，採保守證券名稱規則；排除 ADR／ADS、特別股、ETF、基金、權證、單位與無法確認類型，不宣稱百分之百官方普通股分類 |
-| Flutter 直接連線 | 台股官方上市／上櫃發行公司 JSON；美股上述 NasdaqTrader 目錄 | 台股發行公司資料不是逐筆 CFI 認證；直接連線仍只評估最多 30 檔核心成員或指定個股 |
+| Flutter 直接連線 | 台股官方上市／上櫃發行公司 JSON；美股上述 NasdaqTrader 目錄 | 台股發行公司資料不是逐筆 CFI 認證；台股完整名單逐頁最多 30 檔並保存進度，美股仍為最多 30 檔核心池 |
 | 離線搜尋 | `stocks_master.json` 及內嵌於 HTML 的同一元資料 | 是隨包快照，不是即時行情或當日成分保證；來源、數量及時間以 `stocks_master_sources.json` 為準 |
 
 「全市場」指已取得並通過目前來源分類的名單，不含其他美國交易所、OTC、台灣興櫃、ETF 或未能確認類型的證券。單一來源失敗、舊快取與保守排除會揭露警告，不能把來源取得成功當成所有證券分類已官方核證。
 
-## 每頁 60 檔的背景輪掃
+## Python API 每頁 60 檔的背景輪掃
 
 預設 `MARTIN_SCAN_POOL_LIMIT=0`，表示不再把後端選定池截斷為 30 檔；每次背景工作仍只處理 **60 檔的一頁**，每批 3 檔、批次間隔至少 150ms、提供商 HTTP 期限 8 秒。`background=true` 首次回 `202` 與進度，不等待整個股票池。每市場共用一個進行中的工作，App 約每 3 秒查詢該工作的狀態。
 
@@ -39,6 +39,8 @@
 已嘗試不等於成功取得行情。當頁的 RS 百分位及候選清單只比較**本頁**通過資料、ADR 與指標條件的股票；不合併不同時間的頁面冒充全市場同步排行榜。台灣上市與上櫃目前共用 `^TWII` 加權指數為 RS 基準，並非櫃買指數；美股使用 `^GSPC` 為比較基準，但股票池不再限 S&P 500。
 
 ## 手機、雲端與更新
+
+**只要使用手機掃描台股，選 Yahoo Finance 直接連線即可，依 [MOBILE_TW_SCAN.md](MOBILE_TW_SCAN.md) 操作；以下部署步驟僅適用選擇 Python API 的情況。** 台股本輪候選跨頁保留，但各股 RS 保留原頁排名與實際行情時間，不當作全市場同步排名。
 
 1. 將完整覆蓋包解壓，在 GitHub 網頁上傳到 `fix/refresh-live-gate-20261014` 分支的專案根目錄；保留 `.github/`、`lib/`、`backend/`、`android/` 與其他資產。
 2. 重新部署 Render。既有服務的 Environment 若還是 `MARTIN_SCAN_POOL_LIMIT=30`，必須改為 `0`，並設定 `MARTIN_SCAN_PAGE_SIZE=60`、`MARTIN_SCAN_PAGE_INTERVAL=60`。更新原始碼不會自動覆蓋手動保存的舊環境變數。
