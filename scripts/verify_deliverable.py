@@ -38,6 +38,10 @@ EXCLUDED_FILE_PATTERNS = (
     "apply_market_scan_fix.py", "apply_market_scan_timeout_fix.py",
 )
 REQUIRED_FILES = (
+    "R_TARGET_DISPLAY_FIX.md", "lib/widgets/manual_trade_levels.dart",
+    "test/trade_levels_test.dart", "test/manual_trade_levels_test.dart",
+    "TW_OFFICIAL_CSV_FALLBACK.md", "lib/services/tw_issuer_csv.dart",
+    "test/tw_issuer_csv_test.dart", "test/tw_official_fallback_test.dart",
     "TW_SCAN_STABILITY_FIX.md", "test/tw_universe_stability_test.dart",
     "test/tw_universe_resume_integration_test.dart",
     "RECOMMENDATION_LEVELS.md", "test/recommendation_trade_levels_test.dart",
@@ -286,6 +290,8 @@ def validate_contents(files: dict[str, bytes]) -> None:
         "test/expanded_symbol_test.dart", "test/rolling_scan_snapshot_test.dart",
         "python3 -m unittest discover -s backend/tests -v",
         "test/backend_snapshot_repository_test.dart test/backend_scan_controller_test.dart",
+        "test/tw_issuer_csv_test.dart test/tw_official_fallback_test.dart",
+        "test/trade_levels_test.dart test/manual_trade_levels_test.dart",
     ):
         require(marker in workflow, f"Actions 工作流缺少：{marker}")
     android_app = files["android/app/build.gradle"].decode("utf-8")

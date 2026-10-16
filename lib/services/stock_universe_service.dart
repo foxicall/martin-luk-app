@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/stock_candidate.dart';
 import '../models/stock_item.dart';
 import 'network_request.dart';
+import 'tw_issuer_csv.dart';
 import 'us_stock_directory.dart';
 
 typedef DateTimeFunction = DateTime Function();
@@ -52,10 +53,11 @@ class StockUniverseService {
     Future<SharedPreferences> Function()? preferencesLoader,
     DateTimeFunction? now,
     this.useUsMirrorFallback = true,
+    this.useTwCsvFallback = true,
     this.requestTimeout = NetworkRequest.defaultTimeout,
     this.storageTimeout = NetworkRequest.defaultStorageTimeout,
   })  : _network = NetworkRequest(client: client, timeout: requestTimeout,
-            acceptedContentTypes: 'text/plain,application/json;q=0.9,*/*;q=0.8'),
+            acceptedContentTypes: 'text/plain,text/csv;q=0.95,application/json;q=0.9,*/*;q=0.8'),
         _preferences = preferences,
         _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance,
         _now = now ?? DateTime.now {
@@ -78,6 +80,14 @@ class StockUniverseService {
   static final Uri twOtcEndpoint = Uri.parse(
     'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O',
   );
+  // The official issuer CSVs are published on a separate TWSE host. They are
+  // metadata backups, not third-party membership mirrors or price feeds.
+  static final Uri twCsvEndpoint = Uri.parse(
+    'https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv',
+  );
+  static final Uri twOtcCsvEndpoint = Uri.parse(
+    'https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv',
+  );
   // Public copies of the exchange directories, not price feeds. Their file
   // dates are checked before use; unavailable/stale mirrors never become a
   // successful official source or replace a quote with demonstration data.
@@ -89,6 +99,7 @@ class StockUniverseService {
   );
   static const Duration maximumMirrorAge = Duration(days: 7);
   final bool useUsMirrorFallback;
+  final bool useTwCsvFallback;
   static const Duration cacheLifetime = Duration(hours: 24);
   static const Duration maximumStaleAge = Duration(days: 30);
   final Duration requestTimeout;
@@ -165,7 +176,7 @@ class StockUniverseService {
               master: master, budget: requestBudget, now: now);
         }
         return _loadTwSource(entry.value, otc: entry.key == 1,
-            master: master, budget: requestBudget);
+            master: master, budget: requestBudget, now: now);
       }));
       if (_closed) throw StateError('股票池服務已關閉。');
       if (market == StockMarket.tw) {
@@ -301,11 +312,6 @@ class StockUniverseService {
       if (retrievedAt.isAfter(now) || retrievedAt.isBefore(asOf)) {
         throw const FormatException('股票池取得時間與來源日期不一致。');
       }
-      final age = now.difference(asOf);
-      if (age.isNegative || age > maximumStaleAge) {
-        warnings.add('股票池快取日期無效或已超過 30 天；不以它當作現行成分。');
-        return null;
-      }
       final seen = <String>{};
       final stocks = (decoded['stocks'] as List).map((row) {
         if (row is! Map<String, dynamic>) {
@@ -318,6 +324,21 @@ class StockUniverseService {
         return stock;
       }).toList();
       if (stocks.isEmpty) throw const FormatException('股票池快取不得為空。');
+      final twExchangeSources = decoded['tw_exchange_sources'];
+      if (market == StockMarket.tw && twExchangeSources != null) {
+        _validateTwAggregateCache(twExchangeSources, stocks: stocks,
+            asOf: asOf, retrievedAt: retrievedAt, now: now,
+            source: decoded['source'] as String);
+      } else {
+        // Legacy JSON-only metadata and US caches retain the original strict
+        // 30-day rule. A monthly CSV exception requires validated, matching
+        // per-exchange provenance; it is never inferred from aggregate age.
+        final age = now.difference(asOf);
+        if (age.isNegative || age > maximumStaleAge) {
+          warnings.add('股票池快取日期無效或已超過 30 天；不以它當作現行成分。');
+          return null;
+        }
+      }
       final storedWarnings = decoded['warnings'];
       if (storedWarnings is! List || storedWarnings.any((entry) => entry is! String)) {
         throw const FormatException('股票池快取提示無效。');
@@ -332,8 +353,51 @@ class StockUniverseService {
         isCached: true,
       );
     } catch (_) {
-      warnings.add('股票池快取損毀；重新取得連網清單。');
+      warnings.add('股票池快取未通過來源、日期或格式檢查；重新取得連網清單。');
       return null;
+    }
+  }
+
+  static void _validateTwAggregateCache(Object field,
+      {required List<StockItem> stocks, required DateTime asOf,
+      required DateTime retrievedAt, required DateTime now,
+      required String source}) {
+    if (field is! Map<String, dynamic> || field['version'] != 1 ||
+        field['sources'] is! Map<String, dynamic> ||
+        !const [
+          'TWSE / TPEx official ordinary-stock issuers',
+          'TWSE / TPEx official ordinary-stock issuers / cached or bundled exchange metadata (partial)',
+        ].contains(source)) {
+      throw const FormatException('台股快取缺少可驗證的交易所來源。');
+    }
+    final rows = field['sources'] as Map<String, dynamic>;
+    if (rows.isEmpty || rows.keys.any((key) => key != 'TWSE' && key != 'TPEx')) {
+      throw const FormatException('台股快取交易所來源無效。');
+    }
+    final union = <String, String>{};
+    DateTime? oldest;
+    for (final exchange in rows.keys) {
+      final raw = rows[exchange];
+      if (raw is! Map<String, dynamic>) {
+        throw const FormatException('台股快取交易所紀錄無效。');
+      }
+      // Validate each policy on EVERY aggregate-cache read. In particular,
+      // TPEx's 7-day CSV may expire within the aggregate's 24-hour TTL.
+      final value = _TwSourceCache.fromJson(raw, exchange: exchange, now: now);
+      if (value.retrievedAt.isAfter(retrievedAt)) {
+        throw const FormatException('台股快取交易所取得時間不一致。');
+      }
+      if (oldest == null || value.asOf.isBefore(oldest)) oldest = value.asOf;
+      for (final stock in value.stocks) {
+        if (union.containsKey(stock.symbol)) {
+          throw const FormatException('台股快取交易所成分重複。');
+        }
+        union[stock.symbol] = jsonEncode(stock.toJson());
+      }
+    }
+    if (oldest != asOf || union.length != stocks.length ||
+        stocks.any((stock) => union[stock.symbol] != jsonEncode(stock.toJson()))) {
+      throw const FormatException('台股快取成分或來源日期與交易所紀錄不一致。');
     }
   }
 
@@ -391,7 +455,12 @@ class StockUniverseService {
                   _twSources[exchange] = source;
                 }
               } catch (_) {
-                warnings.add('$exchange 交易所快取無效或超過 30 天；不將它視為現行成分。');
+                final rawAge = value is Map<String, dynamic>
+                    ? value['maximum_age_days'] : null;
+                final limit = const [7, 30, 45].contains(rawAge) ? rawAge : 30;
+                warnings.add('$exchange 交易所快取無效或已超過 $limit 天的來源保存期限'
+                    '（JSON 30 天／上市 CSV 45 天／上櫃 CSV 7 天）；'
+                    '不將它視為現行成分。');
               }
             }
           }
@@ -428,10 +497,14 @@ class StockUniverseService {
         // A successful exchange replaces ONLY that exchange, so removals in a
         // genuinely new source are respected rather than unioned indefinitely.
         _twSources[exchange] = _TwSourceCache(stocks: current.stocks,
-            asOf: current.fileDate ?? now, retrievedAt: now);
+            asOf: current.fileDate ?? now, retrievedAt: now,
+            maximumAgeDays: current.metadataMaximumAgeDays,
+            metadataFormat: current.metadataFormat);
         return _SourceStocks(current.stocks,
             warnings: current.warnings, isComplete: current.isComplete,
-            fileDate: current.fileDate ?? now);
+            fileDate: current.fileDate ?? now,
+            metadataMaximumAgeDays: current.metadataMaximumAgeDays,
+            metadataFormat: current.metadataFormat);
       }
       final previous = _twSources[exchange];
       if (previous != null && previous.isUsable(now)) {
@@ -562,20 +635,83 @@ class StockUniverseService {
   }
 
   Future<_SourceStocks> _loadTwSource(Uri url, {required bool otc,
-      required Map<String, StockItem> master, required Duration budget}) async {
-    try {
-      final response = await _network.get(url, timeout: budget);
+      required Map<String, StockItem> master, required Duration budget,
+      required DateTime now}) async {
+    // Primary and backup share ONE monotonic deadline, including waiting for
+    // the global HTTP permits. A stalled JSON feed cannot consume a second 8s
+    // wait on CSV, or hold the scan's foreground loading state indefinitely.
+    final elapsed = Stopwatch()..start();
+    final label = otc ? 'TPEx' : 'TWSE';
+    final warnings = <String>[];
+    final primaryBudget = useTwCsvFallback
+        ? Duration(microseconds: (budget.inMicroseconds ~/ 2)
+            .clamp(1, budget.inMicroseconds).toInt())
+        : budget;
+    Future<_SourceStocks> read(Uri endpoint, Duration timeout,
+        {required bool csv}) async {
+      if (_closed) throw StateError('股票池服務已關閉。');
+      debugPrint('[StockUniverse] >>> $label ${endpoint.host}${endpoint.path}');
+      final response = await _network.get(endpoint, timeout: timeout);
+      if (_closed) throw StateError('股票池服務已關閉。');
+      debugPrint('[StockUniverse] <<< $label ${endpoint.host} '
+          'HTTP ${response.statusCode} bytes=${response.bodyBytes.length}');
       if (response.statusCode != 200) {
-        throw http.ClientException('HTTP ${response.statusCode}', url);
+        throw http.ClientException('HTTP ${response.statusCode}', endpoint);
       }
-      final parsed = _parseTw(utf8.decode(response.bodyBytes), master, otc: otc);
+      final _SourceStocks parsed;
+      if (csv) {
+        // TWSE's government catalogue specifies monthly publication; TPEx is
+        // daily. Preserve the actual document day instead of relabelling a
+        // valid monthly file as newly published or rejecting it after 7 days.
+        final document = TwIssuerCsv.parseBytes(response.bodyBytes, now: now,
+            maximumAgeDays: otc ? 7 : 45);
+        final rows = _parseTw(jsonEncode(document.rows), master, otc: otc);
+        parsed = _SourceStocks(rows.stocks, fileDate: document.asOf,
+            metadataMaximumAgeDays: otc ? 7 : 45,
+            metadataFormat: 'official_csv',
+            warnings: [
+              '$label 官方 JSON 名單暫不可用，已改用官方 CSV 備援 '
+                  '${endpoint.host}${endpoint.path}；原始出表日期 '
+                  '${document.asOf.add(const Duration(hours: 8)).toIso8601String().substring(0, 10)}（台北日期）。'
+                  '${otc ? '官方目錄為每日更新。' : '官方目錄為每月更新，不表示本日所有新上市異動均已納入。'}'
+                  '這是股票身份名單，不是即時行情。',
+            ]);
+      } else {
+        parsed = _parseTw(utf8.decode(response.bodyBytes), master, otc: otc);
+      }
       if (parsed.stocks.isEmpty) {
         throw const FormatException('台股交易所名單沒有可用普通股。');
       }
+      debugPrint('[StockUniverse] [SUCCESS] $label ${endpoint.host} '
+          '${parsed.stocks.length} identities csv=$csv');
       return parsed;
-    } catch (error) {
-      return _SourceStocks.failure('${url.host}/${url.pathSegments.last}：${_errorLabel(error)}');
     }
+    try {
+      return await read(url, primaryBudget, csv: false);
+    } catch (error) {
+      if (_closed) rethrow;
+      final reason = '${url.host}/${url.pathSegments.last}：${_errorLabel(error)}';
+      debugPrint('[StockUniverse] [WARN] $label $reason');
+      warnings.add(reason);
+    }
+    final remaining = budget - elapsed.elapsed;
+    if (useTwCsvFallback && !_closed && remaining > Duration.zero) {
+      final backup = otc ? twOtcCsvEndpoint : twCsvEndpoint;
+      try {
+        final parsed = await read(backup, remaining, csv: true);
+        return _SourceStocks(parsed.stocks,
+            warnings: [...warnings, ...parsed.warnings],
+            fileDate: parsed.fileDate, isComplete: parsed.isComplete,
+            metadataMaximumAgeDays: parsed.metadataMaximumAgeDays,
+            metadataFormat: parsed.metadataFormat);
+      } catch (error) {
+        if (_closed) rethrow;
+        final reason = '${backup.host}/${backup.pathSegments.last}：${_errorLabel(error)}';
+        debugPrint('[StockUniverse] [WARN] $label $reason');
+        warnings.add(reason);
+      }
+    }
+    return _SourceStocks.failure(warnings.join('；'));
   }
 
   static String _preview(List<int> bytes) => _short(
@@ -657,10 +793,13 @@ class StockUniverseService {
 /// A source failure is data, never an uncaught rejection of the other source.
 class _SourceStocks {
   _SourceStocks(this.stocks, {this.warnings = const [], this.isComplete = true,
-      this.mirrored = false, this.fromCache = false, this.fileDate}) : success = true;
+      this.mirrored = false, this.fromCache = false, this.fileDate,
+      this.metadataMaximumAgeDays = 30,
+      this.metadataFormat = 'official_json'}) : success = true;
   _SourceStocks.failure(String warning)
       : stocks = const [], warnings = [warning], success = false,
-        isComplete = false, mirrored = false, fromCache = false, fileDate = null;
+        isComplete = false, mirrored = false, fromCache = false, fileDate = null,
+        metadataMaximumAgeDays = 30, metadataFormat = 'official_json';
   final List<StockItem> stocks;
   final List<String> warnings;
   final bool success;
@@ -668,25 +807,35 @@ class _SourceStocks {
   final bool mirrored;
   final bool fromCache;
   final DateTime? fileDate;
+  final int metadataMaximumAgeDays;
+  final String metadataFormat;
 }
 
 /// Exchange membership is dated metadata only; prices/signals are never cached
 /// here. Old membership expires independently, even if its peer refreshes daily.
 class _TwSourceCache {
   _TwSourceCache({required List<StockItem> stocks, required this.asOf,
-      required this.retrievedAt}) : stocks = List.unmodifiable(stocks);
+      required this.retrievedAt, this.maximumAgeDays = 30,
+      this.metadataFormat = 'official_json'})
+      : stocks = List.unmodifiable(stocks);
 
   final List<StockItem> stocks;
   final DateTime asOf;
   final DateTime retrievedAt;
+  final int maximumAgeDays;
+  final String metadataFormat;
 
   bool isUsable(DateTime now) => !asOf.isAfter(now) &&
       !retrievedAt.isAfter(now) && !retrievedAt.isBefore(asOf) &&
-      now.difference(asOf) <= StockUniverseService.maximumStaleAge;
+      (maximumAgeDays == 30
+          ? now.difference(asOf) <= StockUniverseService.maximumStaleAge
+          : now.difference(asOf).inDays <= maximumAgeDays);
 
   Map<String, dynamic> toJson() => {
     'as_of': asOf.toUtc().toIso8601String(),
     'retrieved_at': retrievedAt.toUtc().toIso8601String(),
+    'maximum_age_days': maximumAgeDays,
+    'metadata_format': metadataFormat,
     'stocks': stocks.map((stock) => stock.toJson()).toList(),
   };
 
@@ -709,9 +858,18 @@ class _TwSourceCache {
       }
       return stock;
     }).toList();
+    final age = json['maximum_age_days'] ?? 30;
+    final format = json['metadata_format'] ?? 'official_json';
+    if (age is! int || format is! String ||
+        !const ['official_json', 'official_csv'].contains(format) ||
+        (format == 'official_json' ? age != 30
+            : age != (exchange == 'TWSE' ? 45 : 7))) {
+      throw const FormatException('交易所名單保存期限無效。');
+    }
     final source = _TwSourceCache(stocks: stocks,
         asOf: parseApiTimestamp(json['as_of'], 'as_of'),
-        retrievedAt: parseApiTimestamp(json['retrieved_at'], 'retrieved_at'));
+        retrievedAt: parseApiTimestamp(json['retrieved_at'], 'retrieved_at'),
+        maximumAgeDays: age, metadataFormat: format);
     if (!source.isUsable(now)) {
       throw const FormatException('交易所名單已過期或日期無效。');
     }

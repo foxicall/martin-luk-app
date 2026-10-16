@@ -1,12 +1,13 @@
-2026-10-16 / App 1.4.2+9 / GitHub 推薦測試與畫面缺檔補齊包
-依 GitHub commit 79ea8cc338504ca6eac5448cb91470b7002f0723 的實際檔案樹比對。
-每個檔案均為完整內容，依原路徑覆蓋分支 fix/refresh-live-gate-20261014，不要只上傳ZIP。
-確切失敗為 test/recommendation_trade_levels_test.dart: Does not exist，非該測試的語法錯誤。
-此包包含缺少的完整六項測試，以及尚未同步的計算機/HTML/檢查程式與隱藏配置。
-原有測試和斷言均保留，正式App版本仍為1.4.2+9，保留台股完整名單分批續掃修正。
-CI增加檔案存在及非空預檢，缺少任一引用測試時明列路徑並停止，不會製造空測試或跳過。
-步驟見 RESTORE_RECOMMENDATION_FILES.md；版本不確定時使用完整專案包。
-本環境沒有Flutter SDK，尚無修正後的Dart測試或APK成功證據，需以新提交Actions確認。
+2026-10-16 / App 1.4.4+11 / 3R／5R目標價顯示及手動試算完整覆蓋包
+GitHub基線commit: 13e4cb1560b9f3a30bd2b720f173622c970aad25
+目標分支: fix/refresh-live-gate-20261014
+
+此包包含所有相對於目前GitHub基線不同或缺少的完整檔案，不需先安裝舊更新包。
+有效歷史停損顯示帶時間的參考目標，本金無效不抹去價位；快取仍禁止新買進股數。
+缺少實際停損不造價，另提供與推薦分離的手動假設試算。原有風控／零推薦門禁保留。
+含上一版1.4.3+10官方CSV備援、必要測試及隱藏配置；台股輪掃進度保留。
+解壓後依原路徑合併覆蓋；不要只上傳ZIP，不多包一層目錄。務必上傳.github及兩個新測試。
+操作與限制見 R_TARGET_DISPLAY_FIX.md；本機Flutter命令退出127，新版Dart／APK仍須Actions驗證。
 
 .dockerignore
 .github/workflows/build_apk.yml
@@ -15,13 +16,22 @@ CI增加檔案存在及非空預檢，缺少任一引用測試時明列路徑並
 BUILD_STATUS.md
 FILE_MANIFEST.json
 GITHUB_MANUAL_UPDATE.md
-RECOMMENDATION_LEVELS.md
-RESTORE_RECOMMENDATION_FILES.md
+README.md
+R_TARGET_DISPLAY_FIX.md
+TW_OFFICIAL_CSV_FALLBACK.md
 UPDATE_FILES.txt
 lib/screens/calculator_screen.dart
-preview/index.html
-preview/standalone_preview.html
-scripts/check_preview_ui.cjs
-scripts/check_standalone_preview.cjs
-standalone_preview.html
+lib/screens/dashboard_screen.dart
+lib/services/stock_universe_service.dart
+lib/services/strategy_engine.dart
+lib/services/tw_issuer_csv.dart
+lib/widgets/manual_trade_levels.dart
+pubspec.yaml
+scripts/verify_deliverable.py
+test/manual_trade_levels_test.dart
 test/recommendation_trade_levels_test.dart
+test/trade_levels_test.dart
+test/tw_issuer_csv_test.dart
+test/tw_official_fallback_test.dart
+test/tw_universe_resume_integration_test.dart
+test/tw_universe_stability_test.dart

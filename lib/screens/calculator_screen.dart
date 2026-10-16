@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../models/stock_candidate.dart';
 import '../services/strategy_engine.dart';
+import '../widgets/manual_trade_levels.dart';
 
 /// A single-stock review and risk calculator. A watchlist item never becomes a
 /// trade merely because an account balance has been entered.
@@ -31,9 +32,11 @@ class CalculatorScreen extends StatefulWidget {
 class _CalculatorScreenState extends State<CalculatorScreen> {
   late final TextEditingController _equityController;
   PositionPlan? _plan;
+  TradeLevels? _levels;
+  String? _levelsError;
   String? _inputError;
 
-  bool get _eligible => widget.candidate.hasValidStopRange && !widget.isCached;
+  bool get _eligible => _levels != null && !widget.isCached;
 
   String get _currency => widget.candidate.market.currencySymbol;
 
@@ -87,6 +90,17 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   void _recalculate({bool notify = true}) {
+    // Exit prices depend on validated entry/stop prices, not account capital.
+    // A retained quote may show its old levels, while sizing stays disabled.
+    _levels = null;
+    _levelsError = null;
+    try {
+      _levels = StrategyEngine.calculateTradeLevels(widget.candidate);
+    } on ArgumentError catch (error) {
+      _levelsError = error.message?.toString() ?? '進場與停損尚未通過驗證。';
+    } catch (_) {
+      _levelsError = '進場與停損價位無法驗證，請更新後再確認。';
+    }
     final text = _equityController.text.trim().replaceAll(',', '');
     final equity = double.tryParse(text);
     // Clear the preceding result before validation: invalid text must never
@@ -143,7 +157,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 if (widget.isCached) ...[
                   const SizedBox(height: 12),
                   _notice(context, '顯示上次快取',
-                      '目前為原始時間的快取行情與型態；請回到推薦頁下拉更新後再評估進場。'),
+                      '目前為原始時間的快取行情與型態；有效的舊停損與 R 目標保留為參考。'
+                      '請回到推薦頁下拉更新後再評估進場。'),
                 ],
                 const SizedBox(height: 20),
                 LayoutBuilder(
@@ -297,7 +312,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 context,
                 widget.isCached ? '快取行情待更新' : '等待進場確認',
                 widget.isCached
-                    ? '請取得最新行情與型態確認後再計算建議買進股數。'
+                    ? _levels == null
+                        ? '快取資料沒有通過驗證的進場與停損；不能建立 1R。'
+                            '請更新行情，或展開下方手動試算。'
+                        : '下方保留上次確認的參考價位；請取得最新行情與型態確認後再計算建議買進股數。'
                     : '此標的尚無有效突破或實際停損；當日低點風險須 ≤5%，'
                     '超過時才採 1.5%–3% 的分鐘 K 低點。'
                     '確認進場 K 棒與停損後才會提供買進股數。',
@@ -337,56 +355,77 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               _notice(context, '尚無計算結果', '請輸入有效的帳戶淨值。'),
             const Divider(height: 32),
             _buildTradeLevels(context),
+            const SizedBox(height: 16),
+            ManualTradeLevels(candidate: stock),
           ],
         ),
       ),
     );
   }
 
-  /// Targets share the validated position plan; an incomplete entry, stale
-  /// quote or invalid balance never acquires executable-looking target values.
+  /// A valid observed stop determines R even when capital is invalid or prices
+  /// are retained. Retained values remain explicitly dated references; neither
+  /// they nor the separate manual calculator create a new position plan.
   Widget _buildTradeLevels(BuildContext context) {
     final stock = widget.candidate;
     final plan = _plan;
-    final pending = widget.isCached ? '待更新' : '待確認';
+    final levels = _levels;
+    final pending = stock.stopPrice == null
+        ? '缺少停損' : '待確認';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('進出場價位與分批計畫',
+        Text(widget.isCached && levels != null
+                ? '上次確認價位（待更新）' : '進出場價位與分批計畫',
             style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         _dataRow(context,
-            plan == null
+            levels == null || widget.isCached
                 ? '${stock.triggerType ?? '條件'} 觸發參考價'
                 : '假設買價 · ${stock.triggerType ?? '條件'} 觸發',
             _money(stock.triggerPrice),
             valueKey: ValueKey('calculator-entry-${stock.id}')),
-        _dataRow(context, '初始硬停損參考',
-            plan == null ? pending : _money(stock.stopPrice!),
+        _dataRow(context, widget.isCached && levels != null
+                ? '上次初始硬停損參考' : '初始硬停損參考',
+            levels == null ? pending : _money(stock.stopPrice!),
             valueKey: ValueKey('calculator-stop-${stock.id}')),
-        _dataRow(context, '停損來源', plan == null
+        _dataRow(context, '停損來源', levels == null
             ? '待確認實際低點'
             : stock.stopSource == 'entry_bar_low'
                 ? '實際進場分鐘 K 低點' : '突破日當日實際低點'),
         _dataRow(context, '停損幅度',
-            plan == null ? pending : '${plan.stopPercent.toStringAsFixed(2)}%',
+            levels == null ? pending : '${levels.stopPercent.toStringAsFixed(2)}%',
             valueKey: ValueKey('calculator-stop-percent-${stock.id}')),
         _dataRow(context, '每股風險 · 1R',
-            plan == null ? pending : _money(plan.riskPerShare),
+            levels == null ? pending : _money(levels.riskPerShare),
             valueKey: ValueKey('calculator-1r-${stock.id}')),
+        if (levels != null && widget.isCached)
+          _dataRow(context, '上次突破確認時間',
+              _date(stock.signalTimestamp ?? stock.dataTimestamp)),
+        if (levels == null) ...[
+          const SizedBox(height: 8),
+          Text(stock.stopPrice == null
+                  ? '尚未取得已確認突破的實際停損，無法建立 1R、3R 與 5R。'
+                      '只有 PDH／ORH 觸發價還不夠；可更新行情或使用下方手動試算。'
+                  : _levelsError ?? '進場與停損尚未通過驗證。',
+              key: ValueKey('calculator-levels-unavailable-${stock.id}'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.6)),
+        ],
         const SizedBox(height: 12),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            _targetChip(context, '3R 賣價 · 原始股數 15%',
-                plan == null ? pending : _money(plan.targetPrice(3)),
+            _targetChip(context, widget.isCached
+                    ? '3R 參考價 · 原始股數 15%' : '3R 賣價 · 原始股數 15%',
+                levels == null ? pending : _money(levels.targetPrice(3)),
                 valueKey: ValueKey('calculator-3r-${stock.id}')),
-            _targetChip(context, '5R 賣價 · 再賣原始股數 15%',
-                plan == null ? pending : _money(plan.targetPrice(5)),
+            _targetChip(context, widget.isCached
+                    ? '5R 參考價 · 再賣原始股數 15%' : '5R 賣價 · 再賣原始股數 15%',
+                levels == null ? pending : _money(levels.targetPrice(5)),
                 valueKey: ValueKey('calculator-5r-${stock.id}')),
             _targetChip(context, '10R · 額外觀察目標',
-                plan == null ? pending : _money(plan.targetPrice(10)),
+                levels == null ? pending : _money(levels.targetPrice(10)),
                 valueKey: ValueKey('calculator-10r-${stock.id}')),
           ],
         ),
@@ -397,9 +436,11 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               height: 1.6,
             )),
         const SizedBox(height: 6),
-        Text(plan == null
-                ? '買點、實際停損與有效本金確認後，才提供完整價位；目前為觀察參考。'
-                : '1R＝假設買價－初始硬停損；3R／5R＝假設買價＋3／5×1R。'
+        Text(levels == null
+                ? '目標價需有有效進場價與實際停損。系統不會由目標風險百分比反推停損。'
+                : '${widget.isCached ? '以上為上次確認價位，更新確認前不提供買進股數。' : ''}'
+                    '${plan == null && !widget.isCached ? '目前只列價位試算；請輸入有效本金以計算部位。' : ''}'
+                    '1R＝假設買價－初始硬停損；3R／5R＝假設買價＋3／5×1R。'
                     '兩次各賣原始股數的 15%，合計 30%；整股交易需另行調整股數。'
                     '停損先觸發則先出場。'
                     '價位為策略試算，請確認交易所跳動單位與最新行情後再下單。',

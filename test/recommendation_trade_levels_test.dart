@@ -159,7 +159,7 @@ void main() {
     }
   });
 
-  testWidgets('stale recommendation withholds new target prices and sizing until refresh',
+  testWidgets('stale recommendation preserves dated observed targets but withholds sizing',
       (tester) async {
     final controller = await _showDashboard(tester, stale: true);
     try {
@@ -167,9 +167,15 @@ void main() {
       Finder text(String value) => find.descendant(of: card,
           matching: find.textContaining(value));
       expect(text('待更新'), findsWidgets);
-      expect(text('NT\$78.30'), findsNothing);
-      expect(text('NT\$80.70'), findsNothing);
+      expect(text('NT\$73.50'), findsWidgets);
+      expect(text('NT\$78.30'), findsWidgets);
+      expect(text('NT\$80.70'), findsWidgets);
+      expect(text('上次確認價位（待更新）'), findsOneWidget);
+      expect(text('突破確認時間：'), findsOneWidget);
+      expect(text('3R 參考價'), findsWidgets);
+      expect(text('5R 參考價'), findsWidgets);
       expect(text('建議部位 '), findsNothing);
+      expect(text('已確認'), findsNothing);
       expect(tester.takeException(), isNull);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -199,11 +205,13 @@ void main() {
     await tester.enterText(capital, '0');
     await tester.pumpAndSettle();
     expect(tester.widget<Text>(find.byKey(
-        const ValueKey('calculator-3r-tw:6269.TW'))).data, '待確認');
+        const ValueKey('calculator-3r-tw:6269.TW'))).data, 'NT\$78.30 TWD');
     expect(tester.widget<Text>(find.byKey(
-        const ValueKey('calculator-5r-tw:6269.TW'))).data, '待確認');
-    expect(find.textContaining('NT\$78.30'), findsNothing);
-    expect(find.textContaining('NT\$80.70'), findsNothing);
+        const ValueKey('calculator-5r-tw:6269.TW'))).data, 'NT\$80.70 TWD');
+    expect(find.textContaining('NT\$78.30'), findsWidgets);
+    expect(find.textContaining('NT\$80.70'), findsWidgets);
+    expect(find.text('請輸入大於 0 的有效帳戶淨值'), findsOneWidget);
+    expect(find.text('建議買進股數'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -230,6 +238,102 @@ void main() {
         const ValueKey('calculator-5r-tw:1802.TW'))).data, '待確認');
     expect(find.textContaining('NT\$86.30'), findsNothing);
     expect(find.textContaining('NT\$98.50'), findsNothing);
+    expect(find.text('建議買進股數'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('cached calculator preserves observed R prices and timestamp without a new position',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(home: CalculatorScreen(
+      candidate: _candidate(StockMarket.tw), initialEquity: 1000000,
+      isCached: true,
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('上次確認價位（待更新）'), findsOneWidget);
+    expect(find.text('上次突破確認時間'), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(
+        const ValueKey('calculator-stop-tw:6269.TW'))).data, 'NT\$73.50 TWD');
+    expect(tester.widget<Text>(find.byKey(
+        const ValueKey('calculator-3r-tw:6269.TW'))).data, 'NT\$78.30 TWD');
+    expect(tester.widget<Text>(find.byKey(
+        const ValueKey('calculator-5r-tw:6269.TW'))).data, 'NT\$80.70 TWD');
+    expect(find.text('建議買進股數'), findsNothing);
+    expect(find.textContaining('更新確認前不提供買進股數'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('cached missing stop explains the missing input and does not fabricate automatic targets',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(home: CalculatorScreen(
+      candidate: _candidate(StockMarket.tw, missingStop: true),
+      initialEquity: 1000000, isCached: true,
+    )));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(find.byKey(
+        const ValueKey('calculator-3r-tw:6269.TW'))).data, '缺少停損');
+    expect(tester.widget<Text>(find.byKey(
+        const ValueKey('calculator-5r-tw:6269.TW'))).data, '缺少停損');
+    expect(find.byKey(const ValueKey('calculator-levels-unavailable-tw:6269.TW')),
+        findsOneWidget);
+    expect(find.textContaining('尚未取得已確認突破的實際停損'), findsOneWidget);
+    expect(find.text('手動試算 3R／5R'), findsOneWidget);
+    expect(find.textContaining('NT\$78.30'), findsNothing);
+    expect(find.textContaining('NT\$80.70'), findsNothing);
+    expect(find.text('建議買進股數'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a newer unconfirmed candidate clears old automatic target values',
+      (tester) async {
+    Widget page(StockCandidate candidate) => MaterialApp(home: CalculatorScreen(
+      candidate: candidate, initialEquity: 1000000,
+    ));
+    await tester.pumpWidget(page(_candidate(StockMarket.tw)));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('NT\$78.30'), findsWidgets);
+    await tester.pumpWidget(page(_candidate(StockMarket.tw, missingStop: true)));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(find.byKey(
+        const ValueKey('calculator-3r-tw:6269.TW'))).data, '缺少停損');
+    expect(find.textContaining('NT\$78.30'), findsNothing);
+    expect(find.text('建議買進股數'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('manual assumptions cannot fill a missing automatic stop or enable a buy',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(home: CalculatorScreen(
+      candidate: _candidate(StockMarket.tw, missingStop: true),
+      initialEquity: 1000000, isCached: true,
+    )));
+    await tester.pumpAndSettle();
+    final toggle = find.text('手動試算 3R／5R');
+    await tester.ensureVisible(toggle);
+    await tester.pumpAndSettle();
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    final stopField = find.byKey(const ValueKey('manual-stop-tw:6269.TW'));
+    await tester.ensureVisible(stopField);
+    await tester.pumpAndSettle();
+    await tester.enterText(stopField, '73.5');
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(find.byKey(
+        const ValueKey('manual-3r-tw:6269.TW'))).data, 'NT\$78.30 TWD');
+    expect(tester.widget<Text>(find.byKey(
+        const ValueKey('manual-5r-tw:6269.TW'))).data, 'NT\$80.70 TWD');
+    expect(tester.widget<Text>(find.byKey(
+        const ValueKey('calculator-stop-tw:6269.TW'))).data, '缺少停損');
+    expect(tester.widget<Text>(find.byKey(
+        const ValueKey('calculator-3r-tw:6269.TW'))).data, '缺少停損');
+    expect(find.text('假設價格試算 · 非買進建議'), findsOneWidget);
     expect(find.text('建議買進股數'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());

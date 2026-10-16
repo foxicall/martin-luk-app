@@ -761,6 +761,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (_isMobileTwScan)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text('名單來源提示保留本輪建立時的狀態；續掃不會重設進度。個股行情時間請看卡片。',
+                  style: TextStyle(height: 1.5)),
+            ),
           for (var index = 0; index < warnings.length; index++)
             Padding(
               padding: const EdgeInsets.only(top: 12),
@@ -1030,10 +1036,19 @@ class _RecommendationCard extends StatelessWidget {
     }
   }
 
+  TradeLevels? get _levels {
+    try {
+      return StrategyEngine.calculateTradeLevels(stock);
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final plan = _plan;
+    final levels = _levels;
     return Card(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
@@ -1115,27 +1130,36 @@ class _RecommendationCard extends StatelessWidget {
                 ],
               ),
               const Divider(height: 30),
+              if (isCached && levels != null) ...[
+                Text('上次確認價位（待更新）',
+                    key: ValueKey('recommendation-historical-levels-${stock.id}'),
+                    style: Theme.of(context).textTheme.labelLarge),
+                Text('突破確認時間：${_date(stock.signalTimestamp ?? stock.dataTimestamp)}',
+                    style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height: 10),
+              ],
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(child: _metric(context,
-                      plan == null
+                      levels == null || isCached
                           ? '${stock.triggerType ?? '條件'} 觸發參考價'
                           : '假設買價 · ${stock.triggerType ?? '條件'} 觸發',
                       '${stock.market.currencySymbol}${stock.triggerPrice.toStringAsFixed(2)}',
                       small: true,
                       valueKey: ValueKey('recommendation-entry-${stock.id}'))),
                   const SizedBox(width: 8),
-                  Expanded(child: _metric(context, '初始硬停損參考',
-                      plan == null
-                          ? (isCached ? '待更新' : '待確認')
+                  Expanded(child: _metric(context, isCached && levels != null
+                          ? '上次初始硬停損參考' : '初始硬停損參考',
+                      levels == null
+                          ? (stock.stopPrice == null ? '缺少停損' : '待確認')
                           : '${stock.market.currencySymbol}${stock.stopPrice!.toStringAsFixed(2)}',
                       small: true,
                       valueKey: ValueKey('recommendation-stop-${stock.id}'))),
                 ],
               ),
               const SizedBox(height: 8),
-              Text('停損來源：${_stopSource(plan)}',
+              Text('停損來源：${_stopSource(levels)}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.onSurfaceVariant,
                   )),
@@ -1144,14 +1168,14 @@ class _RecommendationCard extends StatelessWidget {
                 spacing: 12,
                 runSpacing: 6,
                 children: [
-                  Text(plan == null
-                      ? (isCached ? '停損幅度待更新' : '停損幅度待確認')
-                      : '停損幅度 ${plan.stopPercent.toStringAsFixed(2)}%',
+                  Text(levels == null
+                      ? '停損幅度待確認'
+                      : '停損幅度 ${levels.stopPercent.toStringAsFixed(2)}%',
                       key: ValueKey('recommendation-stop-percent-${stock.id}'),
                       style: Theme.of(context).textTheme.bodySmall),
-                  Text(plan == null
-                      ? (isCached ? '1R 待更新' : '1R 待確認')
-                      : '1R ${stock.market.currencySymbol}${plan.riskPerShare.toStringAsFixed(2)}',
+                  Text(levels == null
+                      ? '1R 待確認'
+                      : '1R ${stock.market.currencySymbol}${levels.riskPerShare.toStringAsFixed(2)}',
                       key: ValueKey('recommendation-1r-${stock.id}'),
                       style: Theme.of(context).textTheme.bodySmall),
                   Text(isCached ? '部位待更新' : plan == null
@@ -1166,12 +1190,14 @@ class _RecommendationCard extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: _metric(context, '3R 賣價 · 原始股數 15%',
-                      _targetPrice(plan, 3), small: true,
+                  Expanded(child: _metric(context, isCached
+                          ? '3R 參考價 · 原始股數 15%' : '3R 賣價 · 原始股數 15%',
+                      _targetPrice(levels, 3), small: true,
                       valueKey: ValueKey('recommendation-3r-${stock.id}'))),
                   const SizedBox(width: 8),
-                  Expanded(child: _metric(context, '5R 賣價 · 再賣原始股數 15%',
-                      _targetPrice(plan, 5), small: true,
+                  Expanded(child: _metric(context, isCached
+                          ? '5R 參考價 · 再賣原始股數 15%' : '5R 賣價 · 再賣原始股數 15%',
+                      _targetPrice(levels, 5), small: true,
                       valueKey: ValueKey('recommendation-5r-${stock.id}'))),
                 ],
               ),
@@ -1182,9 +1208,13 @@ class _RecommendationCard extends StatelessWidget {
                     color: colors.onSurfaceVariant, height: 1.5,
                   )),
               const SizedBox(height: 6),
-              Text(plan == null
-                      ? '買點、實際停損與有效本金確認後，才提供完整價位；目前為觀察參考。'
-                      : '分批比例以原始買進股數為基準；停損先觸發則先出場。'
+              Text(levels == null
+                      ? stock.stopPrice == null
+                          ? '尚未取得已確認突破的實際停損，無法計算 1R 與目標價。點開詳情可手動試算。'
+                          : '進場與停損未通過驗證，暫不提供目標價。點開詳情查看原因。'
+                      : '${isCached ? '以上保留上次確認的參考價位，更新確認前不提供買進部位。' : ''}'
+                          '${plan == null && !isCached ? '價位試算不受本金影響；買進部位需另行驗證本金。' : ''}'
+                          '分批比例以原始買進股數為基準；停損先觸發則先出場。'
                           '目標價為策略試算，尚非下單指令。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.onSurfaceVariant, height: 1.5,
@@ -1196,12 +1226,12 @@ class _RecommendationCard extends StatelessWidget {
     );
   }
 
-  String _targetPrice(PositionPlan? plan, int multiple) => plan == null
-      ? (isCached ? '待更新' : '待確認')
-      : '${stock.market.currencySymbol}${plan.targetPrice(multiple).toStringAsFixed(2)}';
+  String _targetPrice(TradeLevels? levels, int multiple) => levels == null
+      ? (stock.stopPrice == null ? '缺少停損' : '待確認')
+      : '${stock.market.currencySymbol}${levels.targetPrice(multiple).toStringAsFixed(2)}';
 
-  String _stopSource(PositionPlan? plan) {
-    if (plan == null) return isCached ? '原行情待更新驗證' : '待確認實際低點';
+  String _stopSource(TradeLevels? levels) {
+    if (levels == null) return '待確認實際低點';
     return stock.stopSource == 'entry_bar_low'
         ? '實際進場分鐘 K 低點'
         : '突破日當日實際低點';

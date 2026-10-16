@@ -1,5 +1,27 @@
 import '../models/stock_candidate.dart';
 
+/// Price geometry, independent of an account's balance or share count.
+/// The factory method used determines whether source evidence was verified or
+/// the values were manually supplied for hypothetical math. Freshness and
+/// permission to show a new order remain the responsibility of the caller.
+class TradeLevels {
+  TradeLevels._({
+    required this.riskPerShare,
+    required this.stopPercent,
+    required Map<int, double> targets,
+  }) : targets = Map<int, double>.unmodifiable(targets);
+
+  final double riskPerShare;
+  final double stopPercent;
+  final Map<int, double> targets;
+
+  double targetPrice(int r) {
+    final value = targets[r];
+    if (value == null) throw ArgumentError('僅支援 3R、5R、10R 目標價。');
+    return value;
+  }
+}
+
 /// The risk budget describes loss at the stop, before fees and gap/slippage.
 class PositionPlan {
   PositionPlan({
@@ -39,25 +61,16 @@ class PositionPlan {
 /// avoids an extra share at a risk/cap boundary. An observed day-low stop may
 /// be up to 5%; only an alternate minute-bar stop must be 1.5%–3%.
 class StrategyEngine {
-  static PositionPlan calculate(
-    StockCandidate candidate,
-    double equity, {
-    int lotSize = 1,
-  }) {
-    if (!equity.isFinite || equity <= 0) {
-      throw ArgumentError.value(equity, 'equity', '帳戶淨值必須為有限正數。');
-    }
-    if (lotSize <= 0) {
-      throw ArgumentError.value(lotSize, 'lotSize', '交易單位必須為正整數。');
-    }
+  /// Reuse the same evidence and exact decimal rules as position sizing, but
+  /// do not require capital merely to review a previously observed price setup.
+  /// This does not manufacture a stop for a watchlist or confirm stale quotes.
+  static TradeLevels calculateTradeLevels(StockCandidate candidate) {
     if (!candidate.isConfirmed || candidate.stopPrice == null) {
-      throw ArgumentError('觀察名單尚未確認突破與停損，不能計算建議買進股數。');
+      throw ArgumentError('突破與實際停損尚未確認，不能建立自動進出場價位。');
     }
 
     final entry = _Rational.fromDouble(candidate.entryPrice);
     final stop = _Rational.fromDouble(candidate.stopPrice!);
-    final balance = _Rational.fromDouble(equity);
-    final one = _Rational.integer(1);
     final difference = entry - stop;
     if (difference.compareTo(_Rational.integer(0)) <= 0 ||
         stop.compareTo(_Rational.integer(0)) <= 0) {
@@ -80,6 +93,56 @@ class StrategyEngine {
         (candidate.dayLow != null && candidate.dayLow != candidate.stopPrice)) {
       throw ArgumentError('初始停損須為當日實際低點，距離不得超過 5%。');
     }
+
+    return calculateHypotheticalLevels(
+      entryPrice: candidate.entryPrice,
+      stopPrice: candidate.stopPrice!,
+    );
+  }
+
+  /// Pure manual scenario arithmetic, without a stock, market quote, signal or
+  /// position recommendation. The caller must label user-entered values as
+  /// hypothetical; this method never confirms a setup or substitutes a stop.
+  static TradeLevels calculateHypotheticalLevels({
+    required double entryPrice,
+    required double stopPrice,
+  }) {
+    if (!entryPrice.isFinite || entryPrice <= 0 || !stopPrice.isFinite ||
+        stopPrice <= 0 || stopPrice >= entryPrice) {
+      throw ArgumentError('假設停損須為有限正數，且低於假設買價。');
+    }
+    final entry = _Rational.fromDouble(entryPrice);
+    final stop = _Rational.fromDouble(stopPrice);
+    final difference = entry - stop;
+    final fraction = difference / entry;
+    return TradeLevels._(
+      riskPerShare: difference.toDouble(),
+      stopPercent: (fraction * _Rational.integer(100)).toDouble(),
+      targets: {
+        for (final r in [3, 5, 10])
+          r: (entry + difference * _Rational.integer(r)).toDouble(),
+      },
+    );
+  }
+
+  static PositionPlan calculate(
+    StockCandidate candidate,
+    double equity, {
+    int lotSize = 1,
+  }) {
+    if (!equity.isFinite || equity <= 0) {
+      throw ArgumentError.value(equity, 'equity', '帳戶淨值必須為有限正數。');
+    }
+    if (lotSize <= 0) {
+      throw ArgumentError.value(lotSize, 'lotSize', '交易單位必須為正整數。');
+    }
+    final levels = calculateTradeLevels(candidate);
+    final entry = _Rational.fromDouble(candidate.entryPrice);
+    final stop = _Rational.fromDouble(candidate.stopPrice!);
+    final balance = _Rational.fromDouble(equity);
+    final one = _Rational.integer(1);
+    final difference = entry - stop;
+    final fraction = difference / entry;
 
     final cap = _Rational.parse(candidate.isLargeLiquid ? '0.35' : '0.25');
     final budget = balance * _Rational.parse('0.005');
@@ -120,13 +183,10 @@ class StrategyEngine {
       positionPercent: (amount / balance * _Rational.integer(100)).toDouble(),
       riskBudget: budget.toDouble(),
       riskAmount: risk.toDouble(),
-      riskPerShare: difference.toDouble(),
-      stopPercent: (fraction * _Rational.integer(100)).toDouble(),
+      riskPerShare: levels.riskPerShare,
+      stopPercent: levels.stopPercent,
       capPercent: (cap * _Rational.integer(100)).toDouble(),
-      targets: {
-        for (final r in [3, 5, 10])
-          r: (entry + difference * _Rational.integer(r)).toDouble(),
-      },
+      targets: levels.targets,
       trimShares: trimShares,
     );
   }

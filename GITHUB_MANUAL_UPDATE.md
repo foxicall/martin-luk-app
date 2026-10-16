@@ -1,3 +1,34 @@
+# GitHub 網頁覆蓋：1.4.4+11 目標價顯示修正
+
+請使用 `martin_luk_r_targets_updates_20261016.zip`，解壓後依 `UPDATE_FILES.txt` 原路徑覆蓋 `fix/refresh-live-gate-20261014` 分支。此包包含目前 GitHub 基線缺少的上一版官方 CSV 備援，不需另外依序疊加舊更新包。完整專案為 `martin_luk_r_targets_20261016.zip`。
+
+務必一併上傳 `lib/widgets/manual_trade_levels.dart`、兩項新測試檔、更新後推薦測試及 `.github/workflows/build_apk.yml`；版本為 **1.4.4+11**。不要只上傳 ZIP，保留相對路徑與隱藏目錄，不多套一層資料夾。
+
+看最後一次提交的 Actions，真實行情門禁成功後才建置，完成後下載 `martin-luk-app-release` 安裝。有效的舊停損／R價位會標明歷史參考；缺少停損可展開手動試算，輸入不會變成自動買點。詳見 [R_TARGET_DISPLAY_FIX.md](R_TARGET_DISPLAY_FIX.md)。本環境沒有 Flutter，新增測試與APK尚待新提交驗證。
+
+---
+
+以下為歷史版本說明，以本頁上方的版本與更新包為準。
+
+# GitHub 網頁覆蓋：1.4.3+10 官方台股名單備援
+
+本次使用 `martin_luk_tw_official_csv_updates_20261016.zip`，依解壓後 `UPDATE_FILES.txt` 原路徑覆蓋。若不確定舊檔是否完整，改用 `martin_luk_tw_official_csv_20261016.zip` 合併完整專案。
+
+1. 開啟 `foxicall/martin-luk-app`，切換 **fix/refresh-live-gate-20261014**。
+2. **Add file → Upload files**：上傳解壓後檔案與資料夾，放在原有 `pubspec.yaml` 所在根目錄；不是上傳 ZIP，也不是多包一層目錄。
+3. 保留 `.github/` 隱藏目錄。新版工作流、新 parser 與兩個新測試必須一起上傳，版本為 **1.4.3+10**。清單內其他不同步檔案也一併覆蓋。
+4. 最後一次提交會觸發 Actions。必須看新提交結果；重跑舊提交不會使用新原始碼。手動 Run workflow 按鈕需工作流存在於預設分支。
+5. 成功後下載 **martin-luk-app-release**，解壓並安裝 APK；**martin-luk-live-scan-evidence** 保存測試紀錄。
+6. 關閉 Mock、選手機直接連線，開啟前台自動更新。不要清資料或重設輪掃；目前進度保留，下一輪需要載入名單時會使用新增的官方備援。
+
+這張圖已確認下拉會從 30 增到 60 或更多，並非續掃卡住。新增 CSV 備援處理的是 TWSE 官方名單逾時；完整行為、日期政策與驗證限制見 [TW_OFFICIAL_CSV_FALLBACK.md](TW_OFFICIAL_CSV_FALLBACK.md)。
+
+基線 1.4.2+9 已在 GitHub run `38852597488` 通過測試、真實行情門禁與 APK 建置；新增 1.4.3+10 仍須由本次新提交驗證，本機沒有 Flutter SDK。沒有代為 Push、部署 API 或跳過門禁。
+
+---
+
+以下為先前交付的歷史說明；以本頁上方版本與更新包為準。
+
 # GitHub 網頁完整覆蓋：1.4.0+7 手機台股輪掃
 
 若 Actions 顯示 `recommendation_trade_levels_test.dart: Does not exist`，使用 **`martin_luk_restore_recommendation_files_20261016.zip`** 一次補齊；此包依 GitHub 實際缺漏比對，包含測試與不同步的計算機／預覽更新。步驟見 [RESTORE_RECOMMENDATION_FILES.md](RESTORE_RECOMMENDATION_FILES.md)。版本仍為 1.4.2+9。

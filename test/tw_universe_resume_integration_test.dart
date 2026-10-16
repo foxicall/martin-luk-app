@@ -115,7 +115,7 @@ void main() {
       throw StateError('Unexpected fixture URL: ${request.url}');
     });
     addTearDown(client.close);
-    final universe = StockUniverseService(
+    final universe = StockUniverseService(useTwCsvFallback: false,
       client: client,
       preferences: preferences,
       now: () => now,

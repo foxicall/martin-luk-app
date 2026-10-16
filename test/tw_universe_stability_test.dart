@@ -38,7 +38,7 @@ void main() {
     var tpexFails = false;
     var twse = ['2330', '2603'];
     var tpex = ['6488', '8358'];
-    StockUniverseService service() => StockUniverseService(
+    StockUniverseService service() => StockUniverseService(useTwCsvFallback: false,
       preferences: preferences, now: () => time,
       client: MockClient((request) async {
         final listed = request.url == StockUniverseService.twEndpoint;
@@ -95,7 +95,7 @@ void main() {
 
   test('a mixed cached full-sized list never claims current complete coverage', () async {
     var failTwse = false;
-    final service = StockUniverseService(now: () => originalTime,
+    final service = StockUniverseService(useTwCsvFallback: false, now: () => originalTime,
       client: MockClient((request) async {
         if (request.url == StockUniverseService.twEndpoint) {
           return failTwse ? http.Response('blocked', 403)
@@ -122,7 +122,7 @@ void main() {
   test('cold partial TW load uses only failed exchange bundled identities with original date', () async {
     final preferences = await SharedPreferences.getInstance();
     var tpex = ['6488'];
-    StockUniverseService service() => StockUniverseService(
+    StockUniverseService service() => StockUniverseService(useTwCsvFallback: false,
       preferences: preferences, now: () => originalTime,
       client: MockClient((request) async =>
         request.url == StockUniverseService.twEndpoint
@@ -156,7 +156,7 @@ void main() {
   });
 
   test('cold TPEx failure cannot replace successful TWSE membership with bundled extras', () async {
-    final service = StockUniverseService(now: () => originalTime,
+    final service = StockUniverseService(useTwCsvFallback: false, now: () => originalTime,
       client: MockClient((request) async =>
         request.url == StockUniverseService.twEndpoint
             ? _rows(['2330']) : http.Response('blocked', 403)),
@@ -176,7 +176,7 @@ void main() {
 
   test('legacy official v3 TW cache is split without renewing source timestamps', () async {
     final preferences = await SharedPreferences.getInstance();
-    final first = StockUniverseService(preferences: preferences,
+    final first = StockUniverseService(useTwCsvFallback: false, preferences: preferences,
       now: () => originalTime, client: MockClient((request) async =>
         _rows(request.url == StockUniverseService.twEndpoint ? ['2330'] : ['6488'])),
     );
@@ -186,7 +186,7 @@ void main() {
     final legacy = jsonDecode(preferences.getString(key)!) as Map<String, dynamic>;
     legacy.remove('tw_exchange_sources');
     await preferences.setString(key, jsonEncode(legacy));
-    final next = StockUniverseService(preferences: preferences,
+    final next = StockUniverseService(useTwCsvFallback: false, preferences: preferences,
       now: () => originalTime.add(const Duration(days: 1)),
       client: MockClient((request) async => request.url == StockUniverseService.twEndpoint
           ? http.Response('blocked', 403) : _rows(['8358'])),
@@ -206,7 +206,7 @@ void main() {
     final preferences = await SharedPreferences.getInstance();
     final late = Completer<http.Response>();
     var hang = false;
-    final service = StockUniverseService(preferences: preferences,
+    final service = StockUniverseService(useTwCsvFallback: false, preferences: preferences,
       now: () => originalTime, requestTimeout: const Duration(milliseconds: 25),
       client: MockClient((request) async {
         if (request.url == StockUniverseService.twEndpoint) {
@@ -234,7 +234,7 @@ void main() {
     final preferences = await SharedPreferences.getInstance();
     var time = originalTime;
     var failTwse = false;
-    final service = StockUniverseService(preferences: preferences,
+    final service = StockUniverseService(useTwCsvFallback: false, preferences: preferences,
       now: () => time, client: MockClient((request) async =>
         request.url == StockUniverseService.twEndpoint
             ? (failTwse ? http.Response('blocked', 403) : _rows(['9998']))
@@ -266,7 +266,7 @@ void main() {
     var waitForTwse = false;
     final started = Completer<void>();
     final late = Completer<http.Response>();
-    final service = StockUniverseService(preferences: preferences,
+    final service = StockUniverseService(useTwCsvFallback: false, preferences: preferences,
       now: () => originalTime,
       client: MockClient((request) async {
         if (request.url == StockUniverseService.twEndpoint) {
