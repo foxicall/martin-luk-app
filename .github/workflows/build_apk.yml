@@ -103,7 +103,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v 2>&1 | tee -a test_logs/verification.log
           flutter test test/rs_alignment_test.dart test/live_strategy_engine_test.dart test/live_risk_helpers_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
-          flutter test test/us_stock_directory_test.dart test/us_universe_fallback_test.dart test/network_request_test.dart test/expanded_symbol_test.dart test/rolling_scan_snapshot_test.dart test/stock_universe_service_test.dart test/backend_snapshot_repository_test.dart test/backend_scan_controller_test.dart test/candidate_repository_test.dart test/backend_transport_timeout_test.dart test/backend_connection_service_test.dart test/backend_setup_settings_test.dart test/dashboard_scope_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+          flutter test test/us_stock_directory_test.dart test/us_universe_fallback_test.dart test/network_request_test.dart test/expanded_symbol_test.dart test/rolling_scan_snapshot_test.dart test/stock_universe_service_test.dart test/backend_snapshot_repository_test.dart test/backend_scan_controller_test.dart test/candidate_repository_test.dart test/backend_transport_timeout_test.dart test/backend_connection_service_test.dart test/backend_setup_settings_test.dart test/dashboard_scope_test.dart test/mobile_tw_rolling_repository_test.dart test/mobile_tw_polling_test.dart test/core_market_pool_test.dart test/live_repositories_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
       - name: 執行真實行情與指標門禁測試（允許零推薦）
         id: run-gate-test
