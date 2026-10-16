@@ -152,6 +152,13 @@ jobs:
           set -euo pipefail
           flutter test test/background_scan_uninitialized_test.dart test/background_scan_service_test.dart test/background_scan_controller_test.dart test/background_scan_settings_test.dart test/background_scan_app_lifecycle_test.dart test/production_lifecycle_test.dart test/portfolio_controller_test.dart --dart-define=USE_MOCK_DATA=false --timeout=90s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
+      - name: 驗證美股完整名單分批輪掃、跨重啟與畫面進度
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter test test/mobile_us_rolling_repository_test.dart test/mobile_us_polling_test.dart test/mobile_us_scope_test.dart test/market_scan_progress_test.dart test/production_ui_test.dart --dart-define=USE_MOCK_DATA=false --timeout=90s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+
       - name: 執行真實行情與指標門禁測試（允許零推薦）
         id: run-gate-test
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
