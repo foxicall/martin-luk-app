@@ -2,6 +2,24 @@
 
 本文件取代先前混合多次交付的歷史狀態，避免把舊測試數、舊股票池或舊推薦門禁當成本版結果。
 
+## 最新補充：美股股票池格式與備援
+
+版本為 1.3.1+5，新增美股文字名錄解析器、每服務 Accept、具體 HTTP／格式診斷、共用期限的有日期備援、v3 名錄快取與關閉後的寫入防護。新解析、備援與真實名錄測試均已加入建置流程；細節與覆蓋清單見 [US_UNIVERSE_FIX.md](US_UNIVERSE_FIX.md)。
+
+已用現有 Python parser 驗證 10/15 公開鏡像共 5,115 檔；這不是 Android 或新 Dart 測試成功的證明。本環境仍沒有 Flutter SDK，新測試命令回傳 127，須由新的 Actions 結果確認。前次 v2 計時器測試修正保留。
+
+## 最新補充 v2：在 Widget callback 返回前清理計時器
+
+已讀取 Actions run `38690946473` 的完整日誌：v1 剩餘兩個失敗均為 pending timer invariant，而非行為斷言。v2 將兩個 auto-refresh 測試以 `try/finally` 在 callback 返回前 `dispose()`，移除同測試的重複 teardown，保留 14 個測試、原有斷言及前次零秒計時器修正。新增清理後的 timer／waiting／loading 檢查。詳見 [POLLING_TEST_FIX.md](POLLING_TEST_FIX.md)。
+
+本機仍缺少 Flutter SDK；Docker socket 亦受沙箱限制，不能執行 Flutter 測試。已確認原始碼保留斷言與單次清理，但 v2 的成功結果仍須由新 Actions 執行確認，不能沿用上次的 62 passed / 2 failed 結果宣稱通過。
+
+## 前次補充：背景輪詢測試時鐘
+
+`test/backend_scan_controller_test.dart` 已在前景啟動點明確呼叫 `pump(Duration.zero)`，修正零秒計時器未執行造成的請求次數錯誤。全部 14 個測試與原有斷言保留；詳見 [POLLING_TEST_FIX.md](POLLING_TEST_FIX.md)。本次沒有修改控制器或工作流，沒有跳過門禁。
+
+本機執行該 Flutter 測試命令因缺少 SDK 回傳 127；修正後的 Flutter 成功結果須由新的 GitHub Actions 執行確認。下列 Python／JavaScript 數字是本次股票池版本既有的檢查紀錄，不能代替此次 Dart 測試結果。
+
 ## 已提供的內容
 
 - 台灣上市 `.TW`／上櫃 `.TWO` 及 Nasdaq／NYSE／NYSE American 可確認普通股的來源解析、排除及來源警告。

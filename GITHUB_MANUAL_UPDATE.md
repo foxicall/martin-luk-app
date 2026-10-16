@@ -1,5 +1,7 @@
 # GitHub 網頁完整覆蓋：全市場輪掃版本
 
+最新美股名錄修正版請使用 `martin_luk_us_universe_fix_20261015.zip` 或完整包 `martin_luk_all_stocks_us_fix_20261015.zip`，並依 [US_UNIVERSE_FIX.md](US_UNIVERSE_FIX.md) 操作；下列檔名屬先前股票池擴充交付。
+
 本次原始碼位於完整覆蓋包 `martin_luk_all_stocks_20261015.zip`。更新台灣上市＋上櫃與美股三交易所名單、Flutter 搜尋／代碼、Python 背景逐頁掃描及部署設定。請使用 GitHub 網頁上傳，不需要本機 Git 指令或額外的補丁安裝器。
 
 如果你已套用上一份 `martin_luk_cloud_api_20261015.zip`，可改下載 **`martin_luk_all_stocks_updates_20261015.zip`**，只上傳本次新增／修改的完整檔案（少於 100 個檔案）。具體清單見 `UPDATE_FILES.txt`。這不是補丁腳本；每個同名檔案都整份覆蓋。若原專案版本不確定，使用完整專案包，避免漏掉既有依賴。

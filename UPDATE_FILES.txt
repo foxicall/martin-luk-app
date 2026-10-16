@@ -1,89 +1,41 @@
-本次 GitHub 完整檔案覆蓋清單（2026-10-15）
+美股股票池格式與備援修正（1.3.1+5）
 
-更新包：martin_luk_all_stocks_updates_20261015.zip
-完整包：martin_luk_all_stocks_20261015.zip
+本次更新包：martin_luk_us_universe_fix_20261015.zip
+最新完整包：martin_luk_all_stocks_us_fix_20261015.zip
 
-更新包以先前 martin_luk_cloud_api_20261015.zip 為基礎逐檔比較；
-含新增或變更的完整檔案，沒有差分補丁、沒有需執行的 Git 指令。
-若原專案版本不確定，改用完整包，以免漏掉既有依賴。
+更新包是相對前次 polling_fix_v2 完整包的新增／修改完整檔案。
+不確定現有版本時使用完整包。沒有補丁安裝器或 Git 指令。
 
-1. 解壓 ZIP，勿直接把 ZIP 上傳到 GitHub（GitHub 不會自動解壓）。
-2. 切換 fix/refresh-live-gate-20261014 分支。
-3. 在原含 pubspec.yaml 的根目錄選 Add file > Upload files。
-4. 將下列檔案與資料夾按原相對路徑上傳；務必包含隱藏 .github/。
-5. Commit changes，查看該次提交的 Actions；測試通過才建置 APK。
-6. Render 也須重新部署；舊環境變數 MARTIN_SCAN_POOL_LIMIT=30 改為0，
-   MARTIN_SCAN_PAGE_SIZE=60、MARTIN_SCAN_PAGE_INTERVAL=60。
-7. 安裝新 APK，設定使用 Python API 與實際 HTTPS 根網址。
+解壓後將所有項目依原相對路徑覆蓋到 GitHub
+fix/refresh-live-gate-20261014 分支含 pubspec.yaml 的根目錄，
+保留隱藏 .github；不要只上傳 ZIP。需等待新提交通過 Actions，
+下載安裝新版 APK，再於美股頁下拉強制刷新。
 
-沒有需刪除的來源檔案。原始碼/Android/Dart 尚待 Actions 實際編譯；
-最新行情與雲端部署不能由本機離線測試代替。來源分類限制見
-ALL_STOCKS_UPDATE.md、stocks_master_sources.json。
+新增解析器 us_stock_directory.dart 與網路層 acceptedContentTypes 是
+必要相依；不可只覆蓋 stock_universe_service.dart。
+完整說明與驗證限制見 US_UNIVERSE_FIX.md。
 
-完整包的 FILE_MANIFEST.json 是整個專案的逐檔 SHA256，並非僅更新包。
+完整包 FILE_MANIFEST.json 是全部來源的 SHA256，不僅這份更新清單。
 
-共 63 個更新項目：
+共 20 個更新項目：
 
 .github/workflows/build_apk.yml
-ALL_STOCKS_UPDATE.md
 BUILD_STATUS.md
-CLOUD_API_GUIDE.md
-Dockerfile
 FILE_MANIFEST.json
 GITHUB_MANUAL_UPDATE.md
 README.md
-README_HOW_TO_BUILD.md
-SEARCH_GUIDE.md
 UPDATE_FILES.txt
-backend/README.md
-backend/api.py
-backend/engine/data_loader.py
-backend/engine/exit_engine.py
-backend/engine/listed_universe.py
-backend/engine/portfolio_tracker.py
-backend/scan_jobs.py
-backend/scheduler.py
-backend/tests/test_background_scan.py
-backend/tests/test_expanded_symbols.py
-backend/tests/test_listed_universe.py
-backend/tests/test_rolling_scan.py
-lib/app_controller.dart
-lib/models/backend_scan_status.dart
-lib/models/portfolio_position.dart
-lib/models/stock_candidate.dart
-lib/models/stock_item.dart
-lib/screens/dashboard_screen.dart
-lib/screens/portfolio_screen.dart
-lib/services/candidate_repository.dart
-lib/services/market_data_api.dart
-lib/services/reminder_service.dart
+US_UNIVERSE_FIX.md
+lib/services/live_candidate_repository.dart
+lib/services/network_request.dart
 lib/services/stock_universe_service.dart
-metadata_snapshots/SOURCES.json
-metadata_snapshots/nasdaqlisted.txt
-metadata_snapshots/otherlisted.txt
-metadata_snapshots/tpex_equities_common_20260326.csv
-metadata_snapshots/tw_names_20261014.json
-metadata_snapshots/tw_stock_list_20261006.csv
-metadata_snapshots/twse_equities_common_20260326.csv
-preview/index.html
-preview/standalone_preview.html
-render.yaml
-scripts/check_portfolio_preview.cjs
-scripts/check_standalone_preview.cjs
-scripts/check_stock_search.cjs
-scripts/import_bundled_metadata.py
-scripts/refresh_stock_metadata.py
-scripts/sync_stock_search.py
-scripts/tests/test_live_scan_evidence.py
-scripts/tests/test_refresh_stock_metadata.py
-scripts/validate_live_scan_evidence.py
+lib/services/us_stock_directory.dart
+pubspec.yaml
 scripts/verify_deliverable.py
-standalone_preview.html
-stock_search.js
-stocks_master.json
-stocks_master_sources.json
-test/app_widget_test.dart
-test/capital_market_test.dart
-test/expanded_symbol_test.dart
-test/rolling_scan_snapshot_test.dart
+test/core_market_pool_test.dart
+test/live_repositories_test.dart
+test/network_request_test.dart
 test/stock_universe_service_test.dart
+test/us_stock_directory_test.dart
+test/us_universe_fallback_test.dart
+test/us_universe_http_smoke_test.dart
