@@ -223,6 +223,7 @@ void main() {
     final scans = _Scans();
     final controller = AppController(repositoryFactory: (_) => scans,
         portfolioRepositoryFactory: (_) => _Quotes(),
+        now: () => DateTime.utc(2026, 10, 14, 15),
         pollingInterval: const Duration(hours: 1));
     addTearDown(controller.dispose);
     await controller.initialize(initializeReminders: false);

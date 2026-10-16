@@ -18,7 +18,7 @@ const cases = [
   ['台積電', '2330.TW'], ['台灣積體電路製造', '2330.TW'], ['TSMC', '2330.TW'], ['TJD', '2330.TW'],
   ['2603', '2603.TW'], ['長榮海運', '2603.TW'], ['Evergreen Marine', '2603.TW'],
   ['聯發科', '2454.TW'], ['MediaTek', '2454.TW'], ['LFK', '2454.TW'],
-  ['NVDA', 'NVDA'], ['nvda', 'NVDA'], ['nVdA', 'NVDA'], ['輝達', 'NVDA'], ['輝達半導體', 'NVDA'], ['Nvidia', 'NVDA'],
+  ['6488.TWO', '6488.TWO'], ['6488', '6488.TWO'], ['NVDA', 'NVDA'], ['nvda', 'NVDA'], ['nVdA', 'NVDA'], ['輝達', 'NVDA'], ['輝達半導體', 'NVDA'], ['Nvidia', 'NVDA'],
   ['NVIDIA Corporation', 'NVDA'], ['特斯拉', 'TSLA'], ['Tesla, Inc.', 'TSLA'],
   ['蘋果', 'AAPL'], ['Apple Inc.', 'AAPL'], ['微軟', 'MSFT'], ['Microsoft', 'MSFT'],
   ['BRK.B', 'BRK-B'], ['BRK-B', 'BRK-B'], ['Berkshire Hathaway', 'BRK-B'],
@@ -53,6 +53,11 @@ throws(()=>{index.searchStock('NVDA')[0].aliases.push('malicious');},'Cached rec
 engine.setStocksMaster(records);
 eq(engine.searchStock('輝達')[0].symbol,'NVDA','Convenience searchStock uses the configured in-memory index');
 for (const market of ['US','TW']) ok(records.filter(item=>item.market===market).length>=100, `${market} offline coverage at least 100 genuine records`);
+const provenance=JSON.parse(fs.readFileSync(path.join(root,'stocks_master_sources.json'),'utf8'));
+eq(records.length,provenance.coverage.total,'Dictionary count matches traceable source metadata');
+ok(records.filter(item=>item.market==='US').length>=4000,'Broad US exchange identities replace the old S&P-only catalog');
+ok(records.filter(item=>item.symbol.endsWith('.TWO')).length>=800,'TPEx identities are actually bundled');
+for(const symbol of ['9103.TW','9105.TW','9110.TW','9136.TW','TSM','BABA','SPY'])ok(!records.some(item=>item.symbol===symbol),`Excluded TDR/ADR/ETF identity: ${symbol}`);
 const jsSource = fs.readFileSync(path.join(root,'stock_search.js'),'utf8').trim();
 for (const filename of ['standalone_preview.html','preview/index.html','preview/standalone_preview.html']) {
   const html=fs.readFileSync(path.join(root,filename),'utf8');

@@ -35,8 +35,30 @@ EXCLUDED_FILE_PATTERNS = (
     "*.pyc", "*.pyo", "*.log", "*.zip", "*.b64", "*.sha256", "*.jks", "*.keystore",
     "*.pem", "*.key", ".DS_Store", "Thumbs.db", "local.properties",
     "key.properties", ".env", ".env.local", ".env.production", ".env.*.local",
+    "apply_market_scan_fix.py", "apply_market_scan_timeout_fix.py",
 )
 REQUIRED_FILES = (
+    "TW_SCAN_STABILITY_FIX.md", "test/tw_universe_stability_test.dart",
+    "test/tw_universe_resume_integration_test.dart",
+    "RECOMMENDATION_LEVELS.md", "test/recommendation_trade_levels_test.dart",
+    "MOBILE_TW_SCAN.md", "lib/services/mobile_scan_checkpoint.dart",
+    "test/mobile_tw_rolling_repository_test.dart", "test/mobile_tw_polling_test.dart",
+    "FULL_MARKET_SETUP.md", "lib/services/backend_connection_service.dart",
+    "test/backend_connection_service_test.dart", "test/backend_setup_settings_test.dart",
+    "test/dashboard_scope_test.dart", "backend/tests/test_capabilities.py",
+    "US_UNIVERSE_FIX.md", "lib/services/us_stock_directory.dart",
+    "test/us_stock_directory_test.dart", "test/us_universe_fallback_test.dart",
+    "test/us_universe_http_smoke_test.dart",
+    "ALL_STOCKS_UPDATE.md", "scripts/import_bundled_metadata.py",
+    "backend/engine/listed_universe.py", "backend/tests/test_listed_universe.py",
+    "backend/tests/test_expanded_symbols.py", "backend/tests/test_rolling_scan.py",
+    "scripts/tests/test_refresh_stock_metadata.py",
+    "test/expanded_symbol_test.dart", "test/rolling_scan_snapshot_test.dart",
+    "metadata_snapshots/SOURCES.json", "metadata_snapshots/nasdaqlisted.txt",
+    "metadata_snapshots/otherlisted.txt", "metadata_snapshots/tw_stock_list_20261006.csv",
+    "metadata_snapshots/twse_equities_common_20260326.csv",
+    "metadata_snapshots/tpex_equities_common_20260326.csv",
+    "metadata_snapshots/tw_names_20261014.json",
     "README_HOW_TO_BUILD.md", "README.md", "BUILD_ANDROID.md", "BUILD_STATUS.md",
     "pubspec.yaml", "analysis_options.yaml", ".github/workflows/build_apk.yml",
     "preview/index.html", "preview/README.md",
@@ -81,6 +103,10 @@ REQUIRED_FILES = (
     "test/refresh_recovery_test.dart", "test/support/controllable_http_client.dart",
     "test/integration_scan_test.dart", "REFRESH_RECOVERY.md",
     "scripts/validate_live_scan_evidence.py", "scripts/tests/test_live_scan_evidence.py",
+    "lib/models/backend_scan_status.dart", "test/backend_snapshot_repository_test.dart",
+    "test/backend_scan_controller_test.dart", "backend/scan_jobs.py",
+    "backend/tests/test_background_scan.py", "backend/requirements-dev.txt",
+    "Dockerfile", ".dockerignore", "render.yaml", "CLOUD_API_GUIDE.md",
     "test/market_transport_regression_test.dart", "test/candidate_repository_test.dart",
     "MARKET_DEBUG_LOGGING.md", "GITHUB_MANUAL_UPDATE.md",
     "lib/services/market_scan_progress.dart", "test/market_scan_progress_test.dart",
@@ -219,6 +245,19 @@ def validate_contents(files: dict[str, bytes]) -> None:
         require(coverage.get(market.lower()) == sum(row["market"] == market for row in metadata),
                 f"{market} 股票字典來源記錄與筆數不一致")
     require(coverage.get("total") == len(metadata), "股票字典來源總筆數不一致")
+    require(coverage.get("us", 0) >= 4000 and coverage.get("tw", 0) >= 1800,
+            "擴充股票字典仍停留在舊核心／S&P 500 範圍")
+    require(coverage.get("tpex") == sum(row["symbol"].endswith(".TWO") for row in metadata),
+            "上櫃股票字典筆數不一致")
+    identities = {(row["market"], row["symbol"]) for row in metadata}
+    require(("TW", "6488.TWO") in identities and ("TW", "2330.TW") in identities,
+            "缺少上市／上櫃身份")
+    require(all(("TW", symbol) not in identities for symbol in ("9103.TW", "9105.TW", "9110.TW", "9136.TW")),
+            "公司名錄中的四碼存託憑證不得混入普通股字典")
+    snapshot_sources = json.loads(files["metadata_snapshots/SOURCES.json"].decode("utf-8"))
+    for filename, expected in snapshot_sources["bundled_files"].items():
+        require(hashlib.sha256(files["metadata_snapshots/" + filename]).hexdigest() == expected,
+                f"原始身份快照 hash 不符：{filename}")
     search_engine = files["stock_search.js"].decode("utf-8").strip()
     for title, document in (("preview/index.html", preview), ("standalone_preview.html", standalone),
                             ("preview/standalone_preview.html", files["preview/standalone_preview.html"].decode("utf-8"))):
@@ -243,7 +282,10 @@ def validate_contents(files: dict[str, bytes]) -> None:
         "flutter test test/integration_scan_test.dart --dart-define=RUN_LIVE_SCAN_TEST=true --timeout=90s",
         "set -euo pipefail", "build/live-scan-evidence.json",
         "python3 scripts/validate_live_scan_evidence.py build/live-scan-evidence.json",
-        "test/live_risk_helpers_test.dart", "test_live_scan_evidence.py",
+        "test/live_risk_helpers_test.dart", "-p 'test_*.py'",
+        "test/expanded_symbol_test.dart", "test/rolling_scan_snapshot_test.dart",
+        "python3 -m unittest discover -s backend/tests -v",
+        "test/backend_snapshot_repository_test.dart test/backend_scan_controller_test.dart",
     ):
         require(marker in workflow, f"Actions 工作流缺少：{marker}")
     android_app = files["android/app/build.gradle"].decode("utf-8")

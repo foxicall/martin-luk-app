@@ -111,6 +111,12 @@ async function click(action, value, id, owner) {
 
 (async () => {
   check(countCards() === 6 && html().includes('2330.TW'), 'Initial TW first page');
+  check(html().includes('假設買價 · PDH 觸發') && html().includes('3R 賣價 · 賣原始股數 15%') &&
+    html().includes('5R 賣價 · 再賣原始股數 15%'), 'Recommendation exposes hypothetical entry and two stages based on original shares');
+  check(html().includes('NT$1,187.20 TWD') && html().includes('NT$1,232.00 TWD'),
+    'TW card targets retain exact initial risk and native currency');
+  check(html().includes('剩餘 70%：以日線 9 EMA 追蹤出場') && html().includes('已確認日收盤跌破 9 EMA') &&
+    html().includes('並非可直接下單表'), 'Recommendation states confirmed daily-close trailing and reference status');
   check(networkCalls === 0, 'Mock initialization must not contact API');
   check(nodes.has('dashboard-stock-search'), 'Dashboard exposes offline stock autocomplete');
   let search = nodes.get('dashboard-stock-search');
@@ -166,6 +172,10 @@ async function click(action, value, id, owner) {
     'US Calculator starts with independent USD50000 Capital');
   check(nodes.get('calc-result').innerHTML.includes('US$250.00 USD') &&
     nodes.get('calc-result').innerHTML.includes('89 股'), 'Default US risk budget is USD250, sizing NVDA in USD');
+  check(nodes.get('calc-result').innerHTML.includes('US$148.40 USD') &&
+    nodes.get('calc-result').innerHTML.includes('US$154.00 USD') &&
+    nodes.get('calc-result').innerHTML.includes('recommendation-exit-plan'),
+    'US Calculator uses exact initial-R targets and the same 15%/15%/70% plan');
   await click('market', 'tw');
   check(html().includes('2330.TW') && !html().includes('NVDA') && nodes.get('equity-input').value === '1000000',
     'Market switch keeps Calculator with a TW candidate and its TWD1000000 Capital');
@@ -188,6 +198,8 @@ async function click(action, value, id, owner) {
   await click('detail', undefined, 'us:AMD');
   check(nodes.get('calc-result').innerHTML.includes('等待進場確認') &&
     !nodes.get('calc-result').innerHTML.includes('position-result'), 'Watchlist has no executable order');
+  check(!nodes.get('calc-result').innerHTML.includes('recommendation-exit-plan'),
+    'Unconfirmed watchlist never fabricates a profit-taking plan');
   await click('back');
   await click('market', 'tw');
   await click('detail', undefined, 'tw:2330.TW');

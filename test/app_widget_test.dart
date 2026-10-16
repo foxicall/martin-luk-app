@@ -18,7 +18,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('OFFLINE MOCK · 離線示範'), findsOneWidget);
     expect(find.text('動能觀測站'), findsOneWidget);
-    await tester.tap(find.text('S&P 500 · US'));
+    await tester.tap(find.text('美股三大交易所 · US'));
     await tester.pumpAndSettle();
     expect(controller.market, StockMarket.us);
     expect(tester.takeException(), isNull);

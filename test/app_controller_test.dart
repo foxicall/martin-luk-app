@@ -32,6 +32,12 @@ class FailingRepository implements CandidateRepository {
   }
 }
 
+CandidateSnapshot apiFixture(CandidateSnapshot sample) => CandidateSnapshot(
+  candidates: sample.candidates, fetchedAt: sample.fetchedAt, warnings: [],
+  source: 'API 市場切換測試回應', universeCount: sample.universeCount,
+  stale: false,
+);
+
 void main() {
   setUp(seedMockPreferences);
 
@@ -65,9 +71,11 @@ void main() {
     final first = controller.refresh();
     final second = controller.setMarket(StockMarket.us);
     final mock = MockCandidateRepository();
-    repository.requests[StockMarket.us]!.complete(await mock.fetch(StockMarket.us, adrThreshold: 5));
+    repository.requests[StockMarket.us]!.complete(apiFixture(
+        await mock.fetch(StockMarket.us, adrThreshold: 5)));
     await second;
-    repository.requests[StockMarket.tw]!.complete(await mock.fetch(StockMarket.tw, adrThreshold: 3.5));
+    repository.requests[StockMarket.tw]!.complete(apiFixture(
+        await mock.fetch(StockMarket.tw, adrThreshold: 3.5)));
     await first;
     expect(controller.market, StockMarket.us);
     expect(controller.snapshot!.candidates.every((row) => row.market == StockMarket.us), isTrue);
@@ -78,7 +86,9 @@ void main() {
     final controller = AppController(repositoryFactory: (_) => FailingRepository());
     addTearDown(controller.dispose);
     await controller.initialize(initializeReminders: false);
-    expect(controller.snapshot, isNull);
+    expect(controller.snapshot!.isFallback, isTrue);
+    expect(controller.snapshot!.stale, isTrue);
+    expect(controller.snapshot!.scanCompletedAt, isNull);
     expect(controller.error, contains('API 不可用'));
     expect(controller.visibleCandidates, isEmpty);
   });

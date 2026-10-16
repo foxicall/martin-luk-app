@@ -16,6 +16,7 @@ import 'package:martin_luk_app/services/candidate_repository.dart';
 import 'package:martin_luk_app/services/portfolio_repository.dart';
 
 final _timestamp = DateTime.utc(2026, 10, 14, 2, 3, 4);
+const _universeWarning = '尚未確認完整最新上市成分；本測試僅提供部分普通股與行情。';
 
 StockCandidate _candidate() => StockCandidate(
       id: 'tw:2330.TW', symbol: '2330.TW', name: '台積電', sector: '半導體',
@@ -46,7 +47,7 @@ class _LiveFixtureRepository implements CandidateRepository {
     if (fail) throw const RepositoryException('測試網路中斷');
     return CandidateSnapshot(
       candidates: [_candidate()], fetchedAt: _timestamp,
-      warnings: const [], source: 'Yahoo Finance · 測試回應',
+      warnings: const [_universeWarning], source: 'Yahoo Finance · 測試回應',
       universeCount: 284, stale: stale, evaluatedCount: 1,
       universeIsComplete: false, missingSymbols: const ['2603.TW'],
       universeAsOf: _timestamp, scanCompletedAt: _timestamp,
@@ -107,7 +108,7 @@ void main() {
     expect(controller.settings.apiBaseUrl, isEmpty);
     expect(controller.settings.usEquity, 50000);
     expect(controller.settings.twEquity, 1000000);
-    expect(find.text('設定已儲存，候選清單已更新'), findsOneWidget);
+    expect(find.text('設定已儲存，行情讀取已結束'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -124,8 +125,18 @@ void main() {
     expect(find.textContaining('2026-10-14 10:03:04 · 台北 UTC+08'), findsWidgets);
     expect(find.text('已評估'), findsOneWidget);
     expect(find.text('顯示上次快取'), findsOneWidget);
-    expect(find.textContaining('尚未確認完整最新上市成分'), findsOneWidget);
+    // The coverage summary remains visible; lengthy original source warnings
+    // are retained in the collapsed disclosure below recommendation cards.
+    expect(find.textContaining('目前股票清單覆蓋不足'), findsOneWidget);
+    expect(find.textContaining(_universeWarning), findsNothing);
     expect(find.textContaining('排名僅涵蓋可用資料'), findsOneWidget);
+    final disclosures = find.byKey(const ValueKey('dashboard-source-disclosures'));
+    await tester.scrollUntilVisible(disclosures, 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('資料來源與限制（1 則）'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('尚未確認完整最新上市成分'), findsOneWidget);
+    expect(find.textContaining(_universeWarning), findsOneWidget);
     final before = repository.calls;
     await tester.widget<RefreshIndicator>(find.byType(RefreshIndicator)).onRefresh();
     await tester.pumpAndSettle();

@@ -9,6 +9,7 @@ const equal=(a,b,message)=>{assert.equal(a,b,message);checks++};
 const check=(a,message)=>{assert.ok(a,message);checks++};
 const rejects=(fn,message)=>{assert.throws(fn,undefined,message);checks++};
 const block=id=>{let match=source.match(new RegExp(`<script id="${id}"[^>]*>([\\s\\S]*?)<\\/script>`));assert.ok(match,`Missing inline script ${id}`);return match[1]};
+equal(source,fs.readFileSync(path.join(__dirname,'../preview/standalone_preview.html'),'utf8'),'Both directly openable standalone copies stay identical');
 check(!/\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b|localhost|127\.0\.0\.1/i.test(source),'No network entry points or loopback addresses');
 check(!/<(?:script|img|iframe|link)\b[^>]*\b(?:src|href)=|@import|url\(/i.test(source),'No external HTML/CSS resources');
 const context=vm.createContext({console});vm.runInContext(block('standalone-core'),context);
@@ -26,7 +27,7 @@ check(S.plan({...baseCandidate,source:'entry_bar_low',bar:98,day:94},100000).sha
 rejects(()=>S.plan({...baseCandidate,source:'entry_bar_low',bar:97,day:94},100000),'Entry-bar price must match stop');
 for(const equity of [0,-1,NaN,Infinity,'100000',true,.001])rejects(()=>S.plan(baseCandidate,equity),'Invalid or insufficient equity cannot produce executable shares');
 for(const market of ['tw','us'])for(const c of S.candidates(market)){const result=S.plan(c,market==='tw'?1000000:50000);check(c.adr>=(market==='tw'?3.5:5),'Each fixture meets default ADR');check(c.entry>Math.max(c.ema9,c.ema21,c.ema50),'Fixture is above all EMA values');check((Math.max(c.ema9,c.ema21,c.ema50)-Math.min(c.ema9,c.ema21,c.ema50))/c.entry<.02,'EMA fixture is compressed');check(result.risk<=(market==='tw'?1000000:50000)*.005+1e-8,'Demo size stays within risk cap');check(result.exposure<=result.cap,'Demo size stays within exposure cap');}
-equal(S.symbolFor('2330','tw'),'2330.TW','Taiwan suffix normalized');equal(S.symbolFor('brk-b','us'),'BRK-B','US share class normalized');equal(S.symbolFor('brk.b','us'),'BRK-B','Dotted US share class becomes its standard quote symbol');rejects(()=>S.symbolFor('2330.TWO','tw'),'Wrong market suffix rejected');
+equal(S.symbolFor('2330','tw'),'2330.TW','Taiwan suffix normalized');equal(S.symbolFor('brk-b','us'),'BRK-B','US share class normalized');equal(S.symbolFor('brk.b','us'),'BRK-B','Dotted US share class becomes its standard quote symbol');equal(S.symbolFor('6488.TWO','tw'),'6488.TWO','TPEx suffix stays distinct');rejects(()=>S.symbolFor('6488.TWOO','tw'),'Unsupported market suffix rejected');
 let d=diagnosis();equal(d.current,2.5,'R uses fixed original risk');equal(d.trail,100,'At least 2R arms breakeven');equal(d.pnl,500,'Unrealized PnL');equal(d.action,'hold','Below 3R holds');
 for(const [price,r]of [[106,3],[110,5],[120,10]]){let t=diagnosis({price,close:price,ema9:price-1});equal(t.action,'trim',`${r}R strength advice`);equal(t.trim,15,'15 whole shares meets 10–15% range');check(t.label.includes(`${r}R`),'Reached target label is explicit');}
 equal(diagnosis({price:105.999}).action,'hold','Below exact 3R does not trim');equal(diagnosis({price:104}).trail,100,'Exactly 2R arms breakeven');equal(diagnosis({price:103.999}).trail,98,'Below 2R does not arm breakeven');
@@ -56,6 +57,18 @@ function createUI({denyStorage=false,raw=null}={}){
  return {nodes,html:()=>nodes.get('content').innerHTML,state:()=>JSON.parse(store.get('martin-luk-standalone-offline-v1')||'null'),click(act,value,extra={}){let target={dataset:{act,value,...extra},closest(){return this}};listeners.get('click')({target})},value(id,value){nodes.get(id).value=String(value)},checked(id,value){nodes.get(id).checked=value},input(id){listeners.get('input')({target:nodes.get(id)})},change(id){listeners.get('change')({target:nodes.get(id)})},key(id,key){let prevented=false;listeners.get('keydown')({target:nodes.get(id),key,preventDefault(){prevented=true}});return prevented},advance(ms){const end=clock+ms;while(true){const entry=[...timers.entries()].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!entry)break;timers.delete(entry[0]);clock=entry[1].at;entry[1].fn()}clock=end},submit(id){listeners.get('submit')({target:{id},preventDefault(){}})}};
 }
 const metadata=JSON.parse(block('stocks-master'));
+const referenceUI=createUI();
+check(referenceUI.html().includes('假設買價 · PDH 觸發（TWD）'),'TW recommendation identifies the hypothetical trigger price and native currency');
+check(referenceUI.html().includes('3R 賣價 · 賣原始股數 15%')&&referenceUI.html().includes('5R 賣價 · 再賣原始股數 15%'),'Both stages explicitly use original shares at 15% each');
+check(referenceUI.html().includes('剩餘 70%：以日線 9 EMA 追蹤出場')&&referenceUI.html().includes('已確認日收盤跌破 9 EMA'),'Remaining shares track a confirmed daily close instead of an intraday EMA cross');
+check(referenceUI.html().includes('NT$1,187.20 TWD')&&referenceUI.html().includes('NT$1,232.00 TWD'),'TW 3R and 5R reference prices use the unchanged original entry-minus-stop risk');
+check(referenceUI.html().includes('並非可直接下單表')&&referenceUI.html().includes('初始硬停損優先'),'Recommendation explains reference status and hard-stop priority');
+referenceUI.click('market','us');
+check(referenceUI.html().includes('US$148.40 USD')&&referenceUI.html().includes('US$154.00 USD'),'US reference targets retain USD and exact initial R');
+referenceUI.click('calc','NVDA');
+check(referenceUI.nodes.get('calculation').innerHTML.includes('recommendation-exit-plan')&&referenceUI.nodes.get('calculation').innerHTML.includes('US$154.00 USD'),'Calculator shows the same two-stage exit plan as recommendations');
+referenceUI.value('capital',0);referenceUI.input('capital');
+check(!referenceUI.nodes.get('calculation').innerHTML.includes('recommendation-exit-plan'),'Invalid sizing clears every executable stage plan');
 check(metadata.filter(s=>s.market==='US').length>=100,'At least 100 US identities are embedded for offline search');
 check(metadata.filter(s=>s.market==='TW').length>=100,'At least 100 TW identities are embedded for offline search');
 const searchUI=createUI();

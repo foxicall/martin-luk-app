@@ -2,14 +2,16 @@
 """Refresh the offline stock index from existing public universe providers.
 
 This is a maintenance command, never called while the user types. It uses the
-same Wikipedia S&P 500 / TWSE ISIN ordinary-share filtering and local cache as
-the backend. Curated translations, abbreviations and aliases are preserved by
+same NasdaqTrader NYSE/Nasdaq/NYSE American conservative ordinary-share
+classification and TWSE/TPEx ISIN CFI filtering as the backend. Curated
+translations, abbreviations and aliases are preserved by
 canonical symbol. Unknown names remain empty instead of receiving invented
 translations. Regenerate embedded preview assets after this command succeeds.
 
 Examples::
 
     python scripts/refresh_stock_metadata.py --market all
+    python scripts/refresh_stock_metadata.py --market all --allow-partial
     python scripts/refresh_stock_metadata.py --market tw --offline
 
 Install ``backend/requirements.txt`` before a refresh. ``--help`` needs only
@@ -37,8 +39,6 @@ from scripts.sync_stock_search import validate_records
 REQUIRED_STRINGS = (
     "market", "symbol", "code", "name_zh", "name_full_zh", "name_en", "abbr_en"
 )
-# Identified major US additions are retained separately from S&P membership.
-MAJOR_US_ADDITIONS = frozenset({"TSM", "SHOP", "NET", "RBLX", "ZM", "OKTA"})
 # Preserve old familiar tickers as aliases if the public list uses a new ticker.
 TICKER_RENAMES = {"FISV": "FI", "MRSH": "MMC"}
 
@@ -56,7 +56,7 @@ def read_records(path: Path) -> list[dict[str, Any]]:
             raise ValueError("股票文字欄位缺失或不是字串。")
         market, symbol = row["market"], row["symbol"]
         valid_symbol = (
-            market == "TW" and re.fullmatch(r"\d{4}\.TW", symbol)
+            market == "TW" and re.fullmatch(r"\d{4}\.TW(?:O)?", symbol)
         ) or (
             market == "US" and re.fullmatch(r"[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)?", symbol)
         )
@@ -93,13 +93,14 @@ def merge_market(
         else:
             row = {
                 "market": market, "symbol": symbol,
-                "code": symbol.removesuffix(".TW"),
+                "code": symbol.split(".", 1)[0] if market == "TW" else symbol,
                 "name_zh": stock.name if market == "TW" else stock.name,
                 "name_full_zh": "",
                 "name_en": stock.name if market == "US" else "",
                 "abbr_en": "", "aliases": [], "short_codes": [],
             }
-        row.update(market=market, symbol=symbol, code=symbol.removesuffix(".TW"))
+        row.update(market=market, symbol=symbol,
+                   code=symbol.split(".", 1)[0] if market == "TW" else symbol)
         if market == "TW":
             if row["name_zh"] and row["name_zh"] != stock.name:
                 row["aliases"].append(row["name_zh"])
@@ -122,13 +123,9 @@ def merge_market(
         result.append(row)
     if not result:
         raise ValueError(f"{market} 公開名單為空，保留原股票字典。")
-    additions: list[str] = []
-    if market == "US":
-        for symbol in sorted(MAJOR_US_ADDITIONS - seen):
-            if symbol in originals:
-                result.append(dict(originals[symbol]))
-                additions.append(symbol)
-    return result, additions
+    # Never retain historical manual additions outside the current source.
+    # In particular, TSM is a US ADR and is outside the ordinary-share scope.
+    return result, []
 
 
 def atomic_json(path: Path, payload: Any) -> None:
@@ -154,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--market", choices=("us", "tw", "all"), default="all")
     parser.add_argument("--offline", action="store_true", help="只讀現有公開股票池快取，不連線。")
+    parser.add_argument("--allow-partial", action="store_true",
+                        help="明確允許部分來源／保守名稱分類／過期快取；來源與警告仍會完整記錄。")
     parser.add_argument("--cache-dir", type=Path, default=ROOT / "backend/cache/metadata")
     parser.add_argument("--output", type=Path, default=ROOT / "stocks_master.json")
     parser.add_argument("--sources-output", type=Path, help="預設為字典旁的 stocks_master_sources.json。")
@@ -170,42 +169,63 @@ def main(argv: list[str] | None = None) -> int:
         sources_path = args.sources_output or args.output.with_name("stocks_master_sources.json")
         provenance = (
             json.loads(sources_path.read_text(encoding="utf-8"))
-            if sources_path.exists() else {"schema_version": 1, "sources": {}}
+            if sources_path.exists() else {"schema_version": 2, "sources": {}}
         )
         if not isinstance(provenance, dict) or not isinstance(provenance.get("sources", {}), dict):
             raise ValueError("來源紀錄格式無效，保留原股票字典。")
         source_updates: dict[str, Any] = {}
-        memberships: dict[str, int] = {}
-        extra_symbols = provenance.get("additional_us_symbols", [])
         for label in selected:
             enum = Market(label.lower())
             stocks = provider.load(enum, force_refresh=not args.offline, offline=args.offline)
-            merged, additions = merge_market(old, stocks, label)
+            complete = provider.coverage_complete.get(enum, False)
+            if not complete and not args.allow_partial:
+                raise ValueError(
+                    f"{label} 名錄來源／分類覆蓋不完整，未覆蓋原字典。"
+                    "請先檢查來源警告；如接受保守排除／部分來源，可明確加 --allow-partial。"
+                    + "；".join(provider.warnings)
+                )
+            merged, _ = merge_market(old, stocks, label)
             rows.extend(merged)
-            memberships[label] = len(stocks)
+            captured = provider.captured_at.get(enum)
+            if captured is None or captured.tzinfo is None:
+                raise ValueError(f"{label} 股票池缺少來源擷取時間，不能以執行日期冒充。")
             source_updates[label.lower()] = {
-                "url": UniverseProvider.US_URL if label == "US" else UniverseProvider.TW_URL,
                 "provider_source": provider.sources.get(enum, ""),
-                "description": "Public universe snapshot; offline/stale cache is identified in provider_source.",
+                "captured_at": captured.isoformat(),
+                "scope": provider.statistics.get(enum, {}).get("scope"),
+                "coverage_complete": complete,
+                "statistics": provider.statistics.get(enum, {}),
+                "warnings": list(provider.coverage_warnings.get(enum, [])),
+                "description": "Public metadata snapshot; retained captured_at belongs to upstream fetch, not this assembly run.",
             }
-            if label == "US":
-                extra_symbols = additions
         rows.sort(key=lambda row: (row["market"], row["symbol"]))
         # Validate against the exact offline/Dart canonical schema before
         # replacing files. A changed upstream symbol must not break the App.
         validate_records(rows)
         counts = Counter(row["market"] for row in rows)
-        coverage = dict(provenance.get("coverage", {}))
-        coverage.update(total=len(rows), us=counts["US"], tw=counts["TW"])
-        if "US" in selected:
-            coverage.update(us_sp500_snapshot=memberships["US"], us_additional_major=len(extra_symbols))
-        if "TW" in selected:
-            coverage.update(tw_public_snapshot=memberships["TW"])
+        coverage = {
+            "total": len(rows), "us": counts["US"], "tw": counts["TW"],
+            "us_scope": "NYSE/Nasdaq/NYSE American ordinary shares; conservative name classification",
+            "tw_scope": "TWSE listed + TPEx OTC ordinary shares; ISIN CFI ES",
+        }
         provenance.setdefault("sources", {}).update(source_updates)
+        for legacy in ("additional_us_symbols", "refreshed_at"):
+            provenance.pop(legacy, None)
+        # A metadata assembly timestamp is not a market/source refresh timestamp.
+        # Only report a shared snapshot_date when both market origins are known.
+        source_dates: list[str] = []
+        for market_key in ("us", "tw"):
+            stamp = provenance["sources"].get(market_key, {}).get("captured_at")
+            if isinstance(stamp, str):
+                captured_at = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                if captured_at.tzinfo is None:
+                    raise ValueError(f"{market_key} captured_at 必須含時區。")
+                source_dates.append(captured_at.astimezone(timezone.utc).date().isoformat())
         provenance.update(
-            snapshot_date=datetime.now(timezone.utc).date().isoformat(),
-            refreshed_at=datetime.now(timezone.utc).isoformat(),
-            coverage=coverage, additional_us_symbols=extra_symbols,
+            schema_version=2,
+            assembled_at=datetime.now(timezone.utc).isoformat(),
+            snapshot_date=min(source_dates) if len(source_dates) == 2 else None,
+            coverage=coverage,
             warnings=provider.warnings,
         )
         # Both markets must finish successfully before replacing the dictionary.

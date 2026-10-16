@@ -140,7 +140,7 @@ def validate_evidence(report: Any) -> int:
     for symbol in REQUIRED_SYMBOLS:
         observation = verified.get(("stock", symbol))
         _require(observation is not None, f"缺少必需股票 {symbol} 的實測資料。")
-        expected_market = "tw" if symbol.endswith(".TW") else "us"
+        expected_market = "tw" if symbol.endswith((".TW", ".TWO")) else "us"
         _require(observation["market"] == expected_market,
                  f"必需股票 {symbol} 的市場錯誤。")
     for symbol, (market, currency) in REQUIRED_BENCHMARKS.items():

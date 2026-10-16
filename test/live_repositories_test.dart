@@ -242,7 +242,7 @@ void main() {
     expect(partial.universeCount, 5);
     expect(partial.missingSymbols.toSet(), gates.keys.toSet());
     expect(partial.warnings.any((warning) => warning.contains('整批掃描期限')), true);
-    final partialCache = jsonDecode(preferences.getString('martin-live-scan-v1-us-5.0')!) as Map;
+    final partialCache = jsonDecode(preferences.getString('martin-live-scan-v2-directory-us-5.0')!) as Map;
     expect(partialCache['evaluated_count'], 1,
         reason: 'The scan reserves time to persist a partial offline snapshot inside its budget.');
 
@@ -255,7 +255,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(api.intradayCalls, intradayCalls,
         reason: 'Late daily replies must not schedule another intraday request.');
-    final persisted = jsonDecode(preferences.getString('martin-live-scan-v1-us-5.0')!) as Map;
+    final persisted = jsonDecode(preferences.getString('martin-live-scan-v2-directory-us-5.0')!) as Map;
     expect(persisted['evaluated_count'], 5,
         reason: 'The expired batch must not overwrite a successful retry cache.');
     repository.close(); api.close(); universe.close();
@@ -585,27 +585,39 @@ void main() {
     repository.close(); api.close(); universe.close();
   });
 
-  test('TW core selection requests only current TW members and uses Taiwan priorities', () async {
+  test('TW sorted pages eventually request every current member without a fixed core ceiling', () async {
     StockItem tw(String code) => StockItem(market: StockMarket.tw,
       symbol: '$code.TW', code: code, nameZh: code, nameFullZh: '',
       nameEn: '', abbrEn: '');
     final rows = [
       ...List.generate(34, (index) => tw('${4000 + index}')),
-      tw('2603'), tw('2330'),
+      tw('2603'), tw('2330'), tw('1101'),
     ];
     universe = _Universe(rows, preferences);
     final repository = DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, now: () => _now, interBatchDelay: Duration.zero);
     final snapshot = await repository.fetch(StockMarket.tw, adrThreshold: 100,
       forceRefresh: true);
-    expect(snapshot.universeCount, 36);
+    expect(snapshot.universeCount, 37);
     expect(snapshot.scanPoolSize, 30);
     expect(snapshot.evaluatedCount, 30);
     expect(snapshot.adrMatchCount, 0);
-    expect(api.dailyStarted.keys.take(2), ['2330.TW', '2603.TW']);
+    expect(api.dailyStarted.keys.take(3), ['1101.TW', '2330.TW', '2603.TW']);
     expect(api.dailyStarted.containsKey('2454.TW'), false,
-      reason: 'Priority symbols absent from actual membership must not be invented.');
+      reason: 'Stocks absent from actual membership must not be invented.');
     expect(api.dailyCalls, 30);
+    expect(api.intradayCalls, 0);
+    expect(snapshot.coverageScannedCount, 30);
+    expect(snapshot.coverageRemainingCount, 7);
+    expect(snapshot.candidatesAreCumulative, isTrue);
+    final next = await repository.fetch(StockMarket.tw, adrThreshold: 100,
+      refreshQuotesOnly: true);
+    expect(api.dailyCalls, 37);
+    expect(api.dailyStarted.keys.toSet(), rows.map((row) => row.symbol).toSet());
+    expect(next.scanPoolSize, 7);
+    expect(next.coverageScannedCount, 37);
+    expect(next.coverageEvaluatedCount, 37);
+    expect(next.coverageRemainingCount, 0);
     expect(api.intradayCalls, 0);
     repository.close(); api.close(); universe.close();
   });
@@ -618,28 +630,62 @@ void main() {
     api.dailyFailures['AAPL'] = const MarketDataException('HTTP 429', statusCode: 429);
     api.dailyCharts['TSLA'] = _daily('TSLA', lowAdr: true);
     final progress = <MarketScanProgress>[];
+    var observerErrors = 0;
     final repository = DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, now: () => _now, interBatchDelay: Duration.zero);
-    final snapshot = await repository.fetchWithProgress(StockMarket.us,
-      adrThreshold: 5, forceRefresh: true, onProgress: (value) {
-        progress.add(value);
-        if (value.completedCount == 5) throw StateError('Faulty UI observer');
-      });
-    expect(progress.where((row) => !row.finished && row.completedCount > 0)
-        .map((row) => row.completedCount), [5, 10, 12]);
-    final finished = progress.last;
-    expect(finished.finished, true);
-    expect(finished.attemptedCount, 12);
-    expect(finished.completedCount, 12);
-    expect(finished.evaluatedCount, 11);
-    expect(finished.failedCount, 1);
-    expect(finished.adrMatchCount, 10);
-    expect(finished.fraction, 1);
-    expect(finished.label, contains('已掃描 12/12 檔'));
-    expect(snapshot.adrMatchCount, 10);
-    expect(snapshot.candidates.length, 10);
-    expect(snapshot.missingSymbols, ['AAPL']);
-    repository.close(); api.close(); universe.close();
+    try {
+      final snapshot = await repository.fetchWithProgress(StockMarket.us,
+        adrThreshold: 5, forceRefresh: true, onProgress: (value) {
+          progress.add(value);
+          if (value.completedCount == 5) {
+            observerErrors++;
+            throw StateError('Faulty UI observer');
+          }
+        });
+      // Validated daily data is published per stock, then may be updated by
+      // intraday data and a batch boundary. Do not require exactly one event
+      // per batch: that would reject useful partial data while a sibling waits.
+      final completed = progress
+          .where((row) => !row.finished && row.completedCount > 0)
+          .map((row) => row.completedCount).toList();
+      expect(completed, containsAllInOrder([5, 10, 12]),
+          reason: 'Every completed batch must still be reported in order.');
+      expect(progress.any((row) => !row.finished &&
+          row.completedCount > 0 && row.completedCount < 5 &&
+          row.partialSnapshot != null), isTrue,
+          reason: 'Validated observations must be visible before the first batch finishes.');
+      for (var index = 1; index < progress.length; index++) {
+        expect(progress[index].completedCount,
+            greaterThanOrEqualTo(progress[index - 1].completedCount),
+            reason: 'Daily/intraday updates must not double-count or rewind progress.');
+        expect(progress[index].attemptedCount,
+            greaterThanOrEqualTo(progress[index - 1].attemptedCount));
+      }
+      for (final row in progress) {
+        expect(row.completedCount, row.evaluatedCount + row.failedCount,
+            reason: 'A failed symbol is completed work, never a successful evaluation.');
+        expect(row.completedCount, inInclusiveRange(0, row.attemptedCount));
+        expect(row.attemptedCount, inInclusiveRange(0, row.poolSize));
+        expect(row.adrMatchCount, inInclusiveRange(0, row.evaluatedCount));
+      }
+      expect(observerErrors, greaterThan(0),
+          reason: 'The faulty observer must actually run before testing isolation.');
+      expect(progress.where((row) => row.finished), hasLength(1));
+      final finished = progress.last;
+      expect(finished.finished, true);
+      expect(finished.attemptedCount, 12);
+      expect(finished.completedCount, 12);
+      expect(finished.evaluatedCount, 11);
+      expect(finished.failedCount, 1);
+      expect(finished.adrMatchCount, 10);
+      expect(finished.fraction, 1);
+      expect(finished.label, contains('已掃描 12/12 檔'));
+      expect(snapshot.adrMatchCount, 10);
+      expect(snapshot.candidates.length, 10);
+      expect(snapshot.missingSymbols, ['AAPL']);
+    } finally {
+      repository.close(); api.close(); universe.close();
+    }
   });
 
   test('disposed progressive scan does not commit or notify after a late response', () async {
@@ -660,7 +706,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(progress.length, countAtClose);
     expect(api.intradayCalls, intradayAtClose);
-    expect(preferences.getString('martin-live-scan-v1-us-5.0'), isNull);
+    expect(preferences.getString('martin-live-scan-v2-directory-us-5.0'), isNull);
     api.close(); universe.close();
   });
 
@@ -677,7 +723,7 @@ void main() {
     expect(progress.last.failedCount, 2);
     expect(progress.last.completedCount, 2);
     expect(progress.last.stage, contains('評估失敗'));
-    expect(preferences.getString('martin-live-scan-v1-us-5.0'), isNull);
+    expect(preferences.getString('martin-live-scan-v2-directory-us-5.0'), isNull);
     repository.close(); api.close(); universe.close();
   });
 

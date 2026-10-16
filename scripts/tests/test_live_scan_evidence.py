@@ -26,7 +26,7 @@ def healthy_report() -> dict:
         ("benchmark", "^GSPC"), ("benchmark", "^TWII"),
         *(("stock", symbol) for symbol in validator.REQUIRED_SYMBOLS),
     ):
-        market = "tw" if symbol.endswith(".TW") or symbol == "^TWII" else "us"
+        market = "tw" if symbol.endswith((".TW", ".TWO")) or symbol == "^TWII" else "us"
         observation = {
             "kind": kind, "symbol": symbol, "market": market,
             "currency": "TWD" if market == "tw" else "USD",
@@ -53,6 +53,15 @@ def healthy_report() -> dict:
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_optional_tpex_observation_preserves_twd_and_required_five(self) -> None:
+        report = healthy_report()
+        observation = deepcopy(next(row for row in report["observations"]
+                                    if row["symbol"] == "2330.TW"))
+        observation["symbol"] = "6488.TWO"
+        report["observations"].append(observation)
+        self.assertEqual(validator.validate_evidence(report), 0)
+        self.assertEqual(len(validator.REQUIRED_SYMBOLS), 5)
+
     def test_healthy_data_with_no_entry_is_allowed(self) -> None:
         # ADR may fall below entry thresholds and RS may be negative. Those are
         # legitimate market observations, not a data-health failure.
