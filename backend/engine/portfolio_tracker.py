@@ -171,7 +171,7 @@ def demo_quote(symbol: str, market: Market | str) -> QuoteSnapshot:
         "MSFT": ("Microsoft (demo)", 430, 425, 418, 405, 429, True),
     }
     row = fixtures.get(symbol)
-    if row is None or (symbol.endswith(".TW")) != (selected is Market.TW):
+    if row is None or symbol.endswith((".TW", ".TWO")) != (selected is Market.TW):
         raise PortfolioError("示範資料沒有此代碼；請選用示範股票或切換真實 API。")
     name, price, ema9, ema21, ema50, close, large = row
     instant = datetime(2026, 10, 13, 6, tzinfo=timezone.utc)

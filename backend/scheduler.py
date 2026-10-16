@@ -58,7 +58,7 @@ def run_cycle(service: RecommendationService, markets: list[Market], scheduled: 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="TWSE / S&P 500 cache warmup and exchange-aware scheduler")
+    parser = argparse.ArgumentParser(description="TWSE / TPEx / NYSE / Nasdaq / NYSE American cache warmup and exchange-aware scheduler")
     parser.add_argument("--market", choices=("tw", "us", "all"), default="all")
     parser.add_argument("--scheduled", action="store_true", help="Only scan the requested exchange schedule slots")
     parser.add_argument("--loop", action="store_true", help="Check the exchange schedules every 30 seconds")

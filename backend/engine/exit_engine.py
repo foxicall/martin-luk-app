@@ -41,9 +41,9 @@ def validate_symbol(symbol: str, market: Market | str) -> str:
         selected = Market(market)
     except (ValueError, TypeError) as exc:
         raise PortfolioError("market 必須為 tw 或 us。") from exc
-    pattern = r"[0-9]{4}\.TW" if selected is Market.TW else r"[A-Z][A-Z0-9-]{0,14}"
+    pattern = r"[0-9]{4}\.(?:TW|TWO)" if selected is Market.TW else r"[A-Z][A-Z0-9-]{0,14}"
     if not isinstance(symbol, str) or re.fullmatch(pattern, symbol) is None:
-        raise PortfolioError("股票代碼格式錯誤；台股請使用四位數普通股代碼加 .TW。")
+        raise PortfolioError("股票代碼格式錯誤；台股請使用四位數普通股代碼加 .TW（上市）或 .TWO（上櫃）。")
     return symbol
 
 

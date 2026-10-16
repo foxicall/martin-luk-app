@@ -1,4 +1,4 @@
-"""FastAPI adapter for the TWSE / S&P 500 public-data momentum engine.
+"""FastAPI adapter for Taiwan listed/OTC and US exchange stock universes.
 
 Run from the project root: ``python -m uvicorn backend.api:app --host 0.0.0.0``.
 Financial-provider calls run in a worker thread; failures never switch to mock
@@ -7,6 +7,8 @@ data. An explicit ``demo=true`` query is the only server-side demo mode.
 from __future__ import annotations
 
 from asyncio import to_thread
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import inspect
 import logging
 from math import isfinite
 import os
@@ -20,6 +22,7 @@ from typing import Callable, Literal
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
 
 from .engine.data_loader import DataSourceError, MarketDataLoader, UniverseProvider, _atomic_text
@@ -29,9 +32,47 @@ from .engine.risk_engine import RiskEngine
 from .engine.scanners import MomentumScanner, ScannerConfig, ScannerError
 from .engine.exit_engine import (ExitConfig, PortfolioError, Position, QuoteSnapshot, validate_symbol)
 from .engine.portfolio_tracker import PortfolioAnalyzer, demo_quote
+from .scan_jobs import BackgroundScanManager, Progress, RollingScanCheckpoint
 
 LOGGER = logging.getLogger(__name__)
 MarketCode = Literal["tw", "us"]
+
+
+class ScanCapabilities(BaseModel):
+    """Configured scan scope, not evidence that any market data was fetched."""
+
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid", strict=True)
+    pool_limit: int = Field(ge=0)
+    scope: Literal["full_universe", "limited"]
+    page_size: int = Field(ge=1, le=100)
+    page_interval_seconds: float = Field(gt=0)
+    background_jobs: Literal[True] = True
+    continuation: Literal["client_driven"] = "client_driven"
+    recommendations: Literal["latest_page_only"] = "latest_page_only"
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> ScanCapabilities:
+        expected = "full_universe" if self.pool_limit == 0 else "limited"
+        if self.scope != expected:
+            raise ValueError("掃描範圍必須符合實際股票池上限。")
+        return self
+
+
+class CapabilitiesResponse(BaseModel):
+    """Cheap deployment handshake; a separate live request verifies providers.
+
+    ``data_mode`` identifies the default production protocol. An explicit
+    ``demo=true`` remains available on the existing demonstration endpoints.
+    No provider availability or complete universe coverage is claimed here.
+    """
+
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid", strict=True)
+    service: Literal["martin-luk-market-api"] = "martin-luk-market-api"
+    api_version: Literal[1] = 1
+    data_mode: Literal["live"] = "live"
+    markets: list[MarketCode]
+    scan: ScanCapabilities
+    requires_market_data_verification: Literal[True] = True
 
 
 class CandidateResponse(BaseModel):
@@ -104,13 +145,53 @@ class CandidatesResponse(BaseModel):
     stale: bool
     warnings: list[str] = Field(default_factory=list)
     candidates: list[CandidateResponse]
+    evaluated_count: int | None = Field(default=None, ge=0)
+    scan_pool_size: int | None = Field(default=None, ge=0)
+    adr_match_count: int | None = Field(default=None, ge=0)
+    universe_is_complete: bool | None = None
+    universe_as_of: datetime | None = None
+    scan_completed_at: datetime | None = None
+    missing_symbols: list[str] = Field(default_factory=list)
+    # Coverage is cumulative *attempts*, including failed symbols, for one
+    # universe/threshold round. Evaluated count remains a separate lower bound.
+    coverage_total_count: int | None = Field(default=None, ge=0)
+    coverage_scanned_count: int | None = Field(default=None, ge=0)
+    coverage_evaluated_count: int | None = Field(default=None, ge=0)
+    coverage_remaining_count: int | None = Field(default=None, ge=0)
+    coverage_round: int | None = Field(default=None, ge=1)
+    scan_page_start: int | None = Field(default=None, ge=0)
+    scan_page_size: int | None = Field(default=None, ge=0)
+    universe_fingerprint: str | None = None
 
     @model_validator(mode="after")
     def validate_response_time(self) -> CandidatesResponse:
         if self.generated_at.tzinfo is None:
             raise ValueError("評估時間必須含時區。")
+        if any(value is not None and value.tzinfo is None
+               for value in (self.universe_as_of, self.scan_completed_at)):
+            raise ValueError("股票池與掃描完成時間必須含時區。")
         if any(candidate.market != self.market for candidate in self.candidates):
             raise ValueError("推薦與回應市場識別不一致。")
+        coverage_values = (
+            self.coverage_total_count, self.coverage_scanned_count, self.coverage_evaluated_count,
+            self.coverage_remaining_count, self.coverage_round, self.scan_page_start,
+            self.scan_page_size, self.universe_fingerprint,
+        )
+        if any(value is not None for value in coverage_values):
+            if any(value is None for value in coverage_values) or not self.universe_fingerprint:
+                raise ValueError("輪掃中繼資料必須完整提供。")
+            scanned, remaining = self.coverage_scanned_count, self.coverage_remaining_count
+            if (scanned is None or remaining is None or
+                    scanned + remaining != self.coverage_total_count or
+                    self.coverage_total_count > self.universe_count or
+                    (self.coverage_evaluated_count or 0) > scanned):
+                raise ValueError("輪掃累積計數不一致。")
+            if (self.scan_page_size is None or self.scan_pool_size != self.scan_page_size or
+                    self.scan_page_start + self.scan_page_size > self.coverage_total_count or
+                    self.scan_page_start > scanned or
+                    (self.evaluated_count or 0) > self.scan_page_size or
+                    (self.adr_match_count or 0) > (self.evaluated_count or 0)):
+                raise ValueError("當頁掃描計數不一致。")
         return self
 
 
@@ -206,11 +287,18 @@ class ApiSettings:
 
     cache_dir: Path = Path(".cache/martin_luk")
     response_ttl_seconds: float = 300
-    provider_timeout_seconds: float = 20
-    provider_retries: int = 2
+    provider_timeout_seconds: float = 8
+    provider_retries: int = 1
     fetch_workers: int = 4
     result_limit: int = 50
     large_liquid_symbols: frozenset[str] = frozenset()
+    scan_pool_limit: int = 0
+    scan_page_size: int = 60
+    scan_page_interval_seconds: float = 60
+    scan_batch_size: int = 3
+    scan_batch_delay_seconds: float = 0.15
+    scan_timeout_seconds: float = 180
+    scan_failure_cooldown_seconds: float = 30
 
     def __post_init__(self) -> None:
         if (not isfinite(self.response_ttl_seconds) or not isfinite(self.provider_timeout_seconds)
@@ -218,16 +306,33 @@ class ApiSettings:
             raise ValueError("Cache TTL 與 provider timeout 必須為正數。")
         if min(self.provider_retries, self.fetch_workers, self.result_limit) < 1:
             raise ValueError("Retries、workers 與 result limit 必須為正整數。")
+        if self.scan_pool_limit < 0 or not 3 <= self.scan_batch_size <= 5:
+            raise ValueError("掃描池上限不得小於零，批次必須為 3～5 檔。")
+        if not 1 <= self.scan_page_size <= 100:
+            raise ValueError("輪掃每頁必須為 1～100 檔。")
+        if not isfinite(self.scan_page_interval_seconds) or self.scan_page_interval_seconds <= 0:
+            raise ValueError("輪掃頁面間隔須為正數。")
+        if (not isfinite(self.scan_batch_delay_seconds) or self.scan_batch_delay_seconds < 0.15
+                or not isfinite(self.scan_timeout_seconds) or self.scan_timeout_seconds <= 0
+                or not isfinite(self.scan_failure_cooldown_seconds) or self.scan_failure_cooldown_seconds < 0):
+            raise ValueError("批次間隔至少 150ms、掃描逾時須為正數，失敗冷卻不得小於零。")
 
     @classmethod
     def from_environment(cls) -> ApiSettings:
         return cls(
             cache_dir=Path(os.getenv("MARTIN_CACHE_DIR", ".cache/martin_luk")),
             response_ttl_seconds=float(os.getenv("MARTIN_RESPONSE_TTL", "300")),
-            provider_timeout_seconds=float(os.getenv("MARTIN_PROVIDER_TIMEOUT", "20")),
-            provider_retries=int(os.getenv("MARTIN_PROVIDER_RETRIES", "2")),
+            provider_timeout_seconds=float(os.getenv("MARTIN_PROVIDER_TIMEOUT", "8")),
+            provider_retries=int(os.getenv("MARTIN_PROVIDER_RETRIES", "1")),
             fetch_workers=int(os.getenv("MARTIN_FETCH_WORKERS", "4")),
             result_limit=int(os.getenv("MARTIN_RESULT_LIMIT", "50")),
+            scan_pool_limit=int(os.getenv("MARTIN_SCAN_POOL_LIMIT", "0")),
+            scan_page_size=int(os.getenv("MARTIN_SCAN_PAGE_SIZE", "60")),
+            scan_page_interval_seconds=float(os.getenv("MARTIN_SCAN_PAGE_INTERVAL", "60")),
+            scan_batch_size=int(os.getenv("MARTIN_SCAN_BATCH_SIZE", "3")),
+            scan_batch_delay_seconds=float(os.getenv("MARTIN_SCAN_BATCH_DELAY", "0.15")),
+            scan_timeout_seconds=float(os.getenv("MARTIN_SCAN_TIMEOUT", "180")),
+            scan_failure_cooldown_seconds=float(os.getenv("MARTIN_SCAN_FAILURE_COOLDOWN", "30")),
             large_liquid_symbols=frozenset(
                 symbol.strip() for symbol in os.getenv("LARGE_LIQUID_SYMBOLS", "").split(",")
                 if symbol.strip()
@@ -440,9 +545,34 @@ class RecommendationService:
         self._responses: dict[tuple[Market, float, bool], tuple[float, CandidatesResponse]] = {}
         self.calendar = ExchangeSessionCalendar()
 
+    def _response_ttl(self, result: CandidatesResponse) -> float:
+        """Foreground polling progresses an unfinished round once per minute."""
+        if result.coverage_remaining_count is not None and result.coverage_remaining_count > 0:
+            return min(self.settings.response_ttl_seconds, self.settings.scan_page_interval_seconds)
+        return self.settings.response_ttl_seconds
+
+    def background_cached_response(self, market: Market, threshold: float) -> CandidatesResponse | None:
+        """Worker-only hydration: keep old timestamps and never invent prices."""
+        path = self._response_path(market, threshold)
+        try:
+            # A corrupt/unbounded file must not delay hydration indefinitely.
+            if path.stat().st_size > 4_000_000:
+                return None
+            result = CandidatesResponse.model_validate_json(path.read_text(encoding="utf-8"))
+            if result.market != market.value or result.source.startswith("mock"):
+                return None
+            age = (self.now() - result.generated_at).total_seconds()
+            if age < 0:
+                return None
+            return result.model_copy(update={
+                "stale": result.stale or age >= self._response_ttl(result),
+            })
+        except (OSError, ValueError, TypeError):
+            return None
+
     def _response_path(self, market: Market, threshold: float) -> Path:
         # Float-to-hex encodes even fractional thresholds without path injection.
-        return self.settings.cache_dir / "responses" / f"{market.value}_{threshold.hex()}.json"
+        return self.settings.cache_dir / "responses_expanded_v2" / f"{market.value}_{threshold.hex()}.json"
 
     def _fresh_disk_response(self, market: Market, threshold: float) -> CandidatesResponse | None:
         try:
@@ -451,7 +581,7 @@ class RecommendationService:
             )
             age = (self.now() - result.generated_at).total_seconds()
             if (result.market == market.value and not result.source.startswith("mock")
-                    and 0 <= age < self.settings.response_ttl_seconds):
+                    and 0 <= age < self._response_ttl(result)):
                 return result
         except (OSError, ValueError, TypeError):
             # A corrupt response is only a cache miss; provider caches retain
@@ -460,7 +590,8 @@ class RecommendationService:
         return None
 
     def get_candidates(self, market: Market, adr_threshold: float,
-                       force_refresh: bool = False, demo: bool = False) -> CandidatesResponse:
+                       force_refresh: bool = False, demo: bool = False,
+                       progress: Progress | None = None) -> CandidatesResponse:
         market = Market(market)
         threshold = float(adr_threshold)
         if not 0 <= threshold <= 30 or pd.isna(threshold):
@@ -470,7 +601,7 @@ class RecommendationService:
         with self._locks[market]:
             cached = self._responses.get(key)
             if (not force_refresh and cached is not None
-                    and 0 <= time.monotonic() - cached[0] < self.settings.response_ttl_seconds):
+                    and 0 <= time.monotonic() - cached[0] < self._response_ttl(cached[1])):
                 return cached[1].model_copy(deep=True)
             if not force_refresh and not demo:
                 disk = self._fresh_disk_response(market, threshold)
@@ -478,8 +609,16 @@ class RecommendationService:
                     age = (self.now() - disk.generated_at).total_seconds()
                     self._responses[key] = (time.monotonic() - age, disk)
                     return disk.model_copy(deep=True)
-            result = (self._demo(market, threshold) if demo else
-                      self._scan_live(market, threshold, force_refresh))
+            if demo:
+                result = self._demo(market, threshold)
+            elif progress is not None and "progress" in inspect.signature(self._scan_live).parameters:
+                result = self._scan_live(market, threshold, force_refresh, progress=progress)
+            else:
+                # Existing injected providers/subclasses retain their original
+                # three-argument contract; only the real scanner needs progress.
+                result = self._scan_live(market, threshold, force_refresh)
+            if progress is not None:
+                progress(stage="saving_snapshot")
             self._responses[key] = (time.monotonic(), result)
             if not demo:
                 try:
@@ -489,19 +628,104 @@ class RecommendationService:
             return result.model_copy(deep=True)
 
     def _scan_live(self, market: Market, threshold: float,
-                   force_refresh: bool) -> CandidatesResponse:
+                   force_refresh: bool, progress: Progress | None = None) -> CandidatesResponse:
+        report = progress or (lambda **_: None)
+        report(stage="loading_calendar")
         as_of = pd.Timestamp(self.now())
         context = self.calendar.context(market, as_of.to_pydatetime())
+        report(stage="loading_universe")
         provider = UniverseProvider(
             self.settings.cache_dir / "universe", timeout=self.settings.provider_timeout_seconds,
             retries=self.settings.provider_retries,
         )
         stocks = provider.load(market, force_refresh=force_refresh)
-        loader = MarketDataLoader(
-            self.settings.cache_dir / "prices", workers=self.settings.fetch_workers,
+        universe_count = len(stocks)
+        core = ("NVDA TSLA AMD PLTR SMCI COIN AVGO META AMZN GOOGL MSFT AAPL "
+                "MU NFLX APP CRWD PANW TSM QCOM ORCL INTU NOW CRM UBER LLY "
+                "GE VST CEG ANET".split() if market is Market.US else
+                "2330.TW 2454.TW 2603.TW 2382.TW 2317.TW 3017.TW 3661.TW "
+                "3443.TW 3533.TW 6669.TW 3231.TW 2356.TW 2376.TW 2377.TW "
+                "2308.TW 2303.TW 3034.TW 3711.TW 2345.TW 3037.TW 2609.TW "
+                "2615.TW 2618.TW 2408.TW 3481.TW 2409.TW 2002.TW 2881.TW "
+                "2882.TW 3008.TW".split())
+        priorities = {symbol: index for index, symbol in enumerate(core)}
+        stocks.sort(key=lambda stock: (priorities.get(stock.symbol, len(core)), stock.symbol))
+        if self.settings.scan_pool_limit:
+            stocks = stocks[:self.settings.scan_pool_limit]
+        # A page is bounded even when the selected scope is the whole market.
+        # Force refresh advances this persistent cursor, never resets page one.
+        checkpoint = RollingScanCheckpoint(
+            self.settings.cache_dir / "scan_coverage", market.value, threshold,
+            [stock.symbol for stock in stocks], self.settings.scan_page_size,
+        )
+        by_symbol = {stock.symbol: stock for stock in stocks}
+        stocks = [by_symbol[symbol] for symbol in checkpoint.page_symbols]
+        total = len(stocks)
+        report(stage="loading_benchmark", total_count=total, universe_count=universe_count,
+               **checkpoint.fields())
+        benchmark_loader = MarketDataLoader(
+            self.settings.cache_dir / "prices", workers=1, batch_size=1,
             timeout=self.settings.provider_timeout_seconds, retries=self.settings.provider_retries,
         )
-        data = loader.load(stocks, as_of, include_intraday=True, force_refresh=force_refresh)
+        benchmark = benchmark_loader.load_benchmark(market, as_of)
+        data: dict[str, MarketData] = {}
+        loader_errors: dict[str, str] = {}
+        loader_warnings: list[str] = list(benchmark_loader.warnings)
+        completed = 0
+        adr_matches = 0
+        adr_symbols: set[str] = set()
+        scanner = MomentumScanner(ScannerConfig(
+            adr_threshold=threshold, recommendation_limit=self.settings.result_limit,
+        ))
+
+        def load_one(stock: Stock) -> tuple[MarketData | None, dict[str, str], list[str]]:
+            # Each symbol owns its loader/error state. One malformed response
+            # cannot discard its neighbours or escape the per-symbol boundary.
+            try:
+                loader = MarketDataLoader(
+                    self.settings.cache_dir / "prices", workers=1, batch_size=1,
+                    timeout=self.settings.provider_timeout_seconds,
+                    retries=self.settings.provider_retries,
+                )
+                fetched = loader.load([stock], as_of, include_intraday=True,
+                                      force_refresh=force_refresh)
+                return fetched.get(stock.symbol), loader.errors, loader.warnings
+            except Exception as exc:
+                LOGGER.warning("Skipping %s: %s", stock.symbol, exc)
+                return None, {stock.symbol: str(exc)}, []
+
+        for start in range(0, total, self.settings.scan_batch_size):
+            report(stage="loading_prices")  # Also checks cooperative cancellation.
+            batch = stocks[start:start + self.settings.scan_batch_size]
+            with ThreadPoolExecutor(max_workers=min(len(batch), self.settings.fetch_workers)) as executor:
+                futures = {executor.submit(load_one, stock): stock for stock in batch}
+                for future in as_completed(futures):
+                    stock = futures[future]
+                    item, errors, warnings = future.result()
+                    completed += 1
+                    loader_errors.update(errors)
+                    loader_warnings.extend(warnings)
+                    if item is not None:
+                        data[stock.symbol] = item
+                        try:
+                            if not item.is_stale and scanner.calculate_adr(item.daily) + 1e-10 >= threshold:
+                                adr_symbols.add(stock.symbol)
+                            if item.is_stale:
+                                loader_errors[stock.symbol] = "只有過期來源資料，不列入有效評估。"
+                        except (ValueError, TypeError, KeyError, IndexError) as exc:
+                            loader_errors[stock.symbol] = str(exc)
+                    elif stock.symbol not in loader_errors:
+                        loader_errors[stock.symbol] = "資料供應商沒有回傳此標的。"
+                    adr_matches = len(adr_symbols - loader_errors.keys())
+                    # Save before reporting progress: the deadline callback can
+                    # reject that progress, but a completed attempt must survive
+                    # process restart. A failed attempt is not verified success.
+                    checkpoint.mark_attempt(stock.symbol)
+                    report(stage="loading_prices", completed_count=completed,
+                           evaluated_count=len(data.keys() - loader_errors.keys()), adr_match_count=adr_matches,
+                           failed_count=len(loader_errors), **checkpoint.fields())
+            if start + len(batch) < total:
+                time.sleep(self.settings.scan_batch_delay_seconds)
         if not data or all(item.is_stale for item in data.values()):
             raise DataSourceError("無可用的最新行情；請檢查資料供應商、網路及快取。")
         # Market-cap/large-stock status cannot be inferred from S&P membership
@@ -514,13 +738,18 @@ class RecommendationService:
                 minimum = 50_000_000 if market is Market.US else 1_000_000_000
                 if turnover >= minimum:
                     data[symbol] = replace(item, stock=replace(item.stock, large_liquid=True))
-        benchmark = loader.load_benchmark(market, as_of)
-        scanner = MomentumScanner(ScannerConfig(
-            adr_threshold=threshold, recommendation_limit=self.settings.result_limit,
-        ))
+        report(stage="calculating_indicators")
         candidates = scanner.evaluate(data, benchmark, context)
-        warnings = list(dict.fromkeys(provider.warnings + loader.warnings + scanner.warnings))
-        exclusions = {**loader.errors, **scanner.errors}
+        report(stage="serializing_snapshot")
+        warnings = list(dict.fromkeys(provider.warnings + loader_warnings + scanner.warnings))
+        exclusions = {**loader_errors, **scanner.errors}
+        serialized: list[CandidateResponse] = []
+        for candidate in candidates:
+            try:
+                serialized.append(serialize_candidate(candidate, data.get(candidate.stock.symbol)))
+            except Exception as exc:
+                exclusions[candidate.stock.symbol] = f"推薦欄位驗證失敗：{exc}"
+                LOGGER.warning("Skipping invalid candidate %s: %s", candidate.stock.symbol, exc)
         if exclusions:
             warnings.append(f"{len(exclusions)} 個標的因資料或指標不完整被略過。")
             warnings.extend(f"{symbol}: {reason}" for symbol, reason in list(exclusions.items())[:10])
@@ -529,6 +758,21 @@ class RecommendationService:
             "訊號進場價是 PDH/ORH 觸發界線，完成 K 棒確認價另列；App 不送出交易委託。",
             "大型且流動性身份未確認時，保守採 25% 上限。",
         ])
+        if market is Market.TW:
+            warnings.append("台股上市與上櫃共用加權指數 ^TWII 作相對動能基準，並非各交易所獨立指數排名。")
+        checkpoint.mark_evaluated(data.keys() - exclusions.keys())
+        coverage = checkpoint.fields()
+        warnings.append(
+            f"第 {checkpoint.round} 輪，本頁 {total} 檔；"
+            f"累積已嘗試 {coverage['coverage_scanned_count']}/{coverage['coverage_total_count']} 檔"
+            f"（含失敗），已驗證 {coverage['coverage_evaluated_count']} 檔。"
+            "推薦與 RS 百分位僅代表本頁有效股票，並非全市場同時排名。"
+        )
+        if coverage["coverage_total_count"] < universe_count:
+            warnings.append(
+                f"管理員限制選定池為 {coverage['coverage_total_count']}/{universe_count} 檔；"
+                "MARTIN_SCAN_POOL_LIMIT=0 才涵蓋完整已取得名單。"
+            )
         universe_source = provider.sources.get(market, "public universe")
         degraded = (any(item.is_stale for item in data.values())
                     or universe_source.startswith("stale cache") or bool(exclusions))
@@ -537,9 +781,18 @@ class RecommendationService:
         return CandidatesResponse(
             market=market.value, generated_at=self.now(),
             source=f"yfinance/Yahoo Finance · {universe_source} · {context.calendar_source}",
-            universe_count=len(stocks), stale=degraded, warnings=warnings[:200],
-            candidates=[serialize_candidate(candidate, data.get(candidate.stock.symbol))
-                        for candidate in candidates],
+            universe_count=universe_count, stale=degraded, warnings=warnings[:200],
+            evaluated_count=len(data.keys() - exclusions.keys()), scan_pool_size=total,
+            adr_match_count=len(adr_symbols - exclusions.keys()),
+            universe_is_complete=(
+                coverage["coverage_total_count"] == universe_count and
+                getattr(provider, "coverage_complete", {}).get(market, False) and
+                not universe_source.startswith("stale cache")
+            ),
+            universe_as_of=(None if market not in provider.captured_at else
+                            provider.captured_at[market].to_pydatetime()),
+            scan_completed_at=self.now(), missing_symbols=sorted(exclusions),
+            candidates=serialized, **coverage,
         )
 
     def _demo(self, market: Market, threshold: float) -> CandidatesResponse:
@@ -578,7 +831,7 @@ class RecommendationService:
         return CandidatesResponse(
             market=market.value, generated_at=now, source="mock / fictitious API demonstration",
             universe_count=len(fixtures), stale=False,
-            warnings=["示範模式只含虛構展示標的，不是完整 TWSE / S&P 500 掃描。"], candidates=output,
+            warnings=["示範模式只含虛構展示標的，不是完整台股上市櫃／美股三大交易所掃描。"], candidates=output,
         )
 
 
@@ -587,7 +840,23 @@ def create_app(service: RecommendationService | None = None,
     """Dependency-injected construction keeps all API tests network-free."""
     scanner_service = service or RecommendationService()
     holdings_quotes = quote_service or QuoteService(scanner_service.settings)
-    application = FastAPI(title="Martin Luk Momentum API", version="1.1.0")
+    settings = scanner_service.settings
+    background_scans = BackgroundScanManager(
+        scan=lambda market, threshold, force, progress: scanner_service.get_candidates(
+            Market(market), threshold, force, False, progress=progress,
+        ).model_dump(mode="json", exclude_none=True),
+        read_cache=lambda market, threshold: (
+            result.model_dump(mode="json", exclude_none=True)
+            if (result := scanner_service.background_cached_response(Market(market), threshold)) is not None
+            else None
+        ),
+        timeout_seconds=settings.scan_timeout_seconds,
+        cache_ttl_seconds=settings.response_ttl_seconds,
+        page_interval_seconds=settings.scan_page_interval_seconds,
+        failure_cooldown_seconds=settings.scan_failure_cooldown_seconds,
+        now=scanner_service.now,
+    )
+    application = FastAPI(title="Martin Luk Momentum API", version="1.2.0")
     origins = [origin.strip() for origin in os.getenv("MARTIN_CORS_ORIGINS", "").split(",") if origin.strip()]
     if origins:
         application.add_middleware(
@@ -596,18 +865,41 @@ def create_app(service: RecommendationService | None = None,
         )
 
     @application.get("/health")
-    async def health() -> dict[str, str]:
+    async def health() -> dict[str, object]:
         # Liveness does not imply upstream finance providers are available.
-        return {"status": "ok", "version": "1.1.0"}
+        return {"status": "ok", "version": "1.2.0", "background_scan": True,
+                "provider_verified": False}
+
+    @application.get("/v1/capabilities", response_model=CapabilitiesResponse)
+    async def capabilities() -> CapabilitiesResponse:
+        # Read only immutable runtime settings: this handshake must finish even
+        # when calendars, exchange directories or price providers are offline.
+        # Full-universe scope is configured eligibility, not completed coverage.
+        return CapabilitiesResponse(
+            markets=["tw", "us"],
+            scan=ScanCapabilities(
+                pool_limit=settings.scan_pool_limit,
+                scope="full_universe" if settings.scan_pool_limit == 0 else "limited",
+                page_size=settings.scan_page_size,
+                page_interval_seconds=settings.scan_page_interval_seconds,
+            ),
+        )
 
     @application.get("/v1/candidates", response_model=CandidatesResponse)
     async def candidates(
         market: MarketCode = Query(...),
         adr_threshold: float | None = Query(None, ge=0, le=30),
         force_refresh: bool = Query(False), demo: bool = Query(False),
-    ) -> CandidatesResponse:
+        background: bool = Query(False),
+    ) -> CandidatesResponse | JSONResponse:
         selected = Market(market)
         threshold = market_settings(selected).adr_threshold if adr_threshold is None else adr_threshold
+        if background:
+            if demo:
+                raise HTTPException(status_code=422, detail="背景行情 API 不允許使用 demo=true。")
+            status_code, envelope = background_scans.poll(market, threshold, force_refresh)
+            return JSONResponse(status_code=status_code, content=envelope,
+                                headers={"Retry-After": "3", "Cache-Control": "no-store"})
         try:
             return await to_thread(
                 scanner_service.get_candidates, selected, threshold, force_refresh, demo
@@ -671,6 +963,7 @@ def create_app(service: RecommendationService | None = None,
 
     application.state.recommendation_service = scanner_service
     application.state.quote_service = holdings_quotes
+    application.state.background_scans = background_scans
     return application
 
 
