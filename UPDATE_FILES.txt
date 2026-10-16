@@ -1,30 +1,27 @@
-2026-10-16 / App 1.4.2+9 / 台股名單縮減與第一頁重掃修正
-本包每個檔案都是完整內容，適用已套用 1.4.1+8 推薦價位版本的專案。
-依原路徑覆蓋 GitHub 分支 fix/refresh-live-gate-20261014，不要只上傳 ZIP。
-版本不確定時使用完整專案 martin_luk_tw_scan_stable_20261016.zip。
-修正交易所部分失敗使名單1979/894切換、檢查點重設而反覆掃同30檔的路徑。
-上市/上櫃分別保存原日期名單，本輪固定代碼和公司資料，下拉與重啟續掃。
-畫面顯示本輪名單、實際本頁範圍、下一頁起點/代碼，不混用短暫來源數與舊覆蓋數。
-新增8項交易所快取測試、1項1979名單跨模組測試、輪掃共18項及新的UI穩定計數案例。
-未修改金融風控、行情HTTP、持股、推薦目標價或真實行情門禁；允許零推薦。
-本環境無Flutter SDK，尚無新版Dart測試或APK成功證據；由新提交Actions實際確認。
-操作、舊部分輪次遷移與資料來源限制見 TW_SCAN_STABILITY_FIX.md。
+2026-10-16 / App 1.4.2+9 / GitHub 推薦測試與畫面缺檔補齊包
+依 GitHub commit 79ea8cc338504ca6eac5448cb91470b7002f0723 的實際檔案樹比對。
+每個檔案均為完整內容，依原路徑覆蓋分支 fix/refresh-live-gate-20261014，不要只上傳ZIP。
+確切失敗為 test/recommendation_trade_levels_test.dart: Does not exist，非該測試的語法錯誤。
+此包包含缺少的完整六項測試，以及尚未同步的計算機/HTML/檢查程式與隱藏配置。
+原有測試和斷言均保留，正式App版本仍為1.4.2+9，保留台股完整名單分批續掃修正。
+CI增加檔案存在及非空預檢，缺少任一引用測試時明列路徑並停止，不會製造空測試或跳過。
+步驟見 RESTORE_RECOMMENDATION_FILES.md；版本不確定時使用完整專案包。
+本環境沒有Flutter SDK，尚無修正後的Dart測試或APK成功證據，需以新提交Actions確認。
 
+.dockerignore
 .github/workflows/build_apk.yml
+.gitignore
+.metadata
 BUILD_STATUS.md
 FILE_MANIFEST.json
 GITHUB_MANUAL_UPDATE.md
-MOBILE_TW_SCAN.md
-README.md
-TW_SCAN_STABILITY_FIX.md
+RECOMMENDATION_LEVELS.md
+RESTORE_RECOMMENDATION_FILES.md
 UPDATE_FILES.txt
-lib/screens/dashboard_screen.dart
-lib/services/live_candidate_repository.dart
-lib/services/mobile_scan_checkpoint.dart
-lib/services/stock_universe_service.dart
-pubspec.yaml
-scripts/verify_deliverable.py
-test/dashboard_scope_test.dart
-test/mobile_tw_rolling_repository_test.dart
-test/tw_universe_resume_integration_test.dart
-test/tw_universe_stability_test.dart
+lib/screens/calculator_screen.dart
+preview/index.html
+preview/standalone_preview.html
+scripts/check_preview_ui.cjs
+scripts/check_standalone_preview.cjs
+standalone_preview.html
+test/recommendation_trade_levels_test.dart

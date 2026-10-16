@@ -3,7 +3,7 @@
   "hash_algorithm": "SHA256",
   "archive_layout": "project files at archive root",
   "manifest_excludes_itself": true,
-  "file_count": 208,
+  "file_count": 209,
   "files": [
     {
       "path": ".dockerignore",
@@ -12,8 +12,8 @@
     },
     {
       "path": ".github/workflows/build_apk.yml",
-      "bytes": 7043,
-      "sha256": "26630ce178e3824f240c2a21d708fa714c22dc6d5d0168e39660e0aff995b949"
+      "bytes": 8382,
+      "sha256": "d3d0a829191cbdba5c843a208996f8944e732e2007766aad652e1fa149b3148e"
     },
     {
       "path": ".gitignore",
@@ -42,8 +42,8 @@
     },
     {
       "path": "BUILD_STATUS.md",
-      "bytes": 10827,
-      "sha256": "a0ead96ccc8d586d1ca93b6c6d7a9b368efa44617b3fb2507f8dc58e1f75c66b"
+      "bytes": 11638,
+      "sha256": "5df666b24f02d17ad563b54f4ddd091a1fccb4231fb529ee4d5869b3cb2a5c39"
     },
     {
       "path": "CLOUD_API_GUIDE.md",
@@ -67,8 +67,8 @@
     },
     {
       "path": "GITHUB_MANUAL_UPDATE.md",
-      "bytes": 4278,
-      "sha256": "8b10de03f3a711f5bc418897164e9db9dc8898817d67147f995a74ad3341b720"
+      "bytes": 4632,
+      "sha256": "3ca0c3512a0f660ae2d130a1ecd2916bdb14e52f56d6508c8f28ee52c8c3ee59"
     },
     {
       "path": "MARKET_DEBUG_LOGGING.md",
@@ -126,6 +126,11 @@
       "sha256": "d138a593e49826188cd7681a66eb9fc11857c6da332067aeec52e44f00f7e745"
     },
     {
+      "path": "RESTORE_RECOMMENDATION_FILES.md",
+      "bytes": 2700,
+      "sha256": "7444a8988fcc7ca2baa1db4ddc1411d77c8b6e1c042a7932b41aedce259e6ada"
+    },
+    {
       "path": "SEARCH_GUIDE.md",
       "bytes": 5242,
       "sha256": "a2d3a5d127ad3b54f9945a81c60964559d43d99ce704a8da18c3f70869537d7e"
@@ -142,8 +147,8 @@
     },
     {
       "path": "UPDATE_FILES.txt",
-      "bytes": 1580,
-      "sha256": "668d61bbb4c2746343b6df80152a7e66179aa32a3f4c0ee9bb3b5f5acf57cb60"
+      "bytes": 1338,
+      "sha256": "952ca5664481251e56d6229e604b4b0d133445ab6ec94518bc306f14a19ce47d"
     },
     {
       "path": "US_UNIVERSE_FIX.md",

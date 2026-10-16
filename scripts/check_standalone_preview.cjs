@@ -9,6 +9,7 @@ const equal=(a,b,message)=>{assert.equal(a,b,message);checks++};
 const check=(a,message)=>{assert.ok(a,message);checks++};
 const rejects=(fn,message)=>{assert.throws(fn,undefined,message);checks++};
 const block=id=>{let match=source.match(new RegExp(`<script id="${id}"[^>]*>([\\s\\S]*?)<\\/script>`));assert.ok(match,`Missing inline script ${id}`);return match[1]};
+equal(source,fs.readFileSync(path.join(__dirname,'../preview/standalone_preview.html'),'utf8'),'Both directly openable standalone copies stay identical');
 check(!/\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b|localhost|127\.0\.0\.1/i.test(source),'No network entry points or loopback addresses');
 check(!/<(?:script|img|iframe|link)\b[^>]*\b(?:src|href)=|@import|url\(/i.test(source),'No external HTML/CSS resources');
 const context=vm.createContext({console});vm.runInContext(block('standalone-core'),context);
@@ -56,6 +57,18 @@ function createUI({denyStorage=false,raw=null}={}){
  return {nodes,html:()=>nodes.get('content').innerHTML,state:()=>JSON.parse(store.get('martin-luk-standalone-offline-v1')||'null'),click(act,value,extra={}){let target={dataset:{act,value,...extra},closest(){return this}};listeners.get('click')({target})},value(id,value){nodes.get(id).value=String(value)},checked(id,value){nodes.get(id).checked=value},input(id){listeners.get('input')({target:nodes.get(id)})},change(id){listeners.get('change')({target:nodes.get(id)})},key(id,key){let prevented=false;listeners.get('keydown')({target:nodes.get(id),key,preventDefault(){prevented=true}});return prevented},advance(ms){const end=clock+ms;while(true){const entry=[...timers.entries()].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!entry)break;timers.delete(entry[0]);clock=entry[1].at;entry[1].fn()}clock=end},submit(id){listeners.get('submit')({target:{id},preventDefault(){}})}};
 }
 const metadata=JSON.parse(block('stocks-master'));
+const referenceUI=createUI();
+check(referenceUI.html().includes('假設買價 · PDH 觸發（TWD）'),'TW recommendation identifies the hypothetical trigger price and native currency');
+check(referenceUI.html().includes('3R 賣價 · 賣原始股數 15%')&&referenceUI.html().includes('5R 賣價 · 再賣原始股數 15%'),'Both stages explicitly use original shares at 15% each');
+check(referenceUI.html().includes('剩餘 70%：以日線 9 EMA 追蹤出場')&&referenceUI.html().includes('已確認日收盤跌破 9 EMA'),'Remaining shares track a confirmed daily close instead of an intraday EMA cross');
+check(referenceUI.html().includes('NT$1,187.20 TWD')&&referenceUI.html().includes('NT$1,232.00 TWD'),'TW 3R and 5R reference prices use the unchanged original entry-minus-stop risk');
+check(referenceUI.html().includes('並非可直接下單表')&&referenceUI.html().includes('初始硬停損優先'),'Recommendation explains reference status and hard-stop priority');
+referenceUI.click('market','us');
+check(referenceUI.html().includes('US$148.40 USD')&&referenceUI.html().includes('US$154.00 USD'),'US reference targets retain USD and exact initial R');
+referenceUI.click('calc','NVDA');
+check(referenceUI.nodes.get('calculation').innerHTML.includes('recommendation-exit-plan')&&referenceUI.nodes.get('calculation').innerHTML.includes('US$154.00 USD'),'Calculator shows the same two-stage exit plan as recommendations');
+referenceUI.value('capital',0);referenceUI.input('capital');
+check(!referenceUI.nodes.get('calculation').innerHTML.includes('recommendation-exit-plan'),'Invalid sizing clears every executable stage plan');
 check(metadata.filter(s=>s.market==='US').length>=100,'At least 100 US identities are embedded for offline search');
 check(metadata.filter(s=>s.market==='TW').length>=100,'At least 100 TW identities are embedded for offline search');
 const searchUI=createUI();

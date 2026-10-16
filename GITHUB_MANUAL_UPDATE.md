@@ -1,5 +1,7 @@
 # GitHub 網頁完整覆蓋：1.4.0+7 手機台股輪掃
 
+若 Actions 顯示 `recommendation_trade_levels_test.dart: Does not exist`，使用 **`martin_luk_restore_recommendation_files_20261016.zip`** 一次補齊；此包依 GitHub 實際缺漏比對，包含測試與不同步的計算機／預覽更新。步驟見 [RESTORE_RECOMMENDATION_FILES.md](RESTORE_RECOMMENDATION_FILES.md)。版本仍為 1.4.2+9。
+
 最新 **1.4.2+9** 請使用 `martin_luk_tw_scan_stable_updates_20261016.zip` 或完整包 `martin_luk_tw_scan_stable_20261016.zip`，依 [TW_SCAN_STABILITY_FIX.md](TW_SCAN_STABILITY_FIX.md) 操作。本版修正 894／1979 名單切換造成第一頁重掃，保留推薦價位與前次測試修正。
 
 最新 **1.4.1+8** 請使用 `martin_luk_recommendation_levels_updates_20261016.zip` 或完整包 `martin_luk_recommendation_levels_20261016.zip`。本次新增推薦進出場明細，並包含上一項逐檔進度測試修正；操作見 [RECOMMENDATION_LEVELS.md](RECOMMENDATION_LEVELS.md)。以下是 1.4.0+7 輪掃交付的原有說明。
