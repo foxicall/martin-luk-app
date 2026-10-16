@@ -1,4 +1,16 @@
-# 最新覆蓋：背景服務生命週期測試修正
+# 最新覆蓋：1.6.0+13 美股完整名單手機輪掃
+
+下載 `martin_luk_mobile_us_updates_20261016.zip`，解壓後依`UPDATE_FILES.txt`將完整檔案覆蓋`fix/refresh-live-gate-20261014`分支，再提交新commit。完整專案為`martin_luk_mobile_us_20261016.zip`。
+
+本版修改美股資料層、跨市場檢查點、控制器與進度UI；務必包含三個新增`mobile_us_*_test.dart`、所有更新的既有測試、工作流及`pubspec.yaml`。不能只改畫面上的30或5118。兩市場皆按實際取得的完整名單分批續掃，非一次併發數千檔。
+
+版本應為1.6.0+13。Actions通過固定測試與真實行情門禁後才建置APK；安裝後正式直連切美股下拉，查看30→60→90與剩餘數。背景更新需明確手動啟動Android服務。來源缺漏、API限流及省電限制保留，不能宣稱完整同步行情。
+
+詳細操作、跨日／保存政策與實際驗證狀態見 [MOBILE_US_SCAN.md](MOBILE_US_SCAN.md)。本機沒有Flutter，新增Dart／APK仍待新提交CI。
+
+---
+
+# 前次覆蓋：背景服務生命週期測試修正
 
 版本仍為 **1.5.0+12**。下載 `martin_luk_background_lifecycle_fix_updates_20261016.zip` 解壓後，將 `test/background_scan_app_lifecycle_test.dart` 與 `test/production_lifecycle_test.dart` 完整覆蓋到 `fix/refresh-live-gate-20261014` 分支，再提交新commit觸發Actions。原有全部斷言、正式程式與門禁保留。
 

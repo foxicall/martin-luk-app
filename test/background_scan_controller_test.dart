@@ -48,21 +48,22 @@ class _Scans implements ProgressiveCandidateRepository {
 }
 
 CandidateSnapshot _snapshot(StockMarket market, {int scanned = 30,
-    int universe = 300, int evaluated = 30, int? pageStart}) =>
+    int universe = 300, int evaluated = 30, int? pageStart,
+    bool usRolling = false}) =>
     CandidateSnapshot(
       candidates: const [], fetchedAt: _now, warnings: const [],
       source: 'Yahoo Finance lifecycle fixture', universeCount: universe,
       stale: false, evaluatedCount: evaluated, scanPoolSize: 30, adrMatchCount: 0,
       universeIsComplete: false, universeAsOf: _now, scanCompletedAt: _now,
-      candidatesAreCumulative: market == StockMarket.tw,
-      coverageTotalCount: market == StockMarket.tw ? universe : null,
-      coverageScannedCount: market == StockMarket.tw ? scanned : null,
-      coverageEvaluatedCount: market == StockMarket.tw ? scanned : null,
-      coverageRemainingCount: market == StockMarket.tw ? universe - scanned : null,
-      coverageRound: market == StockMarket.tw ? 1 : null,
-      scanPageStart: market == StockMarket.tw ? pageStart ?? scanned - 30 : null,
-      scanPageSize: market == StockMarket.tw ? 30 : null,
-      universeFingerprint: market == StockMarket.tw ? 'background-fixture' : null,
+      candidatesAreCumulative: market == StockMarket.tw || usRolling,
+      coverageTotalCount: market == StockMarket.tw || usRolling ? universe : null,
+      coverageScannedCount: market == StockMarket.tw || usRolling ? scanned : null,
+      coverageEvaluatedCount: market == StockMarket.tw || usRolling ? scanned : null,
+      coverageRemainingCount: market == StockMarket.tw || usRolling ? universe - scanned : null,
+      coverageRound: market == StockMarket.tw || usRolling ? 1 : null,
+      scanPageStart: market == StockMarket.tw || usRolling ? pageStart ?? scanned - 30 : null,
+      scanPageSize: market == StockMarket.tw || usRolling ? 30 : null,
+      universeFingerprint: market == StockMarket.tw || usRolling ? 'background-fixture' : null,
     );
 
 class _Background implements BackgroundScanService {
@@ -344,7 +345,7 @@ void main() {
     }
   });
 
-  testWidgets('US background polling retains the existing hot-quote scope',
+  testWidgets('legacy US background responses without coverage retain bounded hot-quote scope',
       (tester) async {
     final scans = _Scans();
     final service = _Background();
@@ -361,7 +362,7 @@ void main() {
       await tester.pump();
       expect(scans.calls.last.market, StockMarket.us);
       expect(scans.calls.last.quotesOnly, isTrue,
-          reason: 'Enabling Android must not claim a full-US scan.');
+          reason: 'Legacy responses without rolling coverage must not claim a full-US scan.');
     } finally {
       controller.dispose();
     }
@@ -473,6 +474,80 @@ void main() {
       expect(service.updates.last, contains('已評估 35'));
       expect(service.updates.last, contains('剩餘 265'));
       pending.complete(_snapshot(StockMarket.tw, scanned: 60));
+      await tester.pump();
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  testWidgets('full US service advances pages in background and reports the actual round coverage',
+      (tester) async {
+    final scans = _Scans();
+    scans.reply = (call) async => _snapshot(call.market,
+      universe: call.market == StockMarket.us ? 5000 : 300,
+      scanned: scans.calls.where((item) => item.market == call.market).length * 30,
+      usRolling: call.market == StockMarket.us);
+    final service = _Background();
+    final controller = _controller(scans, service);
+    try {
+      await tester.runAsync(() => controller.initialize(initializeReminders: false));
+      await tester.runAsync(() => controller.setMarket(StockMarket.us));
+      expect(controller.snapshot!.coverageScannedCount, 30);
+      controller.setForeground(true);
+      final started = controller.startBackgroundScan();
+      await tester.pump();
+      await started;
+      expect(controller.snapshot!.coverageScannedCount, 60);
+      controller.setForeground(false);
+      await tester.pump(const Duration(minutes: 1));
+      await tester.pump();
+      expect(controller.snapshot!.coverageScannedCount, 90);
+      expect(scans.calls.last.quotesOnly, isFalse);
+      expect(controller.autoRefreshActive, isTrue);
+      expect(service.updates.first, contains('美股三大交易所輪掃'));
+      expect(service.updates.first, contains('已嘗試 30/5000'));
+      expect(service.updates.first, contains('剩餘 4970'));
+      expect(service.updates.every((text) => !text.contains('核心精選池')), isTrue);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  testWidgets('full US notification prefers validated current partial coverage over the old page',
+      (tester) async {
+    final scans = _Scans()..reply = (call) async => _snapshot(call.market,
+      universe: call.market == StockMarket.us ? 5000 : 300,
+      usRolling: call.market == StockMarket.us);
+    final service = _Background();
+    var instant = _now;
+    final controller = _controller(scans, service, now: () => instant);
+    final pending = Completer<CandidateSnapshot>();
+    try {
+      await tester.runAsync(() => controller.initialize(initializeReminders: false));
+      await tester.runAsync(() => controller.setMarket(StockMarket.us));
+      scans.reply = (_) => pending.future;
+      controller.setForeground(true);
+      final started = controller.startBackgroundScan();
+      await tester.pump();
+      await started;
+      expect(controller.loading, isTrue);
+      instant = instant.add(const Duration(seconds: 2));
+      scans.onProgress!(MarketScanProgress(
+        market: StockMarket.us, universeCount: 5000, poolSize: 30,
+        attemptedCount: 5, completedCount: 5, evaluatedCount: 5,
+        adrMatchCount: 0, confirmedCount: 0, failedCount: 0,
+        finished: false, stage: 'US second page',
+        partialSnapshot: _snapshot(StockMarket.us, universe: 5000,
+          scanned: 35, evaluated: 5, pageStart: 30, usRolling: true),
+      ));
+      await tester.pump();
+      expect(controller.snapshot!.coverageScannedCount, 30);
+      expect(service.updates.last, contains('美股三大交易所輪掃'));
+      expect(service.updates.last, contains('已嘗試 35/5000'));
+      expect(service.updates.last, contains('已評估 35'));
+      expect(service.updates.last, contains('剩餘 4965'));
+      pending.complete(_snapshot(StockMarket.us,
+        universe: 5000, scanned: 60, usRolling: true));
       await tester.pump();
     } finally {
       controller.dispose();

@@ -38,6 +38,8 @@ EXCLUDED_FILE_PATTERNS = (
     "apply_market_scan_fix.py", "apply_market_scan_timeout_fix.py",
 )
 REQUIRED_FILES = (
+    "MOBILE_US_SCAN.md", "test/mobile_us_rolling_repository_test.dart",
+    "test/mobile_us_polling_test.dart", "test/mobile_us_scope_test.dart",
     "ANDROID_BACKGROUND_SCAN.md", "lib/services/background_scan_service.dart",
     "test/background_scan_uninitialized_test.dart",
     "test/background_scan_service_test.dart", "test/background_scan_controller_test.dart",
@@ -300,6 +302,7 @@ def validate_contents(files: dict[str, bytes]) -> None:
         "test/tw_issuer_csv_test.dart test/tw_official_fallback_test.dart",
         "test/trade_levels_test.dart test/manual_trade_levels_test.dart",
         "test/background_scan_uninitialized_test.dart test/background_scan_service_test.dart",
+        "test/mobile_us_rolling_repository_test.dart test/mobile_us_polling_test.dart test/mobile_us_scope_test.dart",
     ):
         require(marker in workflow, f"Actions 工作流缺少：{marker}")
     android_app = files["android/app/build.gradle"].decode("utf-8")

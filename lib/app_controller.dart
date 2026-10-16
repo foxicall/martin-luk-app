@@ -193,12 +193,20 @@ class AppController extends ChangeNotifier {
   bool _foreground = false;
   bool _initialized = false;
   bool _pollBusy = false;
-  bool _mobileScanPaused = false;
-  /// Manual stop pauses the phone's Taiwan round between pages as well as
-  /// during an active page. Pull-to-refresh explicitly resumes it.
+  final Set<StockMarket> _pausedMobileMarkets = {};
+  /// A manual stop belongs to the selected market. Switching tabs must not
+  /// silently resume a stopped round in the other market.
+  bool get _mobileScanPaused => _pausedMobileMarkets.contains(_market);
+  set _mobileScanPaused(bool paused) {
+    if (paused) {
+      _pausedMobileMarkets.add(_market);
+    } else {
+      _pausedMobileMarkets.remove(_market);
+    }
+  }
   bool get mobileScanPaused => _mobileScanPaused;
-  bool get _isMobileTwScan => !_settings.useMockData &&
-      _settings.dataProvider == 'direct' && _market == StockMarket.tw;
+  bool get _isMobileDirectScan => !_settings.useMockData &&
+      _settings.dataProvider == 'direct';
   int _pollVersion = 0;
   DateTime? _lastAutoRefreshAt;
   bool get autoRefreshActive => _pollTimer != null;
@@ -220,6 +228,10 @@ class AppController extends ChangeNotifier {
   CandidateSort get sort => _sort;
   CandidateSnapshot? _snapshot;
   CandidateSnapshot? get snapshot => _snapshot;
+  /// Presentation may consume only a partial that passed the same validation
+  /// as a final result. Raw observer payloads are not verified snapshots.
+  CandidateSnapshot? get verifiedMarketPartialSnapshot =>
+      _scanOperation?.partialSnapshot;
   bool _loading = false;
   bool get loading => _loading;
   bool get isEvaluatingMarket => _loading;
@@ -416,7 +428,7 @@ class AppController extends ChangeNotifier {
   /// deadline; repeated pulls cannot extend one continuously visible spinner.
   Future<void> refresh({bool forceRefresh = true, bool refreshQuotesOnly = false}) {
     if (_disposed) return Future<void>.value();
-    if (forceRefresh && _isMobileTwScan) _mobileScanPaused = false;
+    if (forceRefresh && _isMobileDirectScan) _mobileScanPaused = false;
     final key = _scanKey();
     final active = _scanOperation;
     if (active != null && active.key == key && active.version == _requestVersion) {
@@ -537,12 +549,12 @@ class AppController extends ChangeNotifier {
   /// Retiring request ownership also prevents a late HTTP reply from committing.
   void cancelMarketEvaluation() {
     if (_disposed) return;
-    if (_isMobileTwScan) {
+    if (_isMobileDirectScan) {
       _mobileScanPaused = true;
       // A round may be waiting for the next minute tick with no active page.
       // Stopping in that interval must still suppress future automatic pages.
       if (_scanOperation == null) {
-        _finishMarketProgress('台股輪掃已暫停；下拉更新可續掃');
+        _finishMarketProgress('${_market.label}輪掃已暫停；下拉更新可續掃');
         _notify();
         return;
       }
@@ -867,13 +879,12 @@ class AppController extends ChangeNotifier {
     final evaluated = response.evaluatedCount;
     final poolSize = response.scanPoolSize;
     final adrMatches = response.adrMatchCount;
-    // Only the phone's Taiwan scanner accumulates candidates across pages.
-    // Page counts remain page counts; coverage is separately validated by the
-    // immutable snapshot constructor. A server/US/mock flag cannot opt out of
-    // the original candidate-versus-evaluated-count protection.
+    // Only real, direct phone scans may accumulate candidates across pages.
+    // TW and US share the same strict coverage contract, independently of the
+    // page's counts. A backend/mock flag cannot opt out of count protection.
     final cumulative = response.candidatesAreCumulative && !allowMock &&
         !_settings.useMockData && _settings.dataProvider == 'direct' &&
-        market == StockMarket.tw && response.backendScan == null &&
+        response.backendScan == null &&
         response.coverageTotalCount == response.universeCount &&
         response.universeCount > 0 &&
         response.coverageScannedCount != null &&
@@ -882,7 +893,7 @@ class AppController extends ChangeNotifier {
         evaluated != null && poolSize != null &&
         response.coverageEvaluatedCount! >= evaluated;
     if (response.candidatesAreCumulative && !cumulative) {
-      throw const RepositoryException('累積候選僅允許具完整輪掃統計的手機台股來源。');
+      throw const RepositoryException('累積候選僅允許具完整輪掃統計的手機直接行情來源。');
     }
     if (response.source.trim().isEmpty || response.universeCount < 0 ||
         (evaluated != null && (evaluated < 0 || evaluated > response.universeCount)) ||
@@ -966,13 +977,18 @@ class AppController extends ChangeNotifier {
   Future<void> setMarket(StockMarket value) async {
     if (_disposed || _market == value) return;
     _cancelScan();
+    _pollVersion++;
+    _pollBusy = false;
     _resetBackendWaiting();
     _marketScanProgress = null;
     _market = value;
-    _mobileScanPaused = false;
     _page = 0;
     final saved = _candidateSnapshots['${_portfolioSource(_settings)}:${value.name}'];
     _snapshot = saved == null ? null : _staleSnapshot(saved, '市場切換中，暫顯示上次快取。');
+    if (_isMobileDirectScan && _mobileScanPaused) {
+      _notify();
+      return;
+    }
     await refresh(forceRefresh: false);
   }
 
@@ -1041,7 +1057,7 @@ class AppController extends ChangeNotifier {
       _acceptBackgroundState(state);
       if ((starting || resuming) && state.running) {
         // Start/resume is explicit user intent; it can resume a manually
-        // stopped Taiwan round. An ordinary minute tick still cannot do so.
+        // stopped market round. An ordinary minute tick still cannot do so.
         _mobileScanPaused = false;
       }
     } catch (error, stack) {
@@ -1091,10 +1107,10 @@ class AppController extends ChangeNotifier {
       // Stop this phone's in-flight status request on backgrounding. The
       // server continues independently; its job is not cancelled by the phone.
       if ((!_settings.useMockData && _settings.dataProvider == 'backend') ||
-          _isMobileTwScan) {
+          _isMobileDirectScan) {
         _cancelScan();
       }
-      if (_isMobileTwScan) {
+      if (_isMobileDirectScan) {
         // A suspended page is not a completed auto refresh. Its detached
         // continuation must neither retain the poll lock nor move the last
         // successful foreground-update timestamp forward.
@@ -1148,9 +1164,10 @@ class AppController extends ChangeNotifier {
       // a stale fallback as a recent successful universe scan.
       final quotesOnly = scan != null && !scan.stale && age != null &&
           !age.isNegative && age < const Duration(minutes: 15) &&
-          !(_isMobileTwScan && (scan.coverageRemainingCount ?? 0) > 0);
+          !(_isMobileDirectScan && scan.candidatesAreCumulative &&
+              (scan.coverageRemainingCount ?? 0) > 0);
       await Future.wait([
-        _isMobileTwScan && _mobileScanPaused
+        _isMobileDirectScan && _mobileScanPaused
             ? Future<void>.value()
             : refresh(forceRefresh: false, refreshQuotesOnly: quotesOnly),
         refreshPortfolio(forceRefresh: false),
@@ -1263,7 +1280,7 @@ class AppController extends ChangeNotifier {
     _loading = false;
     _page = 0;
     _settings = next;
-    _mobileScanPaused = false;
+    _pausedMobileMarkets.clear();
     _syncPolling();
     _notify();
     String? reminderError;
@@ -1798,25 +1815,28 @@ class AppController extends ChangeNotifier {
     // Use only the active operation's validated partial. A preceding page's
     // global snapshot otherwise masks cumulative progress (30 + 5 -> 35).
     final partial = _scanOperation?.partialSnapshot;
-    final twSnapshot = _isMobileTwScan &&
+    final rollingSnapshot = _isMobileDirectScan &&
         partial?.coverageScannedCount != null ? partial : snapshot;
-    final tw = _market == StockMarket.tw;
-    final total = tw
-        ? twSnapshot?.coverageTotalCount ?? progress?.universeCount ??
-            twSnapshot?.universeCount
+    final fullRound = _isMobileDirectScan &&
+        rollingSnapshot?.candidatesAreCumulative == true &&
+        rollingSnapshot?.coverageTotalCount == rollingSnapshot?.universeCount &&
+        rollingSnapshot?.coverageScannedCount != null;
+    final total = fullRound
+        ? rollingSnapshot?.coverageTotalCount
         : progress?.poolSize ?? snapshot?.scanPoolSize;
-    final attempted = tw
-        ? twSnapshot?.coverageScannedCount ?? progress?.attemptedCount
+    final attempted = fullRound
+        ? rollingSnapshot?.coverageScannedCount
         : progress?.attemptedCount ??
             (snapshot?.scanCompletedAt != null ? snapshot?.scanPoolSize : null);
-    final evaluated = tw
-        ? twSnapshot?.coverageEvaluatedCount ?? progress?.evaluatedCount ??
-            twSnapshot?.evaluatedCount
+    final evaluated = fullRound
+        ? rollingSnapshot?.coverageEvaluatedCount
         : progress?.evaluatedCount ?? snapshot?.evaluatedCount;
-    final remaining = tw ? twSnapshot?.coverageRemainingCount : null;
-    final marketLabel = _market == StockMarket.tw ? '台股輪掃' : '美股核心精選池';
+    final remaining = fullRound ? rollingSnapshot?.coverageRemainingCount : null;
+    final marketLabel = fullRound
+        ? '${_market.label}輪掃'
+        : _market == StockMarket.tw ? '台股掃描池' : '美股核心精選池';
     final stage = _backgroundState.paused ? '背景掃描已暫停' :
-        _mobileScanPaused && _isMobileTwScan ? '台股輪掃已暫停' :
+        _mobileScanPaused && _isMobileDirectScan ? '${_market.label}輪掃已暫停' :
         _loading ? '正在分批評估' : '等待下一次更新';
     final text = '$marketLabel · $stage'
         '${attempted != null && total != null ? ' · 已嘗試 $attempted/$total' : ''}'
@@ -1824,7 +1844,7 @@ class AppController extends ChangeNotifier {
         '${remaining != null ? ' · 剩餘 $remaining' : ''}';
     final instant = _now();
     final mode = '${_market.name}:${_backgroundState.paused}:'
-        '${_mobileScanPaused && _isMobileTwScan}';
+        '${_mobileScanPaused && _isMobileDirectScan}';
     if (_lastNotificationText == text ||
         (_lastNotificationMode == mode && _lastNotificationAt != null &&
           instant.difference(_lastNotificationAt!) < const Duration(seconds: 1))) {

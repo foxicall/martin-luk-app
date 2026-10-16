@@ -177,7 +177,7 @@ void main() {
     expect(api.intradayCalls, 2);
     repository.close(); api.close(); universe.close();
   });
-  test('foreground refresh reuses member scan and force refresh rescans', () async {
+  test('completed-round quote refresh reuses the directory and force starts a new round', () async {
     final repository = DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, now: () => _now);
     await repository.fetch(StockMarket.us, adrThreshold: 5);
@@ -241,9 +241,9 @@ void main() {
     expect(partial.evaluatedCount, 1);
     expect(partial.universeCount, 5);
     expect(partial.missingSymbols.toSet(), gates.keys.toSet());
-    expect(partial.warnings.any((warning) => warning.contains('整批掃描期限')), true);
-    final partialCache = jsonDecode(preferences.getString('martin-live-scan-v2-directory-us-5.0')!) as Map;
-    expect(partialCache['evaluated_count'], 1,
+    expect(partial.warnings.any((warning) => warning.contains('整批期限')), true);
+    final partialCache = jsonDecode(preferences.getString('martin-mobile-us-rolling-v1-5.0')!) as Map;
+    expect(partialCache['page_evaluated'], 1,
         reason: 'The scan reserves time to persist a partial offline snapshot inside its budget.');
 
     api.dailyGates.clear();
@@ -255,8 +255,8 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(api.intradayCalls, intradayCalls,
         reason: 'Late daily replies must not schedule another intraday request.');
-    final persisted = jsonDecode(preferences.getString('martin-live-scan-v2-directory-us-5.0')!) as Map;
-    expect(persisted['evaluated_count'], 5,
+    final persisted = jsonDecode(preferences.getString('martin-mobile-us-rolling-v1-5.0')!) as Map;
+    expect(persisted['page_evaluated'], 5,
         reason: 'The expired batch must not overwrite a successful retry cache.');
     repository.close(); api.close(); universe.close();
   });
@@ -297,14 +297,17 @@ void main() {
     repository.close(); api.close(); universe.close();
   });
 
-  test('cold quote-only polling does not unexpectedly launch a full universe scan', () async {
+  test('cold polling starts one bounded US page instead of an unbounded universe scan', () async {
     final repository = DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, now: () => _now);
-    await expectLater(repository.fetch(StockMarket.us, adrThreshold: 5, refreshQuotesOnly: true),
-        throwsA(isA<RepositoryException>()));
-    expect(universe.calls, 0);
-    final initialized = await repository.fetch(StockMarket.us, adrThreshold: 5, forceRefresh: true);
+    final initialized = await repository.fetch(StockMarket.us, adrThreshold: 5,
+        refreshQuotesOnly: true);
+    expect(universe.calls, 1);
     expect(initialized.evaluatedCount, 2);
+    expect(initialized.coverageScannedCount, 2);
+    expect(initialized.coverageRemainingCount, 0);
+    expect(initialized.scanPoolSize, lessThanOrEqualTo(30));
+    expect(api.dailyCalls, 2);
     repository.close(); api.close(); universe.close();
   });
 
@@ -398,7 +401,7 @@ void main() {
   test('scan waits for all four stocks and throttles before the next chunk', () async {
     universe = _Universe(['NVDA', 'TSLA', 'AMD', 'AAPL', 'META'].map(_stock).toList(), preferences);
     final gate = Completer<MarketChart>();
-    api.dailyGates['TSLA'] = gate;
+    api.dailyGates['NVDA'] = gate;
     final repository = DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, now: () => _now, batchSize: 4);
     final request = repository.fetch(StockMarket.us, adrThreshold: 5, forceRefresh: true);
@@ -406,11 +409,12 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 120));
     expect(api.dailyCalls, 4,
         reason: 'A fast worker must not start a fifth stock while another chunk member is pending.');
-    expect(api.dailyStarted.containsKey('META'), false);
-    gate.complete(_daily('TSLA'));
+    expect(api.dailyStarted.keys, ['AAPL', 'AMD', 'META', 'NVDA']);
+    expect(api.dailyStarted.containsKey('TSLA'), false);
+    gate.complete(_daily('NVDA'));
     final snapshot = await request.timeout(const Duration(seconds: 2));
     expect(snapshot.evaluatedCount, 5);
-    expect(api.dailyStarted['META']! - api.intradayFinished['TSLA']!,
+    expect(api.dailyStarted['TSLA']! - api.intradayFinished['NVDA']!,
         greaterThanOrEqualTo(const Duration(milliseconds: 145)),
         reason: 'The default 150 ms delay occurs after every stock in the chunk finishes.');
     repository.close(); api.close(); universe.close();
@@ -470,7 +474,12 @@ void main() {
     final snapshot = await repository.fetch(StockMarket.us, adrThreshold: 5, forceRefresh: true)
         .timeout(const Duration(seconds: 1));
     expect(snapshot.evaluatedCount, 1);
-    expect(snapshot.missingSymbols, ['TSLA']);
+    expect(snapshot.missingSymbols, isEmpty,
+        reason: 'TSLA was not started, so it remains queued rather than failed.');
+    expect(snapshot.coverageScannedCount, 1);
+    expect(snapshot.coverageRemainingCount, 1);
+    expect(snapshot.scanCompletedAt, isNull);
+    expect(api.dailyStarted.keys, ['NVDA']);
     expect(api.dailyCalls, 1);
     expect(api.intradayCalls, 1);
     repository.close(); api.close(); universe.close();
@@ -493,6 +502,10 @@ void main() {
       preferences: preferences, corePoolSize: 0), throwsArgumentError);
     expect(() => DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, corePoolSize: 31), throwsArgumentError);
+    expect(() => DirectLiveCandidateRepository(api: api, universe: universe,
+      preferences: preferences, usPageSize: 31), throwsArgumentError);
+    expect(() => DirectLiveCandidateRepository(api: api, universe: universe,
+      preferences: preferences, corePoolSize: 5, usPageSize: 6), throwsArgumentError);
     expect(() => DirectLivePortfolioRepository(api: api, preferences: preferences,
       batchSize: 6), throwsArgumentError);
     api.close(); universe.close();
@@ -516,8 +529,8 @@ void main() {
 
   test('a later healthy stock is still evaluated after twelve invalid stocks', () async {
     final bad = List.generate(12, (index) => 'BAD$index');
-    // This fixture symbol is not in the priority list, so it remains after all
-    // twelve failures and exercises continued processing of later chunks.
+    // Sorted pinned membership places HEALTHY after all twelve failures,
+    // exercising continued processing of later chunks.
     universe = _Universe([...bad, 'HEALTHY'].map(_stock).toList(), preferences);
     for (final symbol in bad) {
       api.dailyFailures[symbol] = const FormatException('OHLCV 欄位缺漏');
@@ -538,10 +551,17 @@ void main() {
     api.dailyFailures['TSLA'] = const FormatException('OHLCV 缺漏');
     final repository = DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, now: () => _now);
-    await expectLater(repository.fetch(StockMarket.us, adrThreshold: 5, forceRefresh: true),
-        throwsA(isA<RepositoryException>()
-          .having((error) => error.message, 'provider cause', contains('NVDA：Yahoo chart HTTP 403'))
-          .having((error) => error.message, 'format cause', contains('TSLA：FormatException: OHLCV 缺漏'))));
+    final failed = await repository.fetch(StockMarket.us, adrThreshold: 5,
+        forceRefresh: true);
+    expect(failed.stale, isTrue);
+    expect(failed.evaluatedCount, 0);
+    expect(failed.candidates, isEmpty);
+    expect(failed.scanCompletedAt, isNull);
+    expect(failed.coverageScannedCount, 2);
+    expect(failed.coverageEvaluatedCount, 0);
+    expect(failed.missingSymbols, ['NVDA', 'TSLA']);
+    expect(failed.warnings.join('\n'), contains('NVDA：Yahoo chart HTTP 403'));
+    expect(failed.warnings.join('\n'), contains('TSLA：FormatException: OHLCV 缺漏'));
     repository.close(); api.close(); universe.close();
   });
 
@@ -555,12 +575,12 @@ void main() {
     expect(snapshot.evaluatedCount, 2);
     expect(snapshot.missingSymbols, isEmpty);
     expect(snapshot.stale, false);
-    expect(snapshot.warnings.join('\n'), contains('推薦清單為有效的空結果'));
+    expect(snapshot.warnings.join('\n'), contains('零候選為有效結果'));
     expect(api.intradayCalls, 0);
     repository.close(); api.close(); universe.close();
   });
 
-  test('core scan limits HTTP work to 30 genuine members and keeps the universe count', () async {
+  test('US pages preserve all real members and continue beyond the first thirty', () async {
     final rows = [
       ...List.generate(60, (index) => _stock('S$index')),
       _stock('TSLA'), _stock('AAPL'), _stock('NVDA'),
@@ -569,19 +589,51 @@ void main() {
     final repository = DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, now: () => _now,
       interBatchDelay: Duration.zero);
-    final snapshot = await repository.fetch(StockMarket.us, adrThreshold: 5,
+    final ordered = rows.map((row) => row.symbol).toList()..sort();
+    final first = await repository.fetch(StockMarket.us, adrThreshold: 5,
       forceRefresh: true);
-    expect(snapshot.universeCount, 63);
-    expect(snapshot.scanPoolSize, 30);
-    expect(snapshot.evaluatedCount, 30);
-    expect(snapshot.adrMatchCount, 30);
+    expect(first.universeCount, 63);
+    expect(first.scanPoolSize, 30);
+    expect(first.evaluatedCount, 30);
+    expect(first.adrMatchCount, 30);
+    expect(first.coverageScannedCount, 30);
+    expect(first.coverageRemainingCount, 33);
     expect(api.dailyCalls, 30);
-    expect(api.dailyStarted.keys.take(3), ['NVDA', 'AAPL', 'TSLA']);
-    expect(api.dailyStarted.keys.every((symbol) => rows.any((row) => row.symbol == symbol)), true);
-    expect(snapshot.missingSymbols, isEmpty,
-      reason: 'Members outside the intentionally selected core are not provider failures.');
-    expect(snapshot.warnings.join('\n'), contains('本次核心精選池 30 檔'));
-    expect(snapshot.warnings.join('\n'), contains('未向整個市場同時發送請求'));
+    expect(api.dailyStarted.keys, ordered.take(30));
+    expect(first.missingSymbols, isEmpty,
+      reason: 'Not-yet-visited directory members are remaining work, not failures.');
+    expect(first.warnings.join('\n'), contains('完整名單分批輪掃'));
+    expect(first.warnings.join('\n'), contains('RS 為原掃描頁內排名'));
+
+    // Even a quote-refresh tick must advance an unfinished round. No universe
+    // reload, duplicate first-page HTTP or fixed core-ceiling is permitted.
+    final second = await repository.fetch(StockMarket.us, adrThreshold: 5,
+        refreshQuotesOnly: true);
+    expect(universe.calls, 1);
+    expect(api.dailyCalls, 60);
+    expect(api.dailyStarted.keys, ordered.take(60));
+    expect(second.scanPageStart, 30);
+    expect(second.coverageScannedCount, 60);
+    expect(second.coverageRemainingCount, 3);
+    expect(second.candidates, hasLength(60));
+    expect(second.universeFingerprint, first.universeFingerprint);
+    expect(second.candidatesAreCumulative, isTrue);
+
+    final finalPage = await repository.fetch(StockMarket.us, adrThreshold: 5,
+        forceRefresh: true);
+    expect(universe.calls, 1,
+        reason: 'Manual pulls also retain the in-progress round membership.');
+    expect(api.dailyCalls, 63);
+    expect(api.dailyStarted.keys, ordered);
+    expect(finalPage.scanPageStart, 60);
+    expect(finalPage.scanPoolSize, 3);
+    expect(finalPage.evaluatedCount, 3);
+    expect(finalPage.candidates, hasLength(63));
+    expect(finalPage.coverageScannedCount, 63);
+    expect(finalPage.coverageEvaluatedCount, 63);
+    expect(finalPage.coverageRemainingCount, 0);
+    expect(finalPage.candidates.every((candidate) => rows.any(
+        (row) => row.symbol == candidate.symbol)), isTrue);
     repository.close(); api.close(); universe.close();
   });
 
@@ -699,6 +751,7 @@ void main() {
     final checked = expectLater(request, throwsA(isA<RepositoryException>()));
     await _waitForDailyCalls(api, 2);
     repository.close();
+    final journalAtClose = preferences.getString('martin-mobile-us-rolling-v1-5.0');
     await checked.timeout(const Duration(seconds: 2));
     final countAtClose = progress.length;
     final intradayAtClose = api.intradayCalls;
@@ -706,24 +759,38 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(progress.length, countAtClose);
     expect(api.intradayCalls, intradayAtClose);
-    expect(preferences.getString('martin-live-scan-v2-directory-us-5.0'), isNull);
+    expect(preferences.getString('martin-mobile-us-rolling-v1-5.0'), journalAtClose,
+        reason: 'Late workers must not overwrite the prefix saved before disposal.');
     api.close(); universe.close();
   });
 
-  test('all-failed core scan finishes progress with an error rather than an empty success', () async {
+  test('all-failed US page finishes stale with errors and keeps a resumable journal', () async {
     api.dailyFailures['NVDA'] = const MarketDataException('HTTP 403', statusCode: 403);
     api.dailyFailures['TSLA'] = const FormatException('OHLCV missing');
     final progress = <MarketScanProgress>[];
     final repository = DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, now: () => _now);
-    await expectLater(repository.fetchWithProgress(StockMarket.us,
-      adrThreshold: 5, forceRefresh: true, onProgress: progress.add),
-      throwsA(isA<RepositoryException>()));
+    final failed = await repository.fetchWithProgress(StockMarket.us,
+      adrThreshold: 5, forceRefresh: true, onProgress: progress.add);
+    expect(failed.stale, isTrue);
+    expect(failed.scanCompletedAt, isNull);
+    expect(failed.evaluatedCount, 0);
+    expect(failed.candidates, isEmpty);
+    expect(failed.coverageScannedCount, 2);
+    expect(failed.coverageEvaluatedCount, 0);
+    expect(failed.missingSymbols, ['NVDA', 'TSLA']);
+    expect(failed.warnings.join('\n'), contains('不是成功的零候選結果'));
+    expect(failed.warnings.join('\n'), contains('NVDA：HTTP 403'));
+    expect(failed.warnings.join('\n'), contains('TSLA：FormatException: OHLCV missing'));
     expect(progress.last.finished, true);
     expect(progress.last.failedCount, 2);
     expect(progress.last.completedCount, 2);
-    expect(progress.last.stage, contains('評估失敗'));
-    expect(preferences.getString('martin-live-scan-v2-directory-us-5.0'), isNull);
+    expect(progress.last.partialSnapshot!.stale, isTrue);
+    final journal = jsonDecode(preferences.getString(
+        'martin-mobile-us-rolling-v1-5.0')!) as Map;
+    expect(journal['attempted'], ['NVDA', 'TSLA']);
+    expect(journal['evaluated'], isEmpty);
+    expect(journal['page_stale'], isTrue);
     repository.close(); api.close(); universe.close();
   });
 
@@ -810,7 +877,11 @@ void main() {
     expect(snapshot.universeIsComplete, false);
     expect(snapshot.warnings.join('\n'), contains('僅使用內建'));
     expect(snapshot.warnings.join('\n'), contains('不是目前完整'));
-    expect(snapshot.missingSymbols, isNotEmpty);
+    expect(snapshot.coverageScannedCount, greaterThan(0));
+    expect(snapshot.coverageRemainingCount, greaterThan(0));
+    expect(snapshot.coverageScannedCount! + snapshot.coverageRemainingCount!,
+        snapshot.universeCount,
+        reason: 'Unvisited fallback members remain queued instead of being provider failures.');
     // An eventual membership reply cannot turn the already-published partial
     // snapshot into a fabricated, fully refreshed constituent list.
     stalled.completeError(StateError('Late membership failure after fallback.'));

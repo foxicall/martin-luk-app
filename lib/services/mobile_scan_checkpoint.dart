@@ -1,13 +1,17 @@
+import 'package:timezone/data/latest.dart' as timezone_data;
+import 'package:timezone/timezone.dart' as tz;
+
 import '../models/stock_candidate.dart';
 import '../models/stock_item.dart';
 import 'candidate_repository.dart';
 
-/// An immutable, versioned Taiwan scan journal. Quote timestamps remain on
+/// An immutable, versioned market scan journal. Quote timestamps remain on
 /// each candidate; [updatedAt] only records progress, never a refreshed quote.
 /// The attempted set MUST be a contiguous prefix of the sorted member list,
 /// so a deadline cannot accidentally skip unvisited members on the next page.
 class MobileScanCheckpoint {
   MobileScanCheckpoint({
+    this.market = StockMarket.tw,
     required List<String> symbols,
     required this.threshold,
     required this.day,
@@ -39,8 +43,8 @@ class MobileScanCheckpoint {
         !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(day) ||
         this.symbols.isEmpty || this.symbols.length > 20000 ||
         this.symbols.toSet().length != this.symbols.length ||
-        this.symbols.any((s) => !RegExp(r'^\d{4}\.(TW|TWO)$').hasMatch(s))) {
-      throw const FormatException('手機台股掃描檢查點的市場、名單或參數無效。');
+        this.symbols.any((s) => !isCanonicalSymbol(s, market))) {
+      throw const FormatException('手機掃描檢查點的市場、名單或參數無效。');
     }
     for (var index = 1; index < this.symbols.length; index++) {
       if (this.symbols[index - 1].compareTo(this.symbols[index]) >= 0) {
@@ -53,10 +57,10 @@ class MobileScanCheckpoint {
         !this.attempted.containsAll(prefix) ||
         !this.attempted.containsAll(this.evaluated) ||
         this.candidates.map((row) => row.symbol).toSet().length != this.candidates.length ||
-        this.candidates.any((row) => row.market != StockMarket.tw ||
+        this.candidates.any((row) => row.market != market ||
             !this.evaluated.contains(row.symbol) || row.adrPercent < threshold) ||
         this.members.map((row) => row.symbol).toSet().length != this.members.length ||
-        this.members.any((row) => row.market != StockMarket.tw ||
+        this.members.any((row) => row.market != market ||
             !knownSymbols.contains(row.symbol)) ||
         pageStart < 0 || pageStart > this.attempted.length ||
         pageSize < 0 || pageSize > 30 ||
@@ -69,6 +73,7 @@ class MobileScanCheckpoint {
     }
   }
 
+  final StockMarket market;
   final List<String> symbols;
   final double threshold;
   final String day;
@@ -89,30 +94,52 @@ class MobileScanCheckpoint {
   final DateTime? pageScanCompletedAt;
   final bool pageStale;
 
-  String get fingerprint => fingerprintFor(symbols);
+  String get fingerprint => fingerprintFor(symbols, market: market);
   int get remaining => symbols.length - attempted.length;
 
   /// Two small, portable integer hashes identify display/progress versions.
   /// Membership comparisons ALSO check the complete stored list exactly;
   /// hash equality alone is never used to accept different membership.
-  static String fingerprintFor(List<String> symbols) {
+  static String fingerprintFor(List<String> symbols,
+      {StockMarket market = StockMarket.tw}) {
     var first = 17, second = 29;
     for (final code in symbols.join('\n').codeUnits) {
       first = (first * 31 + code) % 2147483647;
       second = (second * 131 + code) % 2147483629;
     }
-    return 'tw-mobile-v1-${symbols.length}-${first.toRadixString(16)}-${second.toRadixString(16)}';
+    return '${market.name}-mobile-v1-${symbols.length}-${first.toRadixString(16)}-${second.toRadixString(16)}';
   }
 
-  /// Taiwan has no DST. Day resets use the exchange's UTC+08 calendar, rather
-  /// than the phone's timezone or the UTC date of an overseas deployment.
-  static String dayFor(DateTime now) => now.toUtc()
-      .add(const Duration(hours: 8)).toIso8601String().substring(0, 10);
+  static bool isCanonicalSymbol(String symbol, StockMarket market) =>
+      (market == StockMarket.tw
+          ? RegExp(r'^\d{4}\.(TW|TWO)$')
+          : RegExp(r'^[A-Z][A-Z0-9]{0,14}(?:-[A-Z])?$')).hasMatch(symbol);
+
+  static bool _usTimeZonesInitialized = false;
+
+  /// Use each exchange's calendar day rather than the device/UTC date.
+  /// The optional market preserves the original Taiwan helper signature.
+  /// New York uses the existing timezone database for daylight-saving changes.
+  static String dayFor(DateTime now, {StockMarket market = StockMarket.tw}) {
+    if (market == StockMarket.tw) {
+      return now.toUtc().add(const Duration(hours: 8))
+          .toIso8601String().substring(0, 10);
+    }
+    if (!_usTimeZonesInitialized) {
+      timezone_data.initializeTimeZones();
+      _usTimeZonesInitialized = true;
+    }
+    final local = tz.TZDateTime.from(now.toUtc(), tz.getLocation('America/New_York'));
+    return '${local.year.toString().padLeft(4, '0')}-'
+        '${local.month.toString().padLeft(2, '0')}-'
+        '${local.day.toString().padLeft(2, '0')}';
+  }
 
   bool matches(List<String> members, double adrThreshold, DateTime now) {
-    if (threshold != adrThreshold || day != dayFor(now) ||
+    if (threshold != adrThreshold ||
+        (market == StockMarket.tw && day != dayFor(now, market: market)) ||
         members.length != symbols.length ||
-        fingerprintFor(members) != fingerprint) return false;
+        fingerprintFor(members, market: market) != fingerprint) return false;
     for (var index = 0; index < symbols.length; index++) {
       if (members[index] != symbols[index]) return false;
     }
@@ -120,17 +147,24 @@ class MobileScanCheckpoint {
   }
 
   /// A provider returning only one exchange must not reset an active cursor.
-  /// Membership changes apply when the current round finishes; only the
-  /// exchange day or ADR configuration invalidates a still-running round.
-  bool canResume(double adrThreshold, DateTime now) =>
-      threshold == adrThreshold && day == dayFor(now) && remaining > 0;
+  /// Membership changes apply when the current round finishes. Taiwan's
+  /// exchange day or ADR configuration invalidates a running Taiwan round.
+  /// A large US round continues across New York midnight; otherwise a slow
+  /// provider could permanently prevent reaching the end of the member list.
+  /// The repository enforces the seven-day saved-progress retention limit.
+  bool canResume(double adrThreshold, DateTime now) {
+    if (threshold != adrThreshold || remaining <= 0) return false;
+    if (market == StockMarket.tw) return day == dayFor(now, market: market);
+    final age = now.toUtc().difference(updatedAt);
+    return !age.isNegative && age <= const Duration(days: 7);
+  }
 
   CandidateSnapshot toSnapshot({bool fromDisk = false}) => CandidateSnapshot(
     candidates: candidates,
     fetchedAt: updatedAt,
     scanCompletedAt: pageScanCompletedAt,
     attemptedAt: pageStale ? updatedAt : null,
-    source: 'Yahoo Finance 手機台股完整名單分批輪掃（公開行情可能延遲）',
+    source: 'Yahoo Finance 手機${market == StockMarket.tw ? '台股' : '美股'}完整名單分批輪掃（公開行情可能延遲）',
     universeCount: symbols.length,
     evaluatedCount: pageEvaluated,
     scanPoolSize: pageSize,
@@ -156,7 +190,7 @@ class MobileScanCheckpoint {
 
   MobileScanCheckpoint withCandidates(List<StockCandidate> values,
       DateTime at) => MobileScanCheckpoint(
-    symbols: symbols, threshold: threshold, day: day, round: round,
+    market: market, symbols: symbols, threshold: threshold, day: day, round: round,
     members: members, universeWarnings: universeWarnings,
     attempted: attempted, evaluated: evaluated, candidates: values,
     updatedAt: at, universeAsOf: universeAsOf,
@@ -168,7 +202,7 @@ class MobileScanCheckpoint {
   );
 
   Map<String, dynamic> toJson() => {
-    'schema': 1, 'market': 'tw', 'symbols': symbols, 'fingerprint': fingerprint,
+    'schema': 1, 'market': market.name, 'symbols': symbols, 'fingerprint': fingerprint,
     'threshold': threshold, 'day': day, 'round': round,
     'attempted': attempted.toList()..sort(),
     'evaluated': evaluated.toList()..sort(),
@@ -186,7 +220,7 @@ class MobileScanCheckpoint {
   };
 
   factory MobileScanCheckpoint.fromJson(Map<String, dynamic> json) {
-    if (json['schema'] != 1 || json['market'] != 'tw') {
+    if (json['schema'] != 1 || !['tw', 'us'].contains(json['market'])) {
       throw const FormatException('未知的手機輪掃檢查點版本。');
     }
     List<String> strings(String name) {
@@ -197,6 +231,7 @@ class MobileScanCheckpoint {
       return value.cast<String>();
     }
     final checkpoint = MobileScanCheckpoint(
+      market: json['market'] == 'us' ? StockMarket.us : StockMarket.tw,
       symbols: strings('symbols'), threshold: (json['threshold'] as num).toDouble(),
       day: json['day'] as String, round: json['round'] as int,
       attempted: strings('attempted').toSet(), evaluated: strings('evaluated').toSet(),
@@ -226,3 +261,4 @@ class MobileScanCheckpoint {
     return checkpoint;
   }
 }
+

@@ -1,7 +1,7 @@
 name: martin_luk_app
 description: 台股與美股連網行情、客戶端動能掃描與嚴格風控 Android App。
 publish_to: none
-version: 1.5.0+12
+version: 1.6.0+13
 environment:
   sdk: '>=3.7.0 <4.0.0'
 dependencies:

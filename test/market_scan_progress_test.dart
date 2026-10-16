@@ -14,12 +14,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 final _timestamp = DateTime.utc(2026, 10, 14, 15);
 
 CandidateSnapshot _snapshot(StockMarket market, {int poolSize = 30,
-    int evaluated = 10, int adrMatches = 0,
+    int evaluated = 10, int adrMatches = 0, bool rolling = false,
     String source = 'Yahoo Finance fixture'}) => CandidateSnapshot(
   candidates: [], fetchedAt: _timestamp, warnings: [], source: source,
   universeCount: market == StockMarket.tw ? 900 : 500, stale: false,
   evaluatedCount: evaluated, scanPoolSize: poolSize, adrMatchCount: adrMatches,
   universeIsComplete: true, universeAsOf: _timestamp, scanCompletedAt: _timestamp,
+  candidatesAreCumulative: rolling,
+  coverageTotalCount: rolling ? (market == StockMarket.tw ? 900 : 500) : null,
+  coverageScannedCount: rolling ? poolSize : null,
+  coverageEvaluatedCount: rolling ? evaluated : null,
+  coverageRemainingCount: rolling
+      ? (market == StockMarket.tw ? 900 : 500) - poolSize : null,
+  coverageRound: rolling ? 1 : null,
+  scanPageStart: rolling ? 0 : null,
+  scanPageSize: rolling ? poolSize : null,
+  universeFingerprint: rolling ? '${market.name}-explicit-page-fixture' : null,
 );
 
 class _Call {
@@ -65,7 +75,7 @@ class _Scans implements ProgressiveCandidateRepository {
     calls.add(call);
     call.progress(completed: 0, evaluated: 0, adr: 0, confirmed: 0);
     if (fail) return Future<CandidateSnapshot>.error(
-        const RepositoryException('所有核心股行情均無法取得'));
+        const RepositoryException('股票頁面行情均無法取得'));
     if (deferred) return call.completion.future;
     if (delay > Duration.zero) return Future<CandidateSnapshot>.delayed(
         delay, () => supplied ?? _snapshot(market));
@@ -270,7 +280,7 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 60));
   });
 
-  test('invalid core-pool statistics cannot overwrite a verified snapshot', () async {
+  test('invalid page statistics cannot overwrite a verified snapshot', () async {
     final scans = _Scans();
     final controller = _controller(scans);
     addTearDown(controller.dispose);
@@ -317,7 +327,7 @@ void main() {
     scans.calls.last.progress();
     await tester.pumpWidget(MaterialApp(home: DashboardScreen(controller: controller)));
     await tester.pump();
-    expect(find.text('本次核心池'), findsOneWidget);
+    expect(find.text('先前掃描池'), findsOneWidget);
     expect(find.text('已評估'), findsOneWidget);
     expect(find.text('—'), findsNothing);
     expect(find.textContaining('已掃描 5/30 檔'), findsOneWidget);
@@ -336,8 +346,9 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('successful empty core scan has a snapshot timestamp and no loading indicator', (tester) async {
-    final scans = _Scans();
+  testWidgets('successful empty page scan has a snapshot timestamp and no loading indicator', (tester) async {
+    final scans = _Scans()..supplied = _snapshot(StockMarket.tw,
+        evaluated: 30, rolling: true);
     final controller = _controller(scans);
     addTearDown(controller.dispose);
     await controller.initialize(initializeReminders: false);
@@ -345,7 +356,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.snapshot!.adrMatchCount, 0);
     expect(find.textContaining('資料更新時間：'), findsOneWidget);
-    expect(find.text('目前沒有符合條件的標的'), findsOneWidget);
+    expect(controller.snapshot!.coverageScannedCount, 30);
+    expect(controller.snapshot!.coverageRemainingCount, 870);
+    expect(find.text('本輪目前尚無符合條件的標的'), findsOneWidget);
+    expect(find.textContaining('仍有 870 檔尚未嘗試'), findsOneWidget);
     expect(find.text('尚未取得評估快照'), findsNothing);
     expect(find.byKey(const ValueKey('market-scan-progress')), findsNothing);
     expect(find.text('重試'), findsNothing);
@@ -361,7 +375,7 @@ void main() {
     final running = controller.refresh();
     final call = scans.calls.last;
     call.progress(completed: 10, evaluated: 0, adr: 0, confirmed: 0);
-    call.completion.completeError(const RepositoryException('核心股票池 HTTP 429'));
+    call.completion.completeError(const RepositoryException('股票頁面 HTTP 429'));
     await running;
     await tester.pumpWidget(MaterialApp(home: DashboardScreen(controller: controller)));
     await tester.pumpAndSettle();
@@ -370,7 +384,7 @@ void main() {
     expect(find.text('—'), findsNothing);
     expect(find.textContaining('已掃描 10/30 檔'), findsOneWidget);
     expect(find.textContaining('失敗 10'), findsOneWidget);
-    expect(find.textContaining('核心股票池 HTTP 429'), findsWidgets);
+    expect(find.textContaining('股票頁面 HTTP 429'), findsWidgets);
     expect(find.text('重試'), findsOneWidget);
     expect(find.textContaining('資料更新時間：'), findsNothing);
     expect(find.byKey(const ValueKey('market-scan-progress')), findsNothing);

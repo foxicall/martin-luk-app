@@ -1,8 +1,8 @@
 # Martin Luk 台美股動能策略 App
 
-最新補充：修正兩個生命週期測試的fixture欄位與合法恢復路徑，版本仍為1.5.0+12。正式策略、背景服務與門禁不變；覆蓋檔案及實際驗證狀態見 [BACKGROUND_LIFECYCLE_TEST_FIX.md](BACKGROUND_LIFECYCLE_TEST_FIX.md)。
+最新版本為 **1.6.0+13**：手機美股正式直連改為完整已取得名單分批輪掃，移除固定核心30檔選取。每頁最多30檔、每批最多5檔，從已保存的下一檔繼續；美股／台股進度獨立，未完成美股輪次可跨紐約日界續掃。畫面顯示本輪總數、累積已嘗試／成功／剩餘、本頁與下一檔，不把股票字典當成已評估範圍。操作及驗證限制見 [MOBILE_US_SCAN.md](MOBILE_US_SCAN.md)。
 
-最新版本為 **1.5.0+12**：新增 Android 前景資料同步服務。設定頁手動啟動並允許通知後，可切到其他 App 沿用同一輪掃流程，通知提供暫停／繼續／停止與實際進度；不會在開機或首次開啟時自行啟動。台股逐頁續掃，美股仍為既有核心池；未啟用服務時保留原本背景暫停行為。操作與系統限制見 [ANDROID_BACKGROUND_SCAN.md](ANDROID_BACKGROUND_SCAN.md)。
+既有 **1.5.0+12** Android 前景資料同步服務保留：設定頁手動啟動並允許通知後，可切到其他 App 沿用同一輪掃流程，通知提供暫停／繼續／停止與實際進度；不會在開機或首次開啟時自行啟動。現在兩市場皆可逐頁續掃；未啟用服務時保留背景暫停行為。操作與系統限制見 [ANDROID_BACKGROUND_SCAN.md](ANDROID_BACKGROUND_SCAN.md)。兩個生命週期測試修正亦保留，紀錄見 [BACKGROUND_LIFECYCLE_TEST_FIX.md](BACKGROUND_LIFECYCLE_TEST_FIX.md)。
 
 既有 1.4.4+11 追加修正保留：名單服務關閉時的例外：取消 HTTP 後統一回傳 `StateError`，保留原有測試、晚到回應阻擋及全部門禁。核心只需覆蓋 `lib/services/stock_universe_service.dart`；操作與實際 CI 紀錄見 [UNIVERSE_CLOSE_FIX.md](UNIVERSE_CLOSE_FIX.md)。
 
@@ -14,9 +14,9 @@
 
 既有 **1.4.1+8** 功能保留：推薦卡片與個股計算機列出假設買價／PDH、ORH 觸發價、初始硬停損與來源、停損幅度、1R、3R 賣原始股數 15%、5R 再賣 15%，剩餘 70% 依日收盤跌破 9 EMA 追蹤。離線 HTML 同步更新；缺少有效進場、停損或最新行情時顯示待確認，不產生可執行目標。見 [RECOMMENDATION_LEVELS.md](RECOMMENDATION_LEVELS.md)。
 
-既有 **1.4.0+7** 功能保留：手機直接連線可對取得的台股上市／上櫃完整名單逐頁輪掃，保存進度、跳過失敗並累積本輪觀察候選，無需部署 API。操作見 [MOBILE_TW_SCAN.md](MOBILE_TW_SCAN.md)。美股手機模式仍為最多 30 檔核心池，Python API 分頁方案保留。
+既有 **1.4.0+7** 台股輪掃保留：手機直接連線可對取得的台股上市／上櫃完整名單逐頁輪掃，保存進度、跳過失敗並累積本輪觀察候選，無需部署 API。操作見 [MOBILE_TW_SCAN.md](MOBILE_TW_SCAN.md)。
 
-本版將股票池擴充為**台灣上市＋上櫃普通股**，以及 **NYSE、Nasdaq、NYSE American 的可確認普通股**。Flutter 提供動能總覽、個股風控、庫存診斷與離線搜尋；台股可由手機直接分頁輪掃。Python API 保留有界背景逐頁掃描，供選擇中繼或美股完整名單輪掃時使用；使用此模式才需要填入實際部署的 HTTPS 根網址。
+本版股票池涵蓋**台灣上市＋上櫃普通股**，以及 **NYSE、Nasdaq、NYSE American 的可確認普通股**。Flutter 提供動能總覽、個股風控、庫存診斷與離線搜尋；兩市場皆可由手機直接分頁輪掃。Python API 保留有界背景逐頁掃描，供選用中繼模式；只有使用此模式才需要填入實際部署的 HTTPS 根網址。
 
 這份交付包含原始碼、Android 建置設定、GitHub Actions 與 Render 設定。尚未由本環境完成 Flutter／APK 建置或雲端部署，也沒有已建立的上線網址。更新步驟見 [ALL_STOCKS_UPDATE.md](ALL_STOCKS_UPDATE.md)，部署見 [CLOUD_API_GUIDE.md](CLOUD_API_GUIDE.md)，APK 見 [README_HOW_TO_BUILD.md](README_HOW_TO_BUILD.md)。
 
@@ -26,7 +26,7 @@
 |---|---|---|
 | Python 台股 | TWSE ISIN `strMode=2` 上市、`strMode=4` 上櫃，四位數代碼及 CFI `ES` 普通股 | 上市加 `.TW`，上櫃加 `.TWO`；排除存託憑證、特別股、ETF 等 |
 | Python 美股 | NasdaqTrader `nasdaqlisted.txt`、`otherlisted.txt`，限 Nasdaq／NYSE／NYSE American | 目錄沒有完整 CFI，採保守證券名稱規則；排除 ADR／ADS、特別股、ETF、基金、權證、單位與無法確認類型，不宣稱百分之百官方普通股分類 |
-| Flutter 直接連線 | 台股官方上市／上櫃發行公司 JSON，失敗後使用官方 CSV 備援；美股上述 NasdaqTrader 目錄 | 台股發行公司資料不是逐筆 CFI 認證；台股完整名單逐頁最多 30 檔並保存進度，美股仍為最多 30 檔核心池 |
+| Flutter 直接連線 | 台股官方上市／上櫃發行公司 JSON，失敗後使用官方 CSV 備援；美股上述 NasdaqTrader 目錄 | 兩市場皆依完整已取得名單逐頁最多30檔，保存進度；來源分類限制及缺漏警告保留，逐頁RS不是全市場同步排名 |
 | 離線搜尋 | `stocks_master.json` 及內嵌於 HTML 的同一元資料 | 是隨包快照，不是即時行情或當日成分保證；來源、數量及時間以 `stocks_master_sources.json` 為準 |
 
 「全市場」指已取得並通過目前來源分類的名單，不含其他美國交易所、OTC、台灣興櫃、ETF 或未能確認類型的證券。單一來源失敗、舊快取與保守排除會揭露警告，不能把來源取得成功當成所有證券分類已官方核證。

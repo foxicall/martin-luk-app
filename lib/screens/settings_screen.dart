@@ -347,7 +347,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 8),
         const Text(
           '手動啟動後以常駐通知維持更新，可切換其他 App 或鎖螢幕。'
-          '台股依保存進度分頁續掃；美股仍使用核心精選池，並非全市場掃描。'
+          '台股與美股都依目前可取得的普通股完整名單分頁續掃，保留進度；名單缺漏會另行提示。'
           '掃描跟隨總覽目前選取市場；切換行情來源或 ADR 門檻會先停止服務，需重新啟動。',
         ),
         if (active && progress != null && progress.market == market) ...[
@@ -487,9 +487,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           if (_dataProvider == 'direct' && !_useMockData) ...[
                             const SizedBox(height: 8),
                             const Text(
-                              '台股直連依上市／上櫃普通股完整名單分頁續掃，不需部署 Python API；'
+                              '台股直連依上市／上櫃普通股名單，美股依 NYSE／Nasdaq／NYSE American 普通股名單分頁續掃，不需部署 Python API；'
                               '前台每次只處理一頁，保留本輪累積候選與各股原行情時間。'
-                              '美股直連仍評估核心精選 30 檔；美股全股票池輪掃可選用 Python API。'
+                              '名單數不等於已評估數；來源不完整時保留覆蓋不足警告，RS 為原掃描頁內排名。'
                               '雲端部署方式見專案 CLOUD_API_GUIDE.md。',
                               key: ValueKey('settings-direct-scope'),
                             ),
@@ -523,7 +523,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             contentPadding: EdgeInsets.zero,
                             title: const Text('前台自動更新'),
                             subtitle: const Text(
-                              'App 前台每 60 秒更新目前市場：台股直連續掃下一頁，美股更新最新可用報價；'
+                              'App 前台每 60 秒更新目前市場：台股、美股直連均續掃下一頁；'
                               '持股診斷同步更新。'
                               '未啟動下方 Android 背景服務時，離開 App 會暫停；下拉可立即續掃或更新。'
                               '背景服務需另外手動啟動，不受此開關控制。',

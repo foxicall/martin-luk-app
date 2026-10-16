@@ -20,11 +20,12 @@ const _secondWarning = '原始名單沒有完整 CFI；不代表百分之百分�
 /// ordinary widget suite never depends on a provider or an open market.
 class _ScopeRepository implements CandidateRepository {
   _ScopeRepository({this.fullCoverage = false, this.stale = false,
-    this.mobileRolling = false});
+    this.mobileRolling = false, this.universeCount});
 
   final bool fullCoverage;
   final bool stale;
   final bool mobileRolling;
+  final int? universeCount;
   int calls = 0;
 
   @override
@@ -36,10 +37,10 @@ class _ScopeRepository implements CandidateRepository {
     calls++;
     final now = DateTime.now().toUtc();
     final isUs = market == StockMarket.us;
-    final isMobileRolling = !isUs && mobileRolling;
+    final isMobileRolling = mobileRolling;
     final hasCoverage = fullCoverage || isMobileRolling;
     final symbol = isUs ? 'NVDA' : '2330.TW';
-    final total = isUs ? 5118 : 1978;
+    final total = universeCount ?? (isUs ? 5118 : 1978);
     return CandidateSnapshot(
       candidates: [StockCandidate(
         id: '${market.name}:$symbol', symbol: symbol,
@@ -49,7 +50,9 @@ class _ScopeRepository implements CandidateRepository {
         isLargeLiquid: true, status: 'confirmed', dataTimestamp: now,
         signalTimestamp: now, triggerType: 'PDH', dayLow: 98,
       ), if (isMobileRolling) StockCandidate(
-        id: 'tw:6488.TWO', symbol: '6488.TWO', name: '環球晶', sector: '半導體',
+        id: isUs ? 'us:AMD' : 'tw:6488.TWO',
+        symbol: isUs ? 'AMD' : '6488.TWO',
+        name: isUs ? '超微' : '環球晶', sector: '半導體',
         market: market, adrPercent: 6, rsScore: 90, rsRank: 2,
         patterns: const ['均線收斂'], entryPrice: 110, stopPrice: null,
         isLargeLiquid: false, status: 'watchlist',
@@ -143,18 +146,22 @@ Future<AppController> _loadController(WidgetTester tester, {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('direct mode distinguishes dictionary from evaluated stocks and opens settings',
+  testWidgets('legacy US snapshot distinguishes dictionary from completed coverage and opens settings',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final controller = await _loadController(tester);
     final scope = find.byKey(const ValueKey('dashboard-scan-scope'));
-    expect(find.descendant(of: scope, matching: find.text('手機精選掃描')),
+    expect(find.descendant(of: scope, matching: find.text('手機美股分批輪掃')),
         findsOneWidget);
     expect(find.descendant(of: scope,
-        matching: find.textContaining('本次精選 30 檔 · 已評估 30 檔')), findsOneWidget);
+        matching: find.textContaining('尚未建立本輪掃描進度')), findsOneWidget);
+    expect(find.textContaining('目前保留先前快照（已評估 30 檔）'), findsOneWidget);
     expect(find.textContaining('股票字典不等於全部已評估'), findsOneWidget);
     expect(find.text('股票字典'), findsOneWidget);
+    expect(find.text('先前掃描池'), findsOneWidget);
+    expect(find.text('本輪名單'), findsNothing);
+    expect(find.textContaining('本輪名單已全部嘗試'), findsNothing);
     expect(find.text('5118'), findsOneWidget);
     expect(find.text('Python 全股票池輪掃（分頁）'), findsNothing);
     final button = find.byKey(const ValueKey('dashboard-api-settings'));
@@ -181,7 +188,7 @@ void main() {
     expect(controller.loading, isFalse);
     expect(controller.settings.dataProvider, 'direct');
     expect(controller.settings.apiBaseUrl, isEmpty);
-    expect(find.text('手機全台股分批輪掃'), findsOneWidget);
+    expect(find.text('手機台股分批輪掃'), findsOneWidget);
     expect(find.textContaining('本輪已嘗試 70/1978 檔，成功 68 檔'), findsOneWidget);
     expect(find.textContaining('尚未嘗試 1908 檔'), findsWidgets);
     expect(find.text('本頁掃描池'), findsOneWidget);

@@ -28,12 +28,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _finding = false;
   int _selectionVersion = 0;
 
-  bool get _isMobileTwScan => !controller.settings.useMockData &&
-      controller.settings.dataProvider == 'direct' &&
-      controller.market == StockMarket.tw;
+  bool get _isMobileScan => !controller.settings.useMockData &&
+      controller.settings.dataProvider == 'direct';
 
-  bool _hasTwCoverage(CandidateSnapshot? snapshot) =>
+  String get _marketShortLabel =>
+      controller.market == StockMarket.tw ? '台股' : '美股';
+
+  String get _marketDirectoryLabel => controller.market == StockMarket.tw
+      ? '台股上市／上櫃普通股名單'
+      : '美股 NYSE／Nasdaq／NYSE American 普通股名單';
+
+  bool _hasRoundCoverage(CandidateSnapshot? snapshot) =>
       snapshot != null && !snapshot.isFallback &&
+        snapshot.candidatesAreCumulative &&
         snapshot.universeCount > 0 &&
         snapshot.coverageTotalCount == snapshot.universeCount &&
         snapshot.coverageScannedCount != null &&
@@ -44,23 +51,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// can briefly report only one exchange; it must not relabel a saved full
   /// round as an 894-stock universe while its coverage still refers to 1979.
   CandidateSnapshot? get _mobileCoverageSnapshot {
-    if (!_isMobileTwScan) return null;
+    if (!_isMobileScan) return null;
     final progress = controller.marketScanProgress;
-    final partial = controller.loading && progress?.market == StockMarket.tw
-        ? progress?.partialSnapshot : null;
-    if (partial != null && progress != null && _hasTwCoverage(partial) &&
+    final partial = controller.loading && progress?.market == controller.market
+        ? controller.verifiedMarketPartialSnapshot : null;
+    if (partial != null && progress != null && _hasRoundCoverage(partial) &&
         partial.universeCount == progress.universeCount &&
         partial.evaluatedCount == progress.evaluatedCount &&
         partial.scanPoolSize == progress.poolSize) {
       return partial;
     }
     final saved = controller.snapshot;
-    return _hasTwCoverage(saved) ? saved : null;
+    return _hasRoundCoverage(saved) ? saved : null;
   }
 
-  bool get _hasMobileTwCoverage => _mobileCoverageSnapshot != null;
+  bool get _hasMobileCoverage => _mobileCoverageSnapshot != null;
 
-  bool get _hasCumulativeTwCandidates => _isMobileTwScan &&
+  bool get _hasCumulativeCandidates => _isMobileScan &&
       (controller.snapshot?.candidatesAreCumulative ?? false);
 
   bool _requiresRefresh(StockCandidate stock) {
@@ -159,14 +166,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ],
                               ..._buildWarnings(context),
                               const SizedBox(height: 24),
-                              Text(_hasCumulativeTwCandidates
+                              Text(_hasCumulativeCandidates
                                       ? '本輪累積推薦與觀察名單' : '推薦與觀察名單',
                                   style: Theme.of(context)
                                       .textTheme
                                       .titleLarge
                                       ?.copyWith(fontWeight: FontWeight.w700)),
                               const SizedBox(height: 6),
-                              Text(_hasCumulativeTwCandidates
+                              Text(_hasCumulativeCandidates
                                       ? '各卡保留原行情時間與原掃描頁內 RS，並非全市場排名。'
                                           '確認突破與停損後才提供部位建議。'
                                       : '確認突破與停損後才提供部位建議；點選個股可調整本金。',
@@ -307,15 +314,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final currentProgress = (controller.loading || snapshot == null) &&
         progress?.market == controller.market ? progress : null;
     final roundSnapshot = _mobileCoverageSnapshot ?? snapshot;
-    final pageProgress = _hasMobileTwCoverage && currentProgress?.poolSize == 0
+    final pageProgress = _hasMobileCoverage && currentProgress?.poolSize == 0
         ? null : currentProgress;
-    final coverageTotal = backend?.coverageTotalCount ?? roundSnapshot?.coverageTotalCount;
-    final coverageAttempted = backend?.coverageScannedCount ?? roundSnapshot?.coverageScannedCount;
-    final coverageEvaluated = backend?.coverageEvaluatedCount ?? roundSnapshot?.coverageEvaluatedCount;
-    final coverageRemaining = backend?.coverageRemainingCount ?? roundSnapshot?.coverageRemainingCount;
-    final coverageRound = backend?.coverageRound ?? roundSnapshot?.coverageRound;
-    final pageStart = backend?.scanPageStart ?? roundSnapshot?.scanPageStart;
-    final pageSize = backend?.scanPageSize ?? roundSnapshot?.scanPageSize;
+    // Old direct-mode caches can contain page counters without a cumulative
+    // round. Only validated rolling snapshots can present those as coverage;
+    // the server's separate coverage contract does not require this flag.
+    final showCoverage = !_isMobileScan || _hasMobileCoverage;
+    final coverageTotal = showCoverage
+        ? backend?.coverageTotalCount ?? roundSnapshot?.coverageTotalCount : null;
+    final coverageAttempted = showCoverage
+        ? backend?.coverageScannedCount ?? roundSnapshot?.coverageScannedCount : null;
+    final coverageEvaluated = showCoverage
+        ? backend?.coverageEvaluatedCount ?? roundSnapshot?.coverageEvaluatedCount : null;
+    final coverageRemaining = showCoverage
+        ? backend?.coverageRemainingCount ?? roundSnapshot?.coverageRemainingCount : null;
+    final coverageRound = showCoverage
+        ? backend?.coverageRound ?? roundSnapshot?.coverageRound : null;
+    final pageStart = showCoverage
+        ? backend?.scanPageStart ?? roundSnapshot?.scanPageStart : null;
+    final pageSize = showCoverage
+        ? backend?.scanPageSize ?? roundSnapshot?.scanPageSize : null;
     final threshold = controller.market == StockMarket.tw
         ? controller.settings.twAdrThreshold
         : controller.settings.usAdrThreshold;
@@ -376,20 +394,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             spacing: 28,
             runSpacing: 16,
             children: [
-              _summary(context, _hasMobileTwCoverage ? '本輪名單' : '股票字典',
-                  '${_hasMobileTwCoverage ? coverageTotal : backend?.universeCount ?? currentProgress?.universeCount ?? snapshot?.universeCount ?? '—'}'),
+              _summary(context, _hasMobileCoverage ? '本輪名單' : '股票字典',
+                  '${_hasMobileCoverage ? coverageTotal : backend?.universeCount ?? currentProgress?.universeCount ?? snapshot?.universeCount ?? '—'}'),
               if ((backend?.totalCount ?? pageProgress?.poolSize ?? roundSnapshot?.scanPoolSize) != null)
                 _summary(context, controller.settings.dataProvider == 'direct' &&
-                        !_hasMobileTwCoverage ? '本次核心池' : '本頁掃描池',
+                        !_hasMobileCoverage ? '先前掃描池' : '本頁掃描池',
                     '${backend?.totalCount ?? pageProgress?.poolSize ?? roundSnapshot?.scanPoolSize}'),
               if ((backend?.evaluatedCount ?? pageProgress?.evaluatedCount ?? roundSnapshot?.evaluatedCount) != null)
-                _summary(context, _hasMobileTwCoverage ? '本頁已評估' : '已評估',
+                _summary(context, _hasMobileCoverage ? '本頁已評估' : '已評估',
                     '${backend?.evaluatedCount ?? pageProgress?.evaluatedCount ?? roundSnapshot?.evaluatedCount}'),
-              _summary(context, _hasMobileTwCoverage ? '本頁符合 ADR' : '目前符合 ADR',
+              _summary(context, _hasMobileCoverage ? '本頁符合 ADR' : '目前符合 ADR',
                   '${backend?.adrMatchCount ?? pageProgress?.adrMatchCount ?? roundSnapshot?.adrMatchCount ?? controller.filteredCount}'),
               _summary(context, '已確認型態',
                   '${currentProgress?.confirmedCount ?? confirmed}'),
-              if (_hasCumulativeTwCandidates)
+              if (_hasCumulativeCandidates)
                 _summary(context, '本輪累積候選', '${snapshot!.candidates.length}'),
               _summary(context, 'ADR 門檻', '${threshold.toStringAsFixed(1)}%'),
             ],
@@ -397,8 +415,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 18),
           if (coverageTotal != null && coverageAttempted != null &&
               coverageEvaluated != null && coverageRemaining != null) ...[
-            Text(_isMobileTwScan
-                ? '第 ${coverageRound ?? 1} 輪台股分頁輪掃 · 本輪名單 $coverageTotal 檔'
+            Text(_isMobileScan
+                ? '第 ${coverageRound ?? 1} 輪${_marketShortLabel}分頁輪掃 · 本輪名單 $coverageTotal 檔'
                 : '第 ${coverageRound ?? 1} 輪分頁掃描 · 全池 $coverageTotal 檔',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colors.onPrimaryContainer,
@@ -410,7 +428,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 )),
             if (pageStart != null && pageSize != null && pageSize > 0)
               Text('本頁第 ${pageStart + 1}–${(pageStart + pageSize).clamp(0, coverageTotal)} 檔；'
-                  '${_hasCumulativeTwCandidates
+                  '${_hasCumulativeCandidates
                       ? '清單累積本輪候選，各卡 RS 為原掃描頁內排名，並非全市場排名。'
                       : '推薦與 RS 排名以本頁成功取得的行情計算。'}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -432,7 +450,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     )),
             if (snapshot.scanCompletedAt != null &&
                 snapshot.scanCompletedAt != snapshot.fetchedAt)
-              Text('${_hasMobileTwCoverage ? '本頁評估時間' : '市場評估時間'}：'
+              Text('${_hasMobileCoverage ? '本頁評估時間' : '市場評估時間'}：'
                   '${_date(snapshot.scanCompletedAt!)}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.onPrimaryContainer,
@@ -481,14 +499,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const SizedBox(height: 4),
             ],
             Text(controller.backgroundScanActive && !controller.backgroundScanPaused
-                ? _isMobileTwScan
-                    ? controller.mobileScanPaused
-                        ? '台股輪掃已手動暫停 · 下拉可繼續'
-                        : '服務約每 60 秒續掃下一頁；系統省電可能延後'
-                    : '服務約每 60 秒更新美股核心池報價；系統省電可能延後'
-                : _isMobileTwScan
                 ? controller.mobileScanPaused
-                    ? '台股輪掃已暫停 · 下拉可繼續'
+                    ? '${_marketShortLabel}輪掃已手動暫停 · 下拉可繼續'
+                    : '服務約每 60 秒續掃下一頁；系統省電可能延後'
+                : _isMobileScan
+                ? controller.mobileScanPaused
+                    ? '${_marketShortLabel}輪掃已暫停 · 下拉可繼續'
                     : controller.autoRefreshActive
                         ? '前台每 60 秒續掃下一頁 · 下拉可立即續掃'
                         : '自動輪掃暫停 · 下拉可處理下一頁'
@@ -516,9 +532,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             progress?.market == controller.market
         ? progress
         : null;
-    final universe = _hasMobileTwCoverage ? roundSnapshot!.coverageTotalCount
+    final universe = _hasMobileCoverage ? roundSnapshot!.coverageTotalCount
         : backend?.universeCount ?? currentProgress?.universeCount ?? snapshot?.universeCount;
-    final pageProgress = _hasMobileTwCoverage && currentProgress?.poolSize == 0
+    final pageProgress = _hasMobileCoverage && currentProgress?.poolSize == 0
         ? null : currentProgress;
     final pool = backend?.totalCount ?? pageProgress?.poolSize ??
         roundSnapshot?.scanPoolSize;
@@ -529,7 +545,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         roundSnapshot?.coverageEvaluatedCount;
     final coverageRemaining = backend?.coverageRemainingCount ??
         roundSnapshot?.coverageRemainingCount;
-    final symbolRange = _hasMobileTwCoverage && roundSnapshot != null
+    final symbolRange = _hasMobileCoverage && roundSnapshot != null
         ? _mobileSymbolRange(roundSnapshot) : null;
     final isMock = controller.settings.useMockData;
     final isDirect = controller.settings.dataProvider == 'direct';
@@ -539,22 +555,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final title = isMock
         ? '離線示範（非真實掃描）'
         : isDirect
-            ? _isMobileTwScan ? '手機全台股分批輪掃' : '手機精選掃描'
+            ? '手機${_marketShortLabel}分批輪掃'
             : hasFullScope
                 ? 'Python 全股票池輪掃（分頁）'
                 : 'Python 分批掃描';
     final detail = isMock
         ? '示範卡片與真實市場評估分開；未執行全市場掃描。'
         : isDirect
-            ? _isMobileTwScan
-                ? _hasMobileTwCoverage
+            ? _hasMobileCoverage
                     ? '本輪已嘗試 ${roundSnapshot!.coverageScannedCount}/$universe 檔，'
                         '成功 $coverageEvaluated 檔，尚未嘗試 $coverageRemaining 檔。'
                         '本頁處理 ${pool ?? '待取得'} 檔，逐頁保留本輪候選與原行情時間。'
-                    : '正在準備台股上市／上櫃普通股名單；取得名單後依序分頁，'
-                        '不會同時請求全市場，也不表示全部已完成評估。'
-                : '本次精選 ${pool ?? '待取得'} 檔 · 已評估 ${evaluated ?? '待取得'} 檔。'
-                    '股票字典不等於全部已評估，RS 僅比較已取得行情的精選股。'
+                    : snapshot != null && !snapshot.isFallback
+                        ? '尚未建立本輪掃描進度；目前保留先前快照（已評估 ${evaluated ?? '待取得'} 檔）。'
+                            '股票字典不等於全部已評估；下拉可依目前名單初始化分頁輪掃。'
+                        : '正在準備${_marketDirectoryLabel}；取得名單後依序分頁，'
+                            '不會同時請求全市場，也不表示全部已完成評估。'
             : hasFullScope
                 ? '本輪成功評估 $coverageEvaluated/$coverage 檔；'
                     '尚未嘗試 $coverageRemaining 檔。覆蓋範圍以可確認的普通股名單為限，'
@@ -576,8 +592,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 4),
           Text(detail, style: Theme.of(context).textTheme.bodySmall),
           if (!isMock) ...[
-            if (_isMobileTwScan) ...[
-              if (_hasMobileTwCoverage && roundSnapshot != null) ...[
+            if (_isMobileScan) ...[
+              if (_hasMobileCoverage && roundSnapshot != null) ...[
                 const SizedBox(height: 6),
                 Text(_mobilePageRange(roundSnapshot),
                     key: const ValueKey('dashboard-mobile-page-range'),
@@ -607,12 +623,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 icon: Icon(controller.mobileScanPaused
                     ? Icons.play_arrow_rounded : Icons.pause_rounded, size: 18),
                 label: Text(controller.mobileScanPaused
-                    ? '繼續台股輪掃' : '暫停台股輪掃'),
+                    ? '繼續${_marketShortLabel}輪掃' : '暫停${_marketShortLabel}輪掃'),
               ),
-            ] else if (isDirect) ...[
-              const SizedBox(height: 4),
-              Text('全市場需先部署 Python API，再填入 HTTPS 網址。',
-                  style: Theme.of(context).textTheme.bodySmall),
             ],
             TextButton.icon(
               key: const ValueKey('dashboard-api-settings'),
@@ -620,8 +632,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 builder: (_) => SettingsScreen(controller: controller),
               )),
               icon: const Icon(Icons.cloud_outlined, size: 18),
-              label: Text(_isMobileTwScan ? '選用雲端 API'
-                  : isDirect ? '設定全市場 API' : '查看 API 設定'),
+              label: Text(_isMobileScan ? '選用雲端 API' : '查看 API 設定'),
             ),
           ],
         ],
@@ -777,7 +788,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (_isMobileTwScan)
+          if (_isMobileScan)
             const Padding(
               padding: EdgeInsets.only(top: 12),
               child: Text('名單來源提示保留本輪建立時的狀態；續掃不會重設進度。個股行情時間請看卡片。',
@@ -892,7 +903,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final snapshot = controller.snapshot;
     // A completed mobile page is not a failed whole-market scan. Its rolling
     // counters explicitly retain the rest of the directory for later pages.
-    if (_hasMobileTwCoverage) return false;
+    if (_hasMobileCoverage) return false;
     return !controller.settings.useMockData &&
         controller.settings.dataProvider == 'direct' &&
         snapshot != null && !snapshot.isFallback &&
@@ -912,14 +923,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   : controller.backendScanStatus?.isRunning == true
                       ? '已停止查詢背景進度'
                   : controller.loading ? '正在掃描候選股'
-                  : _isMobileTwScan && controller.mobileScanPaused
-                      ? '台股輪掃已暫停'
+                  : _isMobileScan && controller.mobileScanPaused
+                      ? '${_marketShortLabel}輪掃已暫停'
                   : controller.snapshot == null || controller.snapshot!.isFallback
                       ? '市場評估未完成，請重試'
-                      : _hasMobileTwCoverage
+                      : _hasMobileCoverage
                           ? (controller.snapshot!.coverageRemainingCount ?? 0) > 0
                               ? '本輪目前尚無符合條件的標的'
                               : '本輪已取得資料尚無符合標的'
+                      : _isMobileScan ? '本輪掃描尚未初始化'
                       : _hasIncompleteScan ? '市場評估僅部分完成'
                       : controller.snapshot!.stale
                           ? '暫無可用推薦；目前顯示上次資料'
@@ -932,19 +944,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ? '下拉更新可繼續取得同一背景工作的進度與快照。'
                   : controller.loading
                   ? '單次請求最多等待 10 秒；可點選右上方「停止掃描」。'
-                  : _isMobileTwScan && controller.mobileScanPaused
-                      ? '已保留本輪進度；點選「繼續台股輪掃」或下拉可繼續。'
+                  : _isMobileScan && controller.mobileScanPaused
+                      ? '已保留本輪進度；點選「繼續${_marketShortLabel}輪掃」或下拉可繼續。'
                   : controller.snapshot == null || controller.snapshot!.isFallback || controller.snapshot!.stale
                       ? '查看上方錯誤提示並下拉重試；未取得有效行情時不產生推薦。'
-                      : _hasMobileTwCoverage
+                      : _hasMobileCoverage
                           ? (controller.snapshot!.coverageRemainingCount ?? 0) > 0
                               ? '仍有 ${controller.snapshot!.coverageRemainingCount} 檔尚未嘗試；'
-                                  '本頁沒有新候選不代表整個台股市場都沒有買點。'
+                                  '本頁沒有新候選不代表整個${_marketShortLabel}市場都沒有買點。'
                               : '本輪已嘗試全部名單；僅對成功取得行情的股票判斷，'
                                   '失敗標的並非沒有買點。下拉可開始下一輪。'
                       : _hasIncompleteScan
-                          ? '已處理部分股票，尚未完成全部核心池；請下拉重試。'
-                          : '本次評估已完成；可在設定調整 ADR 門檻，或下拉更新。',
+                          ? '已處理部分股票，尚未完成本頁；請下拉重試。'
+                          : _isMobileScan
+                              ? '目前快照尚無本輪進度；下拉可初始化完整名單分批輪掃。'
+                              : '本次評估已完成；可在設定調整 ADR 門檻，或下拉更新。',
                   textAlign: TextAlign.center),
             ],
           ),

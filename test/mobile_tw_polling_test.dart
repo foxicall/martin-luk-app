@@ -291,14 +291,16 @@ void main() {
     });
   }
 
-  test('US and incomplete Taiwan coverage cannot enable cumulative validation', () async {
+  test('complete US phone coverage is accepted but incomplete Taiwan coverage is rejected', () async {
     _seed(autoRefresh: false);
     final repository = _Repository()..reply = (_) async => _page();
     final controller = _controller(repository);
     try {
       await controller.initialize(initializeReminders: false);
       await controller.setMarket(StockMarket.us);
-      expect(controller.error, contains('累積候選僅允許'));
+      expect(controller.error, isNull);
+      expect(controller.snapshot!.candidatesAreCumulative, isTrue);
+      expect(controller.snapshot!.coverageScannedCount, 30);
       repository.reply = (_) async => _page(total: 299, universe: 300);
       await controller.setMarket(StockMarket.tw);
       expect(controller.error, contains('累積候選僅允許'));
@@ -336,7 +338,7 @@ void main() {
       await tester.pump();
       expect(repository.calls.last.market, StockMarket.us);
       expect(repository.calls.last.quotesOnly, isTrue,
-          reason: 'Taiwan rolling progress must not enlarge the US polling pool.');
+          reason: 'Legacy non-cumulative US responses keep their bounded hot-quote scope.');
     } finally {
       controller.dispose();
     }
