@@ -1,15 +1,30 @@
-2026-10-16 / App 1.4.0+7 / 逐檔進度測試修正
-適用上一份 martin_luk_mobile_tw_20261016.zip 或該更新包已完整套用的專案。
-每個檔案都是完整內容，依原路徑覆蓋 GitHub 分支 fix/refresh-live-gate-20261014。
-功能測試檔只修改 test/live_repositories_test.dart 的一項測試，其餘測試保留。
-正式 App、台股輪掃、行情 API、策略及 CI 工作流均未改動，版本保持 1.4.0+7。
-失敗原因是舊測試要求進度事件只能 [5,10,12]，新服務會逐檔回報。
-修正保留精確終態斷言，增加進度不倒退、計數一致及 observer 確實觸發檢查。
-本環境無 Flutter SDK，尚無修正後 Dart 測試或 APK 成功證據；請提交後由 Actions 驗證。
-詳細原因與操作見 BATCH_PROGRESS_TEST_FIX.md。
+2026-10-16 / App 1.4.2+9 / 台股名單縮減與第一頁重掃修正
+本包每個檔案都是完整內容，適用已套用 1.4.1+8 推薦價位版本的專案。
+依原路徑覆蓋 GitHub 分支 fix/refresh-live-gate-20261014，不要只上傳 ZIP。
+版本不確定時使用完整專案 martin_luk_tw_scan_stable_20261016.zip。
+修正交易所部分失敗使名單1979/894切換、檢查點重設而反覆掃同30檔的路徑。
+上市/上櫃分別保存原日期名單，本輪固定代碼和公司資料，下拉與重啟續掃。
+畫面顯示本輪名單、實際本頁範圍、下一頁起點/代碼，不混用短暫來源數與舊覆蓋數。
+新增8項交易所快取測試、1項1979名單跨模組測試、輪掃共18項及新的UI穩定計數案例。
+未修改金融風控、行情HTTP、持股、推薦目標價或真實行情門禁；允許零推薦。
+本環境無Flutter SDK，尚無新版Dart測試或APK成功證據；由新提交Actions實際確認。
+操作、舊部分輪次遷移與資料來源限制見 TW_SCAN_STABILITY_FIX.md。
 
-BATCH_PROGRESS_TEST_FIX.md
+.github/workflows/build_apk.yml
 BUILD_STATUS.md
 FILE_MANIFEST.json
+GITHUB_MANUAL_UPDATE.md
+MOBILE_TW_SCAN.md
+README.md
+TW_SCAN_STABILITY_FIX.md
 UPDATE_FILES.txt
-test/live_repositories_test.dart
+lib/screens/dashboard_screen.dart
+lib/services/live_candidate_repository.dart
+lib/services/mobile_scan_checkpoint.dart
+lib/services/stock_universe_service.dart
+pubspec.yaml
+scripts/verify_deliverable.py
+test/dashboard_scope_test.dart
+test/mobile_tw_rolling_repository_test.dart
+test/tw_universe_resume_integration_test.dart
+test/tw_universe_stability_test.dart

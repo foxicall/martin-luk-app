@@ -387,6 +387,14 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
           maximum: const Duration(milliseconds: 500));
       if (_closed || !run.active) throw TimeoutException('台股輪掃已取消或逾時。');
       previous ??= checkpoint?.toSnapshot(fromDisk: true);
+      // Restore actual names/suffixes too. A restart must not depend on the
+      // next directory response containing both exchanges to resume its round.
+      if (checkpoint != null) {
+        _members[market] = {
+          ...?_members[market],
+          for (final stock in checkpoint.members) stock.symbol: stock,
+        };
+      }
       final thresholdChanged = _activeTwThreshold != null &&
           _activeTwThreshold != threshold;
       final today = MobileScanCheckpoint.dayFor(_now());
@@ -411,8 +419,25 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
         attemptedCount: 0, completedCount: 0, evaluatedCount: 0,
         adrMatchCount: 0, confirmedCount: 0, failedCount: 0,
         finished: false, stage: '正在取得台股完整名單與大盤'));
+      // Once a round has real metadata for every symbol, membership HTTP is
+      // unnecessary between pages (even on a manual force-price refresh).
+      // Keep its exact identity/date until the round boundary, rather than
+      // allowing an intermittently missing exchange to reset the scan cursor.
+      final Future<UniverseSnapshot> directory;
+      if (checkpoint != null && !thresholdChanged &&
+          checkpoint.canResume(threshold, _now()) &&
+          checkpoint.members.length == checkpoint.symbols.length) {
+        final pinned = checkpoint;
+        directory = Future<UniverseSnapshot>.value(UniverseSnapshot(
+          stocks: pinned.members, asOf: pinned.universeAsOf,
+          source: '本輪已保存的台股上市／上櫃股票名單',
+          isComplete: pinned.universeIsComplete,
+          warnings: pinned.universeWarnings));
+      } else {
+        directory = _loadUniverse(market, force);
+      }
       final prerequisites = await run.wait(Future.wait<Object>([
-        _loadUniverse(market, force), _loadBenchmark(market, force),
+        directory, _loadBenchmark(market, force),
       ], eagerError: true));
       if (_closed || !run.active) throw TimeoutException('台股名單或大盤取得逾時。');
       final universe = prerequisites[0] as UniverseSnapshot;
@@ -420,32 +445,46 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
       if (benchmark.isStale) {
         throw const RepositoryException('大盤行情為過期快取，無法建立新的 RS 排名。');
       }
-      final bySymbol = <String, StockItem>{
+      final currentMembers = <String, StockItem>{
         for (final stock in universe.stocks)
           if (stock.market == market &&
               RegExp(r'^\d{4}\.(TW|TWO)$').hasMatch(stock.symbol))
             stock.symbol: stock,
       };
-      final symbols = bySymbol.keys.toList()..sort();
-      if (symbols.isEmpty) {
+      final currentSymbols = currentMembers.keys.toList()..sort();
+      if (currentSymbols.isEmpty) {
         throw const RepositoryException('台股來源未提供可掃描的上市／上櫃普通股。');
       }
-      _members[market] = bySymbol;
       final oldRound = checkpoint?.round ?? 0;
       final reset = checkpoint == null || thresholdChanged ||
-          !checkpoint.matches(symbols, threshold, _now()) ||
-          checkpoint.remaining == 0;
+          !checkpoint.canResume(threshold, _now());
       if (reset) {
-        checkpoint = MobileScanCheckpoint(symbols: symbols,
+        checkpoint = MobileScanCheckpoint(symbols: currentSymbols,
+          members: currentSymbols.map((symbol) => currentMembers[symbol]!).toList(),
+          universeWarnings: universe.warnings,
           threshold: threshold, day: today, round: oldRound + 1,
           attempted: const <String>{}, evaluated: const <String>{}, candidates: const [],
           updatedAt: _now().toUtc(), universeAsOf: universe.asOf,
           universeIsComplete: universe.isComplete, warnings: universe.warnings);
       }
       final initial = checkpoint!;
+      // Pin the round identity until its final member has been attempted.
+      // Temporary TWSE/TPEx failures (e.g. 1,979 -> 894 -> 1,979) and name-list
+      // reordering must never replay page one. New listings join the next round.
+      final symbols = initial.symbols;
+      final bySymbol = <String, StockItem>{
+        ...?_members[market],
+        for (final stock in initial.members) stock.symbol: stock,
+        ...currentMembers,
+      };
+      final roundMembers = <StockItem>[
+        for (final symbol in symbols)
+          if (bySymbol[symbol] != null) bySymbol[symbol]!,
+      ];
+      _members[market] = bySymbol;
+      final membershipChanged = !initial.matches(currentSymbols, threshold, _now());
       final start = initial.attempted.length;
-      final pool = symbols.skip(start).take(twPageSize)
-          .map((symbol) => bySymbol[symbol]!).toList();
+      final pool = symbols.skip(start).take(twPageSize).toList();
       final attempted = <String>{};
       final evaluations = <String, LiveEvaluation>{};
       final failures = <String, String>{};
@@ -474,9 +513,12 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
             evaluations.length == pool.length && intradayPending.isEmpty;
         final now = _now().toUtc();
         return MobileScanCheckpoint(symbols: symbols, threshold: threshold,
+          members: roundMembers,
+          universeWarnings: initial.universeWarnings,
           day: today, round: initial.round, attempted: allAttempted,
           evaluated: allEvaluated, candidates: accumulated, updatedAt: now,
-          universeAsOf: universe.asOf, universeIsComplete: universe.isComplete,
+          universeAsOf: initial.universeAsOf,
+          universeIsComplete: initial.universeIsComplete,
           roundCompletedAt: finalPage && allAttempted.length == symbols.length
               ? now : null,
           pageStart: start, pageSize: pool.length,
@@ -485,11 +527,17 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
           pageStale: evaluations.isEmpty,
           warnings: [
             ...universe.warnings,
+            if (membershipChanged)
+              '本輪固定沿用 ${symbols.length} 檔股票名單；最新來源取得 '
+                '${currentSymbols.length} 檔，差異於下一輪套用，避免重掃第一頁。',
             '手機台股完整名單分批輪掃：第 ${initial.round} 輪已嘗試 '
               '${allAttempted.length}/${symbols.length} 檔，成功評估 '
               '${allEvaluated.length} 檔，剩餘 ${symbols.length - allAttempted.length} 檔。',
             '本頁股票 ${start + 1}–${start + pool.length}，已嘗試 ${attempted.length} 檔、'
               '成功 ${evaluations.length} 檔；每批最多 $batchSize 檔，失敗跳過後繼續。',
+            if (attempted.isNotEmpty)
+              '本頁已嘗試代碼：${pool.first}–${symbols[start + attempted.length - 1]}；'
+                '下一檔：${allAttempted.length < symbols.length ? symbols[allAttempted.length] : '本輪已全部嘗試'}。',
             '候選跨頁累積並保留各卡原始行情時間；RS 為原掃描頁內排名，非全市場同步排名。',
             if (evaluations.isEmpty)
               '本頁尚無成功的真實日 K／RS 評估；此為失敗或未完成狀態，不是成功的零候選結果。',
@@ -520,7 +568,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
           completedCount: evaluations.length + failures.length,
           evaluatedCount: evaluations.length, adrMatchCount: matches,
           confirmedCount: confirmed, failedCount: failures.length,
-          finished: finished, stage: finished ? '台股本頁輪掃完成' : '台股完整名單分批輪掃',
+          finished: finished,
+          stage: '台股第 ${initial.round} 輪・第 ${start + 1}–${start + pool.length} 檔'
+              '${finished ? '完成' : '分批輪掃'}',
           partialSnapshot: partial));
       }
 
@@ -540,9 +590,18 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
         report();
       }
 
-      Future<void> evaluateStock(StockItem stock) async {
+      Future<void> evaluateStock(String symbol) async {
         if (_closed || !run.active) return;
-        attempted.add(stock.symbol);
+        attempted.add(symbol);
+        final stock = bySymbol[symbol];
+        if (stock == null) {
+          // Older journals did not store company metadata. Preserve their
+          // attempted prefix and disclose unavailable members; never invent a
+          // security name or silently restart the first thirty stocks.
+          failures[symbol] = '舊版進度缺少此檔股票元資料且最新名單未提供，已跳過。';
+          report();
+          return;
+        }
         try {
           final daily = await run.wait(_api.fetchDaily(stock.symbol, market,
               forceRefresh: force));

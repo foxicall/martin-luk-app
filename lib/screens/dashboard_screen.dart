@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../app_controller.dart';
 import '../models/stock_candidate.dart';
 import '../models/stock_item.dart';
+import '../services/candidate_repository.dart';
 import '../services/strategy_engine.dart';
 import '../widgets/stock_search_field.dart';
 import 'calculator_screen.dart';
@@ -31,15 +32,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
       controller.settings.dataProvider == 'direct' &&
       controller.market == StockMarket.tw;
 
-  bool get _hasMobileTwCoverage {
-    final snapshot = controller.snapshot;
-    return _isMobileTwScan && snapshot != null &&
+  bool _hasTwCoverage(CandidateSnapshot? snapshot) =>
+      snapshot != null && !snapshot.isFallback &&
         snapshot.universeCount > 0 &&
         snapshot.coverageTotalCount == snapshot.universeCount &&
         snapshot.coverageScannedCount != null &&
         snapshot.coverageEvaluatedCount != null &&
         snapshot.coverageRemainingCount != null;
+
+  /// Display one round's membership and counters together. A directory probe
+  /// can briefly report only one exchange; it must not relabel a saved full
+  /// round as an 894-stock universe while its coverage still refers to 1979.
+  CandidateSnapshot? get _mobileCoverageSnapshot {
+    if (!_isMobileTwScan) return null;
+    final progress = controller.marketScanProgress;
+    final partial = controller.loading && progress?.market == StockMarket.tw
+        ? progress?.partialSnapshot : null;
+    if (partial != null && progress != null && _hasTwCoverage(partial) &&
+        partial.universeCount == progress.universeCount &&
+        partial.evaluatedCount == progress.evaluatedCount &&
+        partial.scanPoolSize == progress.poolSize) {
+      return partial;
+    }
+    final saved = controller.snapshot;
+    return _hasTwCoverage(saved) ? saved : null;
   }
+
+  bool get _hasMobileTwCoverage => _mobileCoverageSnapshot != null;
 
   bool get _hasCumulativeTwCandidates => _isMobileTwScan &&
       (controller.snapshot?.candidatesAreCumulative ?? false);
@@ -66,7 +85,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   Icon(Icons.insights_rounded, size: 27),
                   SizedBox(width: 10),
-                  Text('動能觀測站'),
+                  Flexible(child: Text('動能觀測站',
+                      maxLines: 1, overflow: TextOverflow.ellipsis)),
                 ],
               ),
               actions: [
@@ -286,13 +306,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final backend = controller.backendScanStatus;
     final currentProgress = (controller.loading || snapshot == null) &&
         progress?.market == controller.market ? progress : null;
-    final coverageTotal = backend?.coverageTotalCount ?? snapshot?.coverageTotalCount;
-    final coverageAttempted = backend?.coverageScannedCount ?? snapshot?.coverageScannedCount;
-    final coverageEvaluated = backend?.coverageEvaluatedCount ?? snapshot?.coverageEvaluatedCount;
-    final coverageRemaining = backend?.coverageRemainingCount ?? snapshot?.coverageRemainingCount;
-    final coverageRound = backend?.coverageRound ?? snapshot?.coverageRound;
-    final pageStart = backend?.scanPageStart ?? snapshot?.scanPageStart;
-    final pageSize = backend?.scanPageSize ?? snapshot?.scanPageSize;
+    final roundSnapshot = _mobileCoverageSnapshot ?? snapshot;
+    final pageProgress = _hasMobileTwCoverage && currentProgress?.poolSize == 0
+        ? null : currentProgress;
+    final coverageTotal = backend?.coverageTotalCount ?? roundSnapshot?.coverageTotalCount;
+    final coverageAttempted = backend?.coverageScannedCount ?? roundSnapshot?.coverageScannedCount;
+    final coverageEvaluated = backend?.coverageEvaluatedCount ?? roundSnapshot?.coverageEvaluatedCount;
+    final coverageRemaining = backend?.coverageRemainingCount ?? roundSnapshot?.coverageRemainingCount;
+    final coverageRound = backend?.coverageRound ?? roundSnapshot?.coverageRound;
+    final pageStart = backend?.scanPageStart ?? roundSnapshot?.scanPageStart;
+    final pageSize = backend?.scanPageSize ?? roundSnapshot?.scanPageSize;
     final threshold = controller.market == StockMarket.tw
         ? controller.settings.twAdrThreshold
         : controller.settings.usAdrThreshold;
@@ -353,17 +376,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
             spacing: 28,
             runSpacing: 16,
             children: [
-              _summary(context, '股票字典',
-                  '${backend?.universeCount ?? currentProgress?.universeCount ?? snapshot?.universeCount ?? '—'}'),
-              if ((backend?.totalCount ?? currentProgress?.poolSize ?? snapshot?.scanPoolSize) != null)
+              _summary(context, _hasMobileTwCoverage ? '本輪名單' : '股票字典',
+                  '${_hasMobileTwCoverage ? coverageTotal : backend?.universeCount ?? currentProgress?.universeCount ?? snapshot?.universeCount ?? '—'}'),
+              if ((backend?.totalCount ?? pageProgress?.poolSize ?? roundSnapshot?.scanPoolSize) != null)
                 _summary(context, controller.settings.dataProvider == 'direct' &&
                         !_hasMobileTwCoverage ? '本次核心池' : '本頁掃描池',
-                    '${backend?.totalCount ?? currentProgress?.poolSize ?? snapshot?.scanPoolSize}'),
-              if ((backend?.evaluatedCount ?? currentProgress?.evaluatedCount ?? snapshot?.evaluatedCount) != null)
+                    '${backend?.totalCount ?? pageProgress?.poolSize ?? roundSnapshot?.scanPoolSize}'),
+              if ((backend?.evaluatedCount ?? pageProgress?.evaluatedCount ?? roundSnapshot?.evaluatedCount) != null)
                 _summary(context, _hasMobileTwCoverage ? '本頁已評估' : '已評估',
-                    '${backend?.evaluatedCount ?? currentProgress?.evaluatedCount ?? snapshot?.evaluatedCount}'),
+                    '${backend?.evaluatedCount ?? pageProgress?.evaluatedCount ?? roundSnapshot?.evaluatedCount}'),
               _summary(context, _hasMobileTwCoverage ? '本頁符合 ADR' : '目前符合 ADR',
-                  '${backend?.adrMatchCount ?? currentProgress?.adrMatchCount ?? snapshot?.adrMatchCount ?? controller.filteredCount}'),
+                  '${backend?.adrMatchCount ?? pageProgress?.adrMatchCount ?? roundSnapshot?.adrMatchCount ?? controller.filteredCount}'),
               _summary(context, '已確認型態',
                   '${currentProgress?.confirmedCount ?? confirmed}'),
               if (_hasCumulativeTwCandidates)
@@ -470,23 +493,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// its scope as the whole verified directory. Completion remains separate.
   Widget _buildScanScope(BuildContext context) {
     final snapshot = controller.snapshot;
+    final roundSnapshot = _mobileCoverageSnapshot ?? snapshot;
     final backend = controller.backendScanStatus;
     final progress = controller.marketScanProgress;
     final currentProgress = (controller.loading || snapshot == null) &&
             progress?.market == controller.market
         ? progress
         : null;
-    final universe = backend?.universeCount ?? currentProgress?.universeCount ??
-        snapshot?.universeCount;
-    final pool = backend?.totalCount ?? currentProgress?.poolSize ??
-        snapshot?.scanPoolSize;
-    final evaluated = backend?.evaluatedCount ?? currentProgress?.evaluatedCount ??
-        snapshot?.evaluatedCount;
-    final coverage = backend?.coverageTotalCount ?? snapshot?.coverageTotalCount;
+    final universe = _hasMobileTwCoverage ? roundSnapshot!.coverageTotalCount
+        : backend?.universeCount ?? currentProgress?.universeCount ?? snapshot?.universeCount;
+    final pageProgress = _hasMobileTwCoverage && currentProgress?.poolSize == 0
+        ? null : currentProgress;
+    final pool = backend?.totalCount ?? pageProgress?.poolSize ??
+        roundSnapshot?.scanPoolSize;
+    final evaluated = backend?.evaluatedCount ?? pageProgress?.evaluatedCount ??
+        roundSnapshot?.evaluatedCount;
+    final coverage = backend?.coverageTotalCount ?? roundSnapshot?.coverageTotalCount;
     final coverageEvaluated = backend?.coverageEvaluatedCount ??
-        snapshot?.coverageEvaluatedCount;
+        roundSnapshot?.coverageEvaluatedCount;
     final coverageRemaining = backend?.coverageRemainingCount ??
-        snapshot?.coverageRemainingCount;
+        roundSnapshot?.coverageRemainingCount;
+    final symbolRange = _hasMobileTwCoverage && roundSnapshot != null
+        ? _mobileSymbolRange(roundSnapshot) : null;
     final isMock = controller.settings.useMockData;
     final isDirect = controller.settings.dataProvider == 'direct';
     final hasFullScope = !isMock && !isDirect && universe != null &&
@@ -504,7 +532,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         : isDirect
             ? _isMobileTwScan
                 ? _hasMobileTwCoverage
-                    ? '本輪已嘗試 ${snapshot!.coverageScannedCount}/$universe 檔，'
+                    ? '本輪已嘗試 ${roundSnapshot!.coverageScannedCount}/$universe 檔，'
                         '成功 $coverageEvaluated 檔，尚未嘗試 $coverageRemaining 檔。'
                         '本頁處理 ${pool ?? '待取得'} 檔，逐頁保留本輪候選與原行情時間。'
                     : '正在準備台股上市／上櫃普通股名單；取得名單後依序分頁，'
@@ -533,6 +561,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Text(detail, style: Theme.of(context).textTheme.bodySmall),
           if (!isMock) ...[
             if (_isMobileTwScan) ...[
+              if (_hasMobileTwCoverage && roundSnapshot != null) ...[
+                const SizedBox(height: 6),
+                Text(_mobilePageRange(roundSnapshot),
+                    key: const ValueKey('dashboard-mobile-page-range'),
+                    style: Theme.of(context).textTheme.bodySmall),
+                Text((roundSnapshot.coverageRemainingCount ?? 0) > 0
+                    ? '下一頁起點：第 ${roundSnapshot.coverageScannedCount! + 1} 檔；'
+                        '本輪掃完前不因名單來源暫時失敗而回到第一檔。'
+                    : '本輪名單已全部嘗試；下一輪再採用更新後的名單。',
+                    key: const ValueKey('dashboard-mobile-next-start'),
+                    style: Theme.of(context).textTheme.bodySmall),
+                if (symbolRange != null)
+                  Text(symbolRange,
+                      key: const ValueKey('dashboard-mobile-symbol-range'),
+                      style: Theme.of(context).textTheme.bodySmall),
+              ],
               const SizedBox(height: 4),
               Text(controller.mobileScanPaused
                   ? '已暫停自動輪掃；下拉或點繼續可處理下一頁。'
@@ -567,6 +611,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
     );
+  }
+
+  String _mobilePageRange(CandidateSnapshot snapshot) {
+    final start = snapshot.scanPageStart ?? 0;
+    final size = snapshot.scanPageSize ?? 0;
+    if (size <= 0) return '正在準備本輪下一頁。';
+    return '本頁範圍：第 ${start + 1}–${start + size} 檔'
+        '（第 ${snapshot.coverageRound ?? 1} 輪，名單固定）。';
+  }
+
+  String? _mobileSymbolRange(CandidateSnapshot snapshot) {
+    for (final note in snapshot.warnings.reversed) {
+      if (note.startsWith('本頁已嘗試代碼：')) return note;
+    }
+    return null;
   }
 
   Widget _buildBackendProgress(BuildContext context) {
@@ -1059,29 +1118,42 @@ class _RecommendationCard extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: _metric(context, '${stock.triggerType ?? '條件'} 觸發價',
+                  Expanded(child: _metric(context,
+                      plan == null
+                          ? '${stock.triggerType ?? '條件'} 觸發參考價'
+                          : '假設買價 · ${stock.triggerType ?? '條件'} 觸發',
                       '${stock.market.currencySymbol}${stock.triggerPrice.toStringAsFixed(2)}',
-                      small: true)),
+                      small: true,
+                      valueKey: ValueKey('recommendation-entry-${stock.id}'))),
                   const SizedBox(width: 8),
-                  Expanded(child: _metric(context, '初始硬停損',
-                      stock.stopPrice == null
-                          ? '待確認'
+                  Expanded(child: _metric(context, '初始硬停損參考',
+                      plan == null
+                          ? (isCached ? '待更新' : '待確認')
                           : '${stock.market.currencySymbol}${stock.stopPrice!.toStringAsFixed(2)}',
-                      small: true)),
+                      small: true,
+                      valueKey: ValueKey('recommendation-stop-${stock.id}'))),
                 ],
               ),
+              const SizedBox(height: 8),
+              Text('停損來源：${_stopSource(plan)}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  )),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 12,
                 runSpacing: 6,
                 children: [
-                  Text(stock.stopPercent == null
-                      ? '停損待確認'
-                      : '停損 ${stock.stopPercent!.toStringAsFixed(2)}%',
+                  Text(plan == null
+                      ? (isCached ? '停損幅度待更新' : '停損幅度待確認')
+                      : '停損幅度 ${plan.stopPercent.toStringAsFixed(2)}%',
+                      key: ValueKey('recommendation-stop-percent-${stock.id}'),
                       style: Theme.of(context).textTheme.bodySmall),
-                  if (stock.riskPerShare != null)
-                    Text('1R ${stock.market.currencySymbol}${stock.riskPerShare!.toStringAsFixed(2)}',
-                        style: Theme.of(context).textTheme.bodySmall),
+                  Text(plan == null
+                      ? (isCached ? '1R 待更新' : '1R 待確認')
+                      : '1R ${stock.market.currencySymbol}${plan.riskPerShare.toStringAsFixed(2)}',
+                      key: ValueKey('recommendation-1r-${stock.id}'),
+                      style: Theme.of(context).textTheme.bodySmall),
                   Text(isCached ? '部位待更新' : plan == null
                       ? '部位待確認' : '建議部位 ${plan.positionPercent.toStringAsFixed(2)}%',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1090,6 +1162,33 @@ class _RecommendationCard extends StatelessWidget {
                           )),
                 ],
               ),
+              const Divider(height: 26),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: _metric(context, '3R 賣價 · 原始股數 15%',
+                      _targetPrice(plan, 3), small: true,
+                      valueKey: ValueKey('recommendation-3r-${stock.id}'))),
+                  const SizedBox(width: 8),
+                  Expanded(child: _metric(context, '5R 賣價 · 再賣原始股數 15%',
+                      _targetPrice(plan, 5), small: true,
+                      valueKey: ValueKey('recommendation-5r-${stock.id}'))),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text('剩餘 70%：日收盤跌破 9 EMA 追蹤出場。',
+                  key: ValueKey('recommendation-trailing-${stock.id}'),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onSurfaceVariant, height: 1.5,
+                  )),
+              const SizedBox(height: 6),
+              Text(plan == null
+                      ? '買點、實際停損與有效本金確認後，才提供完整價位；目前為觀察參考。'
+                      : '分批比例以原始買進股數為基準；停損先觸發則先出場。'
+                          '目標價為策略試算，尚非下單指令。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onSurfaceVariant, height: 1.5,
+                  )),
             ],
           ),
         ),
@@ -1097,8 +1196,19 @@ class _RecommendationCard extends StatelessWidget {
     );
   }
 
+  String _targetPrice(PositionPlan? plan, int multiple) => plan == null
+      ? (isCached ? '待更新' : '待確認')
+      : '${stock.market.currencySymbol}${plan.targetPrice(multiple).toStringAsFixed(2)}';
+
+  String _stopSource(PositionPlan? plan) {
+    if (plan == null) return isCached ? '原行情待更新驗證' : '待確認實際低點';
+    return stock.stopSource == 'entry_bar_low'
+        ? '實際進場分鐘 K 低點'
+        : '突破日當日實際低點';
+  }
+
   Widget _metric(BuildContext context, String label, String value,
-      {bool small = false}) => Column(
+      {bool small = false, Key? valueKey}) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label,
@@ -1107,6 +1217,7 @@ class _RecommendationCard extends StatelessWidget {
                   )),
           const SizedBox(height: 4),
           Text(value,
+              key: valueKey,
               style: (small
                       ? Theme.of(context).textTheme.titleSmall
                       : Theme.of(context).textTheme.titleLarge)

@@ -99,6 +99,9 @@ class StockUniverseService {
   final Future<SharedPreferences> Function() _preferencesLoader;
   Future<Map<String, StockItem>>? _master;
   final Map<StockMarket, Future<UniverseSnapshot>> _inFlight = {};
+  // Keep each exchange independently. A TPEx-only reply must not erase the
+  // latest usable TWSE membership (or renew its original retrieval date).
+  final Map<String, _TwSourceCache> _twSources = {};
   bool _closed = false;
 
   static String cacheKey(StockMarket market) =>
@@ -129,6 +132,9 @@ class StockUniverseService {
     final preferences = await _getPreferences(warnings);
     if (_closed) throw StateError('股票池服務已關閉。');
     final cached = _readCache(preferences, market, now, warnings);
+    if (market == StockMarket.tw) {
+      _readTwSources(preferences, cached, now, warnings);
+    }
     if (!forceRefresh && cached != null &&
         now.difference(cached.retrievedAt ?? cached.asOf) <=
             (cached.isComplete ? cacheLifetime : const Duration(minutes: 5))) {
@@ -153,7 +159,7 @@ class StockUniverseService {
           ? [usEndpoint, usOtherEndpoint] : [twEndpoint, twOtcEndpoint];
       final requestBudget = requestTimeout < NetworkRequest.defaultTimeout
           ? requestTimeout : NetworkRequest.defaultTimeout;
-      final replies = await Future.wait(endpoints.asMap().entries.map((entry) {
+      var replies = await Future.wait(endpoints.asMap().entries.map((entry) {
         if (market == StockMarket.us) {
           return _loadUsSource(entry.value, nasdaq: entry.key == 0,
               master: master, budget: requestBudget, now: now);
@@ -162,7 +168,11 @@ class StockUniverseService {
             master: master, budget: requestBudget);
       }));
       if (_closed) throw StateError('股票池服務已關閉。');
-      final successful = replies.where((reply) => reply.success).length;
+      if (market == StockMarket.tw) {
+        replies = _retainTwSources(replies, now, master);
+      }
+      final successful = replies
+          .where((reply) => reply.success && !reply.fromCache).length;
       final bySymbol = <String, StockItem>{};
       for (final reply in replies) {
         warnings.addAll(reply.warnings);
@@ -191,7 +201,7 @@ class StockUniverseService {
       if (market == StockMarket.tw) {
         warnings.add('台股使用官方上市／上櫃發行公司清單，並保守排除91開頭存託憑證及非四碼證券；此為啟發式分類，未逐筆取得證券 CFI 認證。');
       }
-      final sourceDates = replies.where((reply) => reply.success)
+      final sourceDates = replies.where((reply) => reply.stocks.isNotEmpty)
           .map((reply) => reply.fileDate).whereType<DateTime>().toList();
       final asOf = sourceDates.isEmpty ? now :
           sourceDates.reduce((a, b) => a.isBefore(b) ? a : b);
@@ -203,15 +213,18 @@ class StockUniverseService {
         source: market == StockMarket.us
             ? 'Nasdaq Trader symbol directories: Nasdaq / NYSE / NYSE American common stocks'
                 '${mirrored ? ' / dated public mirror (partial)' : ''}'
-            : 'TWSE / TPEx official ordinary-stock issuers',
+            : 'TWSE / TPEx official ordinary-stock issuers'
+                '${replies.any((reply) => reply.fromCache) ? ' / cached or bundled exchange metadata (partial)' : ''}',
         isComplete: complete,
+        isCached: replies.any((reply) => reply.fromCache),
         warnings: warnings,
       );
       if (_closed) throw StateError('股票池服務已關閉。');
       if (preferences != null) {
         try {
           final written = await preferences.setString(
-            cacheKey(market), jsonEncode(_encode(snapshot, market)),
+            cacheKey(market), jsonEncode(_encode(snapshot, market,
+              twSources: market == StockMarket.tw ? _twSources : null)),
           ).timeout(storageTimeout);
           if (_closed) throw StateError('股票池服務已關閉。');
           if (!written) throw StateError('快取儲存失敗。');
@@ -223,6 +236,7 @@ class StockUniverseService {
             retrievedAt: snapshot.retrievedAt,
             source: snapshot.source,
             isComplete: snapshot.isComplete,
+            isCached: snapshot.isCached,
             warnings: [...snapshot.warnings, '最新股票池已取得，但無法儲存本機快取。'],
           );
         }
@@ -323,7 +337,8 @@ class StockUniverseService {
     }
   }
 
-  static Map<String, dynamic> _encode(UniverseSnapshot snapshot, StockMarket market) => {
+  static Map<String, dynamic> _encode(UniverseSnapshot snapshot,
+      StockMarket market, {Map<String, _TwSourceCache>? twSources}) => {
     'version': 3,
     'scope': 'all_common',
     'market': market.name,
@@ -333,7 +348,121 @@ class StockUniverseService {
     'is_complete': snapshot.isComplete,
     'warnings': snapshot.warnings,
     'stocks': snapshot.stocks.map((stock) => stock.toJson()).toList(),
+    if (twSources != null) 'tw_exchange_sources': {
+      'version': 1,
+      'sources': twSources.map((exchange, value) =>
+          MapEntry(exchange, value.toJson())),
+    },
   };
+
+  /// The optional field extends only the TW v3 cache. Existing US and TW cache
+  /// readers keep working; old official TW caches can be conservatively split
+  /// by their actual .TW/.TWO symbols without inventing exchange membership.
+  void _readTwSources(SharedPreferences? preferences, UniverseSnapshot? cached,
+      DateTime now, List<String> warnings) {
+    var hasExchangeField = false;
+    if (preferences != null) {
+      try {
+        final raw = preferences.getString(cacheKey(StockMarket.tw));
+        final decoded = raw == null ? null : jsonDecode(raw);
+        if (decoded is Map<String, dynamic> && decoded['version'] == 3 &&
+            decoded['scope'] == 'all_common' && decoded['market'] == 'tw') {
+          final exchangeField = decoded['tw_exchange_sources'];
+          if (exchangeField != null) {
+            hasExchangeField = true;
+            if (exchangeField is! Map<String, dynamic> ||
+                exchangeField['version'] != 1 ||
+                exchangeField['sources'] is! Map<String, dynamic>) {
+              throw const FormatException('交易所快取結構無效。');
+            }
+            final rows = exchangeField['sources'] as Map<String, dynamic>;
+            for (final exchange in ['TWSE', 'TPEx']) {
+              final value = rows[exchange];
+              if (value == null) continue;
+              try {
+                if (value is! Map<String, dynamic>) {
+                  throw const FormatException('交易所快取紀錄無效。');
+                }
+                final source = _TwSourceCache.fromJson(value,
+                    exchange: exchange, now: now);
+                final memory = _twSources[exchange];
+                if (memory == null ||
+                    source.retrievedAt.isAfter(memory.retrievedAt)) {
+                  _twSources[exchange] = source;
+                }
+              } catch (_) {
+                warnings.add('$exchange 交易所快取無效或超過 30 天；不將它視為現行成分。');
+              }
+            }
+          }
+        }
+      } catch (_) {
+        warnings.add('台股分交易所快取無法讀取；不推測缺少的成分。');
+      }
+    }
+    _twSources.removeWhere((_, source) => !source.isUsable(now));
+    if (hasExchangeField || cached == null ||
+        cached.source != 'TWSE / TPEx official ordinary-stock issuers') {
+      return;
+    }
+    // Only migration from the old format: do not overwrite a per-source record
+    // with a blended aggregate's timestamp. The minimum aggregate date is safe
+    // when the old version did not retain independent exchange provenance.
+    for (final exchange in ['TWSE', 'TPEx']) {
+      if (_twSources.containsKey(exchange)) continue;
+      final suffix = exchange == 'TWSE' ? '.TW' : '.TWO';
+      final stocks = cached.stocks
+          .where((stock) => stock.symbol.endsWith(suffix)).toList();
+      if (stocks.isEmpty) continue;
+      _twSources[exchange] = _TwSourceCache(stocks: stocks,
+          asOf: cached.asOf, retrievedAt: cached.retrievedAt ?? cached.asOf);
+    }
+  }
+
+  List<_SourceStocks> _retainTwSources(List<_SourceStocks> replies,
+      DateTime now, Map<String, StockItem> master) {
+    return List.generate(2, (index) {
+      final exchange = index == 0 ? 'TWSE' : 'TPEx';
+      final current = replies[index];
+      if (current.success && current.stocks.isNotEmpty) {
+        // A successful exchange replaces ONLY that exchange, so removals in a
+        // genuinely new source are respected rather than unioned indefinitely.
+        _twSources[exchange] = _TwSourceCache(stocks: current.stocks,
+            asOf: current.fileDate ?? now, retrievedAt: now);
+        return _SourceStocks(current.stocks,
+            warnings: current.warnings, isComplete: current.isComplete,
+            fileDate: current.fileDate ?? now);
+      }
+      final previous = _twSources[exchange];
+      if (previous != null && previous.isUsable(now)) {
+        return _SourceStocks(previous.stocks, isComplete: false,
+            fromCache: true, fileDate: previous.asOf, warnings: [
+              ...current.warnings,
+              '$exchange 更新失敗；沿用最後成功取得的 ${previous.stocks.length} 檔名單'
+                  '（取得時間 ${previous.retrievedAt.toIso8601String()}）。'
+                  '本次未刷新該交易所成分，不能視為最新完整名單。',
+            ]);
+      }
+      _twSources.remove(exchange);
+      final suffix = exchange == 'TWSE' ? '.TW' : '.TWO';
+      final bundled = master.values.where((stock) =>
+          stock.market == StockMarket.tw && stock.symbol.endsWith(suffix))
+          .toList();
+      if (bundled.isNotEmpty) {
+        // Identity-only fallback, never promoted to last successful exchange
+        // metadata. In particular a later TPEx success cannot refresh the date
+        // or validation status of a bundled TWSE identity list.
+        return _SourceStocks(bundled, isComplete: false, fromCache: true,
+            fileDate: DateTime.utc(2026, 10, 6), warnings: [
+              ...current.warnings,
+              '$exchange 無可用的官方名單快取；只為該失敗交易所保留內建 '
+                  '${bundled.length} 檔股票身份字典（2026-10-06，成分日期未驗證）。'
+                  '它不是最新完整名單，也不是示範行情。',
+            ]);
+      }
+      return current;
+    });
+  }
 
   static UniverseSnapshot _cachedCopy(UniverseSnapshot snapshot, List<String> warnings) =>
       UniverseSnapshot(
@@ -439,7 +568,11 @@ class StockUniverseService {
       if (response.statusCode != 200) {
         throw http.ClientException('HTTP ${response.statusCode}', url);
       }
-      return _parseTw(utf8.decode(response.bodyBytes), master, otc: otc);
+      final parsed = _parseTw(utf8.decode(response.bodyBytes), master, otc: otc);
+      if (parsed.stocks.isEmpty) {
+        throw const FormatException('台股交易所名單沒有可用普通股。');
+      }
+      return parsed;
     } catch (error) {
       return _SourceStocks.failure('${url.host}/${url.pathSegments.last}：${_errorLabel(error)}');
     }
@@ -524,14 +657,64 @@ class StockUniverseService {
 /// A source failure is data, never an uncaught rejection of the other source.
 class _SourceStocks {
   _SourceStocks(this.stocks, {this.warnings = const [], this.isComplete = true,
-      this.mirrored = false, this.fileDate}) : success = true;
+      this.mirrored = false, this.fromCache = false, this.fileDate}) : success = true;
   _SourceStocks.failure(String warning)
       : stocks = const [], warnings = [warning], success = false,
-        isComplete = false, mirrored = false, fileDate = null;
+        isComplete = false, mirrored = false, fromCache = false, fileDate = null;
   final List<StockItem> stocks;
   final List<String> warnings;
   final bool success;
   final bool isComplete;
   final bool mirrored;
+  final bool fromCache;
   final DateTime? fileDate;
+}
+
+/// Exchange membership is dated metadata only; prices/signals are never cached
+/// here. Old membership expires independently, even if its peer refreshes daily.
+class _TwSourceCache {
+  _TwSourceCache({required List<StockItem> stocks, required this.asOf,
+      required this.retrievedAt}) : stocks = List.unmodifiable(stocks);
+
+  final List<StockItem> stocks;
+  final DateTime asOf;
+  final DateTime retrievedAt;
+
+  bool isUsable(DateTime now) => !asOf.isAfter(now) &&
+      !retrievedAt.isAfter(now) && !retrievedAt.isBefore(asOf) &&
+      now.difference(asOf) <= StockUniverseService.maximumStaleAge;
+
+  Map<String, dynamic> toJson() => {
+    'as_of': asOf.toUtc().toIso8601String(),
+    'retrieved_at': retrievedAt.toUtc().toIso8601String(),
+    'stocks': stocks.map((stock) => stock.toJson()).toList(),
+  };
+
+  factory _TwSourceCache.fromJson(Map<String, dynamic> json,
+      {required String exchange, required DateTime now}) {
+    final raw = json['stocks'];
+    if (raw is! List || raw.isEmpty || raw.length > 3500) {
+      throw const FormatException('交易所名單大小無效。');
+    }
+    final seen = <String>{};
+    final suffix = exchange == 'TWSE' ? '.TW' : '.TWO';
+    final stocks = raw.map((value) {
+      if (value is! Map<String, dynamic>) {
+        throw const FormatException('交易所名單紀錄無效。');
+      }
+      final stock = StockItem.fromJson(value);
+      if (stock.market != StockMarket.tw ||
+          !stock.symbol.endsWith(suffix) || !seen.add(stock.symbol)) {
+        throw const FormatException('交易所名單含跨市場、錯誤後綴或重複代碼。');
+      }
+      return stock;
+    }).toList();
+    final source = _TwSourceCache(stocks: stocks,
+        asOf: parseApiTimestamp(json['as_of'], 'as_of'),
+        retrievedAt: parseApiTimestamp(json['retrieved_at'], 'retrieved_at'));
+    if (!source.isUsable(now)) {
+      throw const FormatException('交易所名單已過期或日期無效。');
+    }
+    return source;
+  }
 }

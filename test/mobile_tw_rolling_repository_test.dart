@@ -91,10 +91,12 @@ class _Universe extends StockUniverseService {
   List<StockItem> rows;
   final DateTime Function() clock;
   bool fails = false;
+  int calls = 0;
 
   @override
   Future<UniverseSnapshot> load(StockMarket market,
       {bool forceRefresh = false}) async {
+    calls++;
     if (fails) throw StateError('Explicit directory failure');
     return UniverseSnapshot(stocks: rows, asOf: clock(),
       source: 'Explicit TWSE/TPEx member fixture', isComplete: false,
@@ -210,6 +212,8 @@ void main() {
     expect(resumed.coverageEvaluatedCount, 60);
     expect(resumed.candidates.length, 60);
     expect(api.calls.first, _stock(30).symbol);
+    expect(universe.calls, 1,
+      reason: 'Active pages reuse pinned metadata, even if the provider list changes');
     expect(api.calls.contains(_stock(0).symbol), isFalse);
   });
 
@@ -299,18 +303,136 @@ void main() {
     expect(preferences.getString('martin-mobile-tw-rolling-v1-3.5'), before);
   });
 
-  test('membership fingerprint changes reset the active round', () async {
-    final scanner = repository(pageSize: 5);
+  test('directory growth changes identity only after the pinned round finishes', () async {
+    final scanner = repository();
     final first = await scanner.fetch(StockMarket.tw, adrThreshold: 3.5);
     universe.rows = [...universe.rows, _stock(100)];
     api.calls.clear();
     final changed = await scanner.fetch(StockMarket.tw, adrThreshold: 3.5);
-    expect(changed.universeFingerprint, isNot(first.universeFingerprint));
-    expect(changed.coverageRound, 2);
-    expect(changed.scanPageStart, 0);
-    expect(changed.coverageScannedCount, 5);
-    expect(changed.coverageTotalCount, 71);
+    expect(changed.universeFingerprint, first.universeFingerprint);
+    expect(changed.coverageRound, 1);
+    expect(changed.scanPageStart, 30);
+    expect(changed.coverageScannedCount, 60);
+    expect(changed.coverageTotalCount, 70);
+    expect(api.calls.first, _stock(30).symbol);
+    expect(universe.calls, 1,
+      reason: 'A membership change is not fetched halfway through a round');
+    final completed = await scanner.fetch(StockMarket.tw, adrThreshold: 3.5);
+    expect(completed.coverageScannedCount, 70);
+    expect(completed.coverageRemainingCount, 0);
+    expect(api.calls, List.generate(40, (index) => _stock(index + 30).symbol));
+    api.calls.clear();
+    final nextRound = await scanner.fetch(StockMarket.tw, adrThreshold: 3.5,
+        forceRefresh: true);
+    expect(nextRound.universeFingerprint, isNot(first.universeFingerprint));
+    expect(nextRound.coverageRound, 2);
+    expect(nextRound.scanPageStart, 0);
+    expect(nextRound.coverageTotalCount, 71);
     expect(api.calls.first, _stock(0).symbol);
+    expect(universe.calls, 2);
+  });
+
+  test('full subset full directories resume 30, 60, 70 across phone restarts', () async {
+    final firstScanner = repository();
+    final first = await firstScanner.fetch(StockMarket.tw, adrThreshold: 3.5);
+    firstScanner.close();
+    // A temporary one-exchange/subset response omits ALL next-page members.
+    // Their genuine company metadata must survive in the persisted journal.
+    universe.rows = List.generate(30, _stock);
+    final secondScanner = repository();
+    final second = await secondScanner.fetch(StockMarket.tw, adrThreshold: 3.5,
+        refreshQuotesOnly: true, forceRefresh: true);
+    secondScanner.close();
+    universe.rows = List.generate(70, _stock);
+    final third = await repository().fetch(StockMarket.tw, adrThreshold: 3.5,
+        refreshQuotesOnly: true);
+    expect([first.coverageScannedCount, second.coverageScannedCount,
+      third.coverageScannedCount], [30, 60, 70]);
+    expect([first.coverageTotalCount, second.coverageTotalCount,
+      third.coverageTotalCount], [70, 70, 70]);
+    expect([first.coverageRound, second.coverageRound, third.coverageRound], [1, 1, 1]);
+    expect(second.scanPageStart, 30);
+    expect(third.scanPageStart, 60);
+    expect(second.universeFingerprint, first.universeFingerprint);
+    expect(third.universeFingerprint, first.universeFingerprint);
+    expect(api.calls, List.generate(70, (index) => _stock(index).symbol));
+    expect(api.calls.toSet().length, 70);
+    expect(second.candidates.singleWhere((row) => row.symbol == _stock(40).symbol).name,
+        _stock(40).nameZh);
+    expect(universe.calls, 1,
+      reason: 'Restoring complete genuine metadata avoids another directory HTTP request');
+    expect(third.missingSymbols, isEmpty);
+    expect(third.candidates.length, 70);
+    final persisted = MobileScanCheckpoint.fromJson(jsonDecode(
+        preferences.getString('martin-mobile-tw-rolling-v1-3.5')!) as Map<String, dynamic>);
+    expect(persisted.members.length, 70);
+    expect(persisted.members.map((stock) => stock.symbol).toSet(),
+        List.generate(70, (index) => _stock(index).symbol).toSet());
+    expect(persisted.members.any((stock) => stock.symbol.endsWith('.TW')), isTrue);
+    expect(persisted.members.any((stock) => stock.symbol.endsWith('.TWO')), isTrue);
+  });
+
+  test('an initially partial round finishes once before adopting the larger universe', () async {
+    universe.rows = List.generate(35, _stock);
+    final scanner = repository();
+    final first = await scanner.fetch(StockMarket.tw, adrThreshold: 3.5);
+    universe.rows = List.generate(70, _stock).reversed.toList();
+    final last = await scanner.fetch(StockMarket.tw, adrThreshold: 3.5);
+    expect(first.coverageScannedCount, 30);
+    expect(last.coverageScannedCount, 35);
+    expect(last.coverageTotalCount, 35);
+    expect(last.coverageRemainingCount, 0);
+    expect(api.calls, List.generate(35, (index) => _stock(index).symbol));
+    final next = await scanner.fetch(StockMarket.tw, adrThreshold: 3.5,
+        forceRefresh: true);
+    expect(next.coverageRound, 2);
+    expect(next.coverageTotalCount, 70);
+    expect(next.coverageScannedCount, 30);
+    expect(next.universeFingerprint, isNot(first.universeFingerprint));
+    expect(universe.calls, 2);
+  });
+
+  test('saved metadata continues after a directory outage without replaying page one', () async {
+    final firstScanner = repository();
+    await firstScanner.fetch(StockMarket.tw, adrThreshold: 3.5);
+    firstScanner.close();
+    universe.fails = true;
+    api.calls.clear();
+    final resumed = await repository().fetch(StockMarket.tw, adrThreshold: 3.5,
+        forceRefresh: true);
+    expect(resumed.stale, isFalse);
+    expect(resumed.scanPageStart, 30);
+    expect(resumed.coverageScannedCount, 60);
+    expect(resumed.coverageRound, 1);
+    expect(universe.calls, 1);
+    expect(api.calls, List.generate(30, (index) => _stock(index + 30).symbol));
+    expect(resumed.warnings.join(' '), contains('1030.TW–1059.TWO'));
+    expect(resumed.warnings.join(' '), contains('下一檔：1060.TW'));
+  });
+
+  test('legacy schema one resolves real metadata without resetting a changed directory', () async {
+    final firstScanner = repository();
+    final first = await firstScanner.fetch(StockMarket.tw, adrThreshold: 3.5);
+    firstScanner.close();
+    const key = 'martin-mobile-tw-rolling-v1-3.5';
+    final legacy = jsonDecode(preferences.getString(key)!) as Map<String, dynamic>
+      ..remove('members')..remove('universe_warnings');
+    await preferences.setString(key, jsonEncode(legacy));
+    universe.rows = [...universe.rows, _stock(100)];
+    api.calls.clear();
+    final resumed = await repository().fetch(StockMarket.tw, adrThreshold: 3.5);
+    expect(universe.calls, 2,
+      reason: 'Old journals need one actual metadata lookup to populate missing names');
+    expect(resumed.coverageRound, 1);
+    expect(resumed.universeFingerprint, first.universeFingerprint);
+    expect(resumed.coverageTotalCount, 70);
+    expect(resumed.scanPageStart, 30);
+    expect(resumed.coverageScannedCount, 60);
+    expect(api.calls, List.generate(30, (index) => _stock(index + 30).symbol));
+    final upgraded = MobileScanCheckpoint.fromJson(jsonDecode(
+        preferences.getString(key)!) as Map<String, dynamic>);
+    expect(upgraded.members.length, 70);
+    expect(upgraded.members.any((row) => row.symbol == _stock(100).symbol), isFalse);
   });
 
   test('an interrupted final chunk cannot renew a cooldown forever after restart', () async {
@@ -440,6 +562,17 @@ void main() {
     final different = [...checkpoint.symbols]..[0] = '0999.TW';
     expect(checkpoint.matches(different, 3.5, now), isFalse);
     expect(checkpoint.matches(checkpoint.symbols, 4, now), isFalse);
+    expect(checkpoint.canResume(3.5, now), isTrue);
+    expect(checkpoint.canResume(4, now), isFalse);
+    expect(checkpoint.canResume(3.5, now.add(const Duration(days: 1))), isFalse);
+    expect(() => MobileScanCheckpoint.fromJson({...data,
+      'members': [_stock(100).toJson()]}), throwsFormatException);
+    final legacy = {...data}..remove('members')..remove('universe_warnings');
+    final restored = MobileScanCheckpoint.fromJson(legacy);
+    expect(restored.members, isEmpty);
+    expect(restored.attempted, checkpoint.attempted);
+    expect(restored.universeWarnings, checkpoint.warnings);
+    expect(restored.canResume(3.5, now), isTrue);
     expect(snapshot.universeFingerprint, checkpoint.fingerprint);
   });
 }

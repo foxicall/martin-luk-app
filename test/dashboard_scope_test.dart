@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'package:martin_luk_app/models/stock_candidate.dart';
 import 'package:martin_luk_app/screens/dashboard_screen.dart';
 import 'package:martin_luk_app/screens/settings_screen.dart';
 import 'package:martin_luk_app/services/candidate_repository.dart';
+import 'package:martin_luk_app/services/market_scan_progress.dart';
 
 const _firstWarning = '美股目錄 20 筆未能確認普通股類別，已排除。';
 const _secondWarning = '原始名單沒有完整 CFI；不代表百分之百分類認證。';
@@ -74,12 +76,45 @@ class _ScopeRepository implements CandidateRepository {
   }
 }
 
+/// An interim directory probe is deliberately smaller than the current round.
+/// Its count must not replace the pinned total while the next page is pending.
+class _PendingScopeRepository extends _ScopeRepository
+    implements ProgressiveCandidateRepository {
+  _PendingScopeRepository() : super(mobileRolling: true);
+  bool holdNext = false;
+  Completer<CandidateSnapshot>? pending;
+
+  @override
+  Future<CandidateSnapshot> fetchWithProgress(StockMarket market, {
+    required double adrThreshold,
+    bool forceRefresh = false,
+    bool refreshQuotesOnly = false,
+    void Function(MarketScanProgress)? onProgress,
+  }) {
+    if (!holdNext) {
+      return super.fetch(market, adrThreshold: adrThreshold,
+          forceRefresh: forceRefresh, refreshQuotesOnly: refreshQuotesOnly);
+    }
+    holdNext = false;
+    calls++;
+    pending = Completer<CandidateSnapshot>();
+    onProgress?.call(MarketScanProgress(
+      market: market, universeCount: 894, poolSize: 0,
+      attemptedCount: 0, completedCount: 0, evaluatedCount: 0,
+      adrMatchCount: 0, confirmedCount: 0, failedCount: 0,
+      finished: false, stage: 'Explicit partial-directory fixture',
+    ));
+    return pending!.future;
+  }
+}
+
 Future<AppController> _loadController(WidgetTester tester, {
   String provider = 'direct',
   bool fullCoverage = false,
   bool stale = false,
   StockMarket market = StockMarket.us,
   _ScopeRepository? fixtureRepository,
+  bool registerCleanup = true,
 }) async {
   SharedPreferences.setMockInitialValues({
     'martin_luk_settings_v1': jsonEncode(AppSettings(
@@ -97,7 +132,7 @@ Future<AppController> _loadController(WidgetTester tester, {
     await controller.initialize(initializeReminders: false);
     await controller.setMarket(market);
   });
-  addTearDown(controller.dispose);
+  if (registerCleanup) addTearDown(controller.dispose);
   await tester.pumpWidget(MaterialApp(
     home: DashboardScreen(controller: controller),
   ));
@@ -150,6 +185,9 @@ void main() {
     expect(find.textContaining('本輪已嘗試 70/1978 檔，成功 68 檔'), findsOneWidget);
     expect(find.textContaining('尚未嘗試 1908 檔'), findsWidgets);
     expect(find.text('本頁掃描池'), findsOneWidget);
+    expect(find.text('本輪名單'), findsOneWidget);
+    expect(find.textContaining('本頁範圍：第 61–70 檔'), findsOneWidget);
+    expect(find.textContaining('下一頁起點：第 71 檔'), findsOneWidget);
     expect(find.text('本頁已評估'), findsOneWidget);
     expect(find.text('本輪累積候選'), findsOneWidget);
     expect(find.text('本輪累積推薦與觀察名單'), findsOneWidget);
@@ -177,6 +215,36 @@ void main() {
     expect(find.text('暫停台股輪掃'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('TW pinned total stays stable during a smaller directory progress report',
+      (tester) async {
+    final repository = _PendingScopeRepository();
+    final controller = await _loadController(tester,
+        market: StockMarket.tw, fixtureRepository: repository,
+        registerCleanup: false);
+    try {
+      final previous = controller.snapshot!;
+      repository.holdNext = true;
+      final refresh = controller.refresh(forceRefresh: true);
+      await tester.pump();
+      expect(controller.loading, isTrue);
+      expect(repository.pending, isNotNull);
+      expect(find.text('本輪名單'), findsOneWidget);
+      expect(find.text('1978'), findsOneWidget);
+      expect(find.text('894'), findsNothing);
+      expect(find.textContaining('本輪已嘗試 70/1978 檔'), findsOneWidget);
+      expect(find.textContaining('本頁範圍：第 61–70 檔'), findsOneWidget);
+      expect(find.textContaining('下一頁起點：第 71 檔'), findsOneWidget);
+      repository.pending!.complete(previous);
+      await tester.pumpAndSettle();
+      await refresh;
+      expect(controller.loading, isFalse);
+      expect(tester.takeException(), isNull);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    }
   });
 
   testWidgets('source warnings are deduplicated and collapsed after the recommendation cards',

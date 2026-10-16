@@ -1,5 +1,9 @@
 # GitHub 網頁完整覆蓋：1.4.0+7 手機台股輪掃
 
+最新 **1.4.2+9** 請使用 `martin_luk_tw_scan_stable_updates_20261016.zip` 或完整包 `martin_luk_tw_scan_stable_20261016.zip`，依 [TW_SCAN_STABILITY_FIX.md](TW_SCAN_STABILITY_FIX.md) 操作。本版修正 894／1979 名單切換造成第一頁重掃，保留推薦價位與前次測試修正。
+
+最新 **1.4.1+8** 請使用 `martin_luk_recommendation_levels_updates_20261016.zip` 或完整包 `martin_luk_recommendation_levels_20261016.zip`。本次新增推薦進出場明細，並包含上一項逐檔進度測試修正；操作見 [RECOMMENDATION_LEVELS.md](RECOMMENDATION_LEVELS.md)。以下是 1.4.0+7 輪掃交付的原有說明。
+
 本版不需要本機 Git 指令或補丁安裝器。台股手機直接連線即可分頁輪掃上市／上櫃名單；美股手機模式仍是最多 30 檔核心池。細節見 [MOBILE_TW_SCAN.md](MOBILE_TW_SCAN.md)。
 
 ## 1. 選擇更新包

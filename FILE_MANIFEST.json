@@ -3,7 +3,7 @@
   "hash_algorithm": "SHA256",
   "archive_layout": "project files at archive root",
   "manifest_excludes_itself": true,
-  "file_count": 203,
+  "file_count": 208,
   "files": [
     {
       "path": ".dockerignore",
@@ -12,8 +12,8 @@
     },
     {
       "path": ".github/workflows/build_apk.yml",
-      "bytes": 6589,
-      "sha256": "e5881de7b20d2cab9bb7f619bbe42b148621d3cd8a0ca60ea1df0e3ecac564e6"
+      "bytes": 7043,
+      "sha256": "26630ce178e3824f240c2a21d708fa714c22dc6d5d0168e39660e0aff995b949"
     },
     {
       "path": ".gitignore",
@@ -42,8 +42,8 @@
     },
     {
       "path": "BUILD_STATUS.md",
-      "bytes": 8870,
-      "sha256": "8ebffae98c678075ac3ec840916e0182c68dc1d5beb056da8f762f62510729c6"
+      "bytes": 10827,
+      "sha256": "a0ead96ccc8d586d1ca93b6c6d7a9b368efa44617b3fb2507f8dc58e1f75c66b"
     },
     {
       "path": "CLOUD_API_GUIDE.md",
@@ -67,8 +67,8 @@
     },
     {
       "path": "GITHUB_MANUAL_UPDATE.md",
-      "bytes": 3630,
-      "sha256": "6f2a29c4a9a3d49a482b2f50acaa0879482592965d3a0445af986e7f9ec6797b"
+      "bytes": 4278,
+      "sha256": "8b10de03f3a711f5bc418897164e9db9dc8898817d67147f995a74ad3341b720"
     },
     {
       "path": "MARKET_DEBUG_LOGGING.md",
@@ -77,8 +77,8 @@
     },
     {
       "path": "MOBILE_TW_SCAN.md",
-      "bytes": 4434,
-      "sha256": "5421651a24949a54114238d257ee3cf4957c6231cdc460fd79040638791e1d34"
+      "bytes": 4790,
+      "sha256": "5a2222c64d330f638ab6734a2df5102b72dba03e8be80aedc4686ae6c0fc35f6"
     },
     {
       "path": "NETWORK_DISPOSE_TEST_FIX.md",
@@ -107,13 +107,18 @@
     },
     {
       "path": "README.md",
-      "bytes": 8476,
-      "sha256": "f6071350a2f038750549ff7688bf7eda17434e7d4466182c74d6e8750237bb0f"
+      "bytes": 9232,
+      "sha256": "a1a7c1b6bba6ccf3be15f9c0017a32b8986175d60c61bb1d860598efa809389d"
     },
     {
       "path": "README_HOW_TO_BUILD.md",
       "bytes": 6124,
       "sha256": "eadb712d144d3c2c24692295b03e0caca14e4cd261567af8712185562e6fbb85"
+    },
+    {
+      "path": "RECOMMENDATION_LEVELS.md",
+      "bytes": 3454,
+      "sha256": "17e690ba2dcf58d797a0291570b3249f33f0b8f66a83f02b062a49e3319cc2b5"
     },
     {
       "path": "REFRESH_RECOVERY.md",
@@ -131,9 +136,14 @@
       "sha256": "eb6952a5b09351599a0689f31d81ec41790d6e47b4843c0e72c2ab6622895606"
     },
     {
+      "path": "TW_SCAN_STABILITY_FIX.md",
+      "bytes": 5143,
+      "sha256": "ed574a805e53c3daf93d442cf8cedab59e51360aa49c84ba66986b4c113b8b22"
+    },
+    {
       "path": "UPDATE_FILES.txt",
-      "bytes": 917,
-      "sha256": "dadfe19066e445e5324659c2a6e3c53fd9fb8988aa6a013ea84ef32a836a4be4"
+      "bytes": 1580,
+      "sha256": "668d61bbb4c2746343b6df80152a7e66179aa32a3f4c0ee9bb3b5f5acf57cb60"
     },
     {
       "path": "US_UNIVERSE_FIX.md",
@@ -437,13 +447,13 @@
     },
     {
       "path": "lib/screens/calculator_screen.dart",
-      "bytes": 22928,
-      "sha256": "e030cff9a030fa9771b030623ab828d23b7464518197a66f471284dbaac23a62"
+      "bytes": 24950,
+      "sha256": "a2d83c1bbf7402475aee93ce9d3a6ca0968d46207562d55991ae86aa0e9058f3"
     },
     {
       "path": "lib/screens/dashboard_screen.dart",
-      "bytes": 53941,
-      "sha256": "6fe32a84f54ddbdf6d8f38413672abf2e2f88f25a3c0f8fe761aaede89966be7"
+      "bytes": 60161,
+      "sha256": "31fd968fdcfccf0a5b21a7eb3539f3fd62411a96f48a3d10654f5e7ab311c762"
     },
     {
       "path": "lib/screens/portfolio_screen.dart",
@@ -477,8 +487,8 @@
     },
     {
       "path": "lib/services/live_candidate_repository.dart",
-      "bytes": 53075,
-      "sha256": "539d6710469e89c8c6950ee5099f84eaeb808fdd021b4165ec8183639fd493ca"
+      "bytes": 56217,
+      "sha256": "1e212459a7eafd90dc80cfe03bcd7a19073cbd34f4a58384e5679985a1864396"
     },
     {
       "path": "lib/services/live_portfolio_repository.dart",
@@ -502,8 +512,8 @@
     },
     {
       "path": "lib/services/mobile_scan_checkpoint.dart",
-      "bytes": 9197,
-      "sha256": "1c992ef2cc5f227fb1f0b81df1d6f294ac3a2ce59c9bfab1fab99beeaf4abbd7"
+      "bytes": 10739,
+      "sha256": "b15a34dc4bf9af6e6d07fd4732bdf90d52ac2094bf9b977a9d1caaca0f7f3137"
     },
     {
       "path": "lib/services/network_request.dart",
@@ -527,8 +537,8 @@
     },
     {
       "path": "lib/services/stock_universe_service.dart",
-      "bytes": 23587,
-      "sha256": "2d1382c96f8748f4320131d3983e1df45550cfd9588c5c9108e9a44f51ceba9e"
+      "bytes": 32175,
+      "sha256": "fa0786750cbe4ff5f05e887b0e813005e1f27907dc9cf7398161e66450a407d4"
     },
     {
       "path": "lib/services/strategy_engine.dart",
@@ -587,18 +597,18 @@
     },
     {
       "path": "preview/index.html",
-      "bytes": 1630772,
-      "sha256": "71b582aa579dc1a6184af2421c701b346e9776a8deb012877b2547c91c010a5b"
+      "bytes": 1631490,
+      "sha256": "034bc1fa379f047fcab8ace37ed26a2b73f8acdf5d9169a8608a743e12cc0ade"
     },
     {
       "path": "preview/standalone_preview.html",
-      "bytes": 1564502,
-      "sha256": "ab541129b53bcb2b6d54c8bd2628bfce6f762c1e37d75946e2a7efe0bc50d2c5"
+      "bytes": 1565394,
+      "sha256": "787b13c672ef5d6d50c9001fd463143dd7d75f129020b2b75b75046484bf4763"
     },
     {
       "path": "pubspec.yaml",
       "bytes": 635,
-      "sha256": "e0dd66f0adff97175b4d3841be32934473657989495ef6e56d34bdce556c6b16"
+      "sha256": "64002159e41c7e280247fb203a65439c0cf0b1321e9663a301530a5906b42231"
     },
     {
       "path": "render.yaml",
@@ -642,13 +652,13 @@
     },
     {
       "path": "scripts/check_preview_ui.cjs",
-      "bytes": 17226,
-      "sha256": "1bb627af3e679d404e71f0808bdc9167f923620af196f4f3e83ccd68be579de0"
+      "bytes": 18336,
+      "sha256": "d81cc3e7c329d596d2a9ba896bae58687c3ae7b9bbcbc9be665cddb5bf630272"
     },
     {
       "path": "scripts/check_standalone_preview.cjs",
-      "bytes": 24833,
-      "sha256": "304664068730f64d061b2d2099101778945cfed9b3b077f43d559f72dbf03121"
+      "bytes": 26626,
+      "sha256": "fcc20ee6ac9e1d1d60735f2b3f5003b127307b428700fd5527e51c6876d65249"
     },
     {
       "path": "scripts/check_stock_search.cjs",
@@ -737,13 +747,13 @@
     },
     {
       "path": "scripts/verify_deliverable.py",
-      "bytes": 22956,
-      "sha256": "ba83585ed18c4535171fd08c62d8dbd239aac6baa3cea6ddd5ef7b8e3ac3135c"
+      "bytes": 23159,
+      "sha256": "c768ac990606adb262b67ab2b336716d8230e068c0d8061faba514ab2c65e473"
     },
     {
       "path": "standalone_preview.html",
-      "bytes": 1564502,
-      "sha256": "ab541129b53bcb2b6d54c8bd2628bfce6f762c1e37d75946e2a7efe0bc50d2c5"
+      "bytes": 1565394,
+      "sha256": "787b13c672ef5d6d50c9001fd463143dd7d75f129020b2b75b75046484bf4763"
     },
     {
       "path": "stock_search.js",
@@ -812,8 +822,8 @@
     },
     {
       "path": "test/dashboard_scope_test.dart",
-      "bytes": 10969,
-      "sha256": "6088f925f0e1389ba79dd6277d59ddcf05c30a09e2e5b807b531a7d22d20458b"
+      "bytes": 13813,
+      "sha256": "9de2ce2e36c57653effcd669037c9b79aa0ebd9e657c362b3899395510b59b57"
     },
     {
       "path": "test/exit_advisory_engine_test.dart",
@@ -877,8 +887,8 @@
     },
     {
       "path": "test/mobile_tw_rolling_repository_test.dart",
-      "bytes": 20859,
-      "sha256": "575043fb342f283bad272e9599b2b4e951676a3dfaf2534b4b5fb68254213ead"
+      "bytes": 27826,
+      "sha256": "3c299c21561c02e546c6b8d19c672981cd0ecee5291036a9a8e230898839f689"
     },
     {
       "path": "test/model_test.dart",
@@ -919,6 +929,11 @@
       "path": "test/production_ui_test.dart",
       "bytes": 10999,
       "sha256": "3cb3882f47e889968257d1b92ab5e7ffbe5aea78110434402e8bc2e4a0209bc7"
+    },
+    {
+      "path": "test/recommendation_trade_levels_test.dart",
+      "bytes": 9800,
+      "sha256": "9481c106314ac5c759f46f95e9b3b299e5f7a5851f53d06ea71b7433c62557af"
     },
     {
       "path": "test/refresh_recovery_test.dart",
@@ -974,6 +989,16 @@
       "path": "test/support/mock_preferences.dart",
       "bytes": 563,
       "sha256": "bd5b650f51db68835403a0946874c8c3277fad5bf46fc82ceb8d367afde42ad0"
+    },
+    {
+      "path": "test/tw_universe_resume_integration_test.dart",
+      "bytes": 9109,
+      "sha256": "859c95e8f8eabae4226259fd4fa4689b4ba2a30932822dd930db8955b0b25f8f"
+    },
+    {
+      "path": "test/tw_universe_stability_test.dart",
+      "bytes": 13032,
+      "sha256": "eca77b412d06e88a949475b81e0c7225f9338b4e1c96b212d865f5079c42a409"
     },
     {
       "path": "test/us_stock_directory_test.dart",

@@ -1,4 +1,5 @@
 import '../models/stock_candidate.dart';
+import '../models/stock_item.dart';
 import 'candidate_repository.dart';
 
 /// An immutable, versioned Taiwan scan journal. Quote timestamps remain on
@@ -18,6 +19,8 @@ class MobileScanCheckpoint {
     required this.universeAsOf,
     required this.universeIsComplete,
     required List<String> warnings,
+    List<StockItem> members = const [],
+    List<String> universeWarnings = const [],
     this.roundCompletedAt,
     this.pageStart = 0,
     this.pageSize = 0,
@@ -29,6 +32,8 @@ class MobileScanCheckpoint {
        attempted = Set<String>.unmodifiable(attempted),
        evaluated = Set<String>.unmodifiable(evaluated),
        candidates = List<StockCandidate>.unmodifiable(candidates),
+       members = List<StockItem>.unmodifiable(members),
+       universeWarnings = List<String>.unmodifiable(universeWarnings),
        warnings = List<String>.unmodifiable(warnings) {
     if (!threshold.isFinite || threshold < 0 || round < 1 ||
         !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(day) ||
@@ -43,12 +48,16 @@ class MobileScanCheckpoint {
       }
     }
     final prefix = this.symbols.take(this.attempted.length).toSet();
+    final knownSymbols = this.symbols.toSet();
     if (this.attempted.length > this.symbols.length ||
         !this.attempted.containsAll(prefix) ||
         !this.attempted.containsAll(this.evaluated) ||
         this.candidates.map((row) => row.symbol).toSet().length != this.candidates.length ||
         this.candidates.any((row) => row.market != StockMarket.tw ||
             !this.evaluated.contains(row.symbol) || row.adrPercent < threshold) ||
+        this.members.map((row) => row.symbol).toSet().length != this.members.length ||
+        this.members.any((row) => row.market != StockMarket.tw ||
+            !knownSymbols.contains(row.symbol)) ||
         pageStart < 0 || pageStart > this.attempted.length ||
         pageSize < 0 || pageSize > 30 ||
         pageStart + pageSize > this.symbols.length ||
@@ -67,6 +76,10 @@ class MobileScanCheckpoint {
   final Set<String> attempted;
   final Set<String> evaluated;
   final List<StockCandidate> candidates;
+  /// Actual source metadata for this round, saved with its pinned symbols.
+  /// Optional for legacy schema-1 journals; it never contains market prices.
+  final List<StockItem> members;
+  final List<String> universeWarnings;
   final DateTime updatedAt;
   final DateTime universeAsOf;
   final bool universeIsComplete;
@@ -80,7 +93,7 @@ class MobileScanCheckpoint {
   int get remaining => symbols.length - attempted.length;
 
   /// Two small, portable integer hashes identify display/progress versions.
-  /// Resume validation ALSO compares the complete stored member list exactly;
+  /// Membership comparisons ALSO check the complete stored list exactly;
   /// hash equality alone is never used to accept different membership.
   static String fingerprintFor(List<String> symbols) {
     var first = 17, second = 29;
@@ -105,6 +118,12 @@ class MobileScanCheckpoint {
     }
     return true;
   }
+
+  /// A provider returning only one exchange must not reset an active cursor.
+  /// Membership changes apply when the current round finishes; only the
+  /// exchange day or ADR configuration invalidates a still-running round.
+  bool canResume(double adrThreshold, DateTime now) =>
+      threshold == adrThreshold && day == dayFor(now) && remaining > 0;
 
   CandidateSnapshot toSnapshot({bool fromDisk = false}) => CandidateSnapshot(
     candidates: candidates,
@@ -138,6 +157,7 @@ class MobileScanCheckpoint {
   MobileScanCheckpoint withCandidates(List<StockCandidate> values,
       DateTime at) => MobileScanCheckpoint(
     symbols: symbols, threshold: threshold, day: day, round: round,
+    members: members, universeWarnings: universeWarnings,
     attempted: attempted, evaluated: evaluated, candidates: values,
     updatedAt: at, universeAsOf: universeAsOf,
     universeIsComplete: universeIsComplete, warnings: warnings,
@@ -153,6 +173,8 @@ class MobileScanCheckpoint {
     'attempted': attempted.toList()..sort(),
     'evaluated': evaluated.toList()..sort(),
     'candidates': candidates.map((row) => row.toJson()).toList(),
+    'members': members.map((row) => row.toJson()).toList(),
+    'universe_warnings': universeWarnings,
     'updated_at': updatedAt.toUtc().toIso8601String(),
     'universe_as_of': universeAsOf.toUtc().toIso8601String(),
     'universe_is_complete': universeIsComplete, 'warnings': warnings,
@@ -180,6 +202,11 @@ class MobileScanCheckpoint {
       attempted: strings('attempted').toSet(), evaluated: strings('evaluated').toSet(),
       candidates: (json['candidates'] as List).map((row) =>
           StockCandidate.fromJson(Map<String, dynamic>.from(row as Map))).toList(),
+      members: json['members'] == null ? const [] :
+          (json['members'] as List).map((row) =>
+              StockItem.fromJson(Map<String, dynamic>.from(row as Map))).toList(),
+      universeWarnings: json['universe_warnings'] == null ?
+          strings('warnings') : strings('universe_warnings'),
       updatedAt: parseApiTimestamp(json['updated_at'], 'updated_at'),
       universeAsOf: parseApiTimestamp(json['universe_as_of'], 'universe_as_of'),
       universeIsComplete: json['universe_is_complete'] as bool,
