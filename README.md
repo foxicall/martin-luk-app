@@ -1,5 +1,7 @@
 # Martin Luk 台美股動能策略 App
 
+本次 1.4.4+11 追加修正名單服務關閉時的例外：取消 HTTP 後統一回傳 `StateError`，保留原有測試、晚到回應阻擋及全部門禁。核心只需覆蓋 `lib/services/stock_universe_service.dart`；操作與實際 CI 紀錄見 [UNIVERSE_CLOSE_FIX.md](UNIVERSE_CLOSE_FIX.md)。
+
 最新版本為 **1.4.4+11**：3R／5R 價位與本金／買進股數分開。有有效舊停損時，快取卡片保留確認時間與參考目標；本金無效不抹去價位，但不產生買進股數。缺停損時明確說明，詳情新增獨立手動假設價位試算，不修改推薦與實際停損。操作及驗證限制見 [R_TARGET_DISPLAY_FIX.md](R_TARGET_DISPLAY_FIX.md)。
 
 既有 **1.4.3+10** 官方名單備援保留：台股官方 JSON 名單逾時、HTTP 錯誤或格式無效時，在同一請求時限內嘗試官方 CSV 備援。上市／上櫃分開驗證出表日期與保存快取，不以下載時間冒充資料日期。本輪名單與續掃進度保留；來源提示與當前進度分別呈現。覆蓋及驗證限制見 [TW_OFFICIAL_CSV_FALLBACK.md](TW_OFFICIAL_CSV_FALLBACK.md)。

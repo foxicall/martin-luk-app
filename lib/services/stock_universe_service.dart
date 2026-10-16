@@ -253,8 +253,14 @@ class StockUniverseService {
         }
       }
       return snapshot;
-    } catch (error) {
-      if (_closed) rethrow;
+    } catch (error, stack) {
+      if (_closed) {
+        // Closing aborts transport work with RequestAbortedException. Expose
+        // this service's lifecycle contract on the shared _load future, so both
+        // its original caller and coalesced callers receive the same error.
+        // Do not turn disposal into a cached/bundled successful result.
+        Error.throwWithStackTrace(StateError('股票池服務已關閉。'), stack);
+      }
       warnings.add('股票池更新失敗（${_errorLabel(error)}）；沒有使用示範行情。');
       if (cached != null) {
         warnings.add('使用 ${cached.asOf.toIso8601String()} 的股票池快取，成分可能已變更。');

@@ -3,7 +3,7 @@
   "hash_algorithm": "SHA256",
   "archive_layout": "project files at archive root",
   "manifest_excludes_itself": true,
-  "file_count": 217,
+  "file_count": 218,
   "files": [
     {
       "path": ".dockerignore",
@@ -42,8 +42,8 @@
     },
     {
       "path": "BUILD_STATUS.md",
-      "bytes": 14558,
-      "sha256": "bd9028acdd84eecf4cc66c810d72773166df6a7e25e38ed2ef64449182ef9e96"
+      "bytes": 15514,
+      "sha256": "f1bb174d83f1d5e35b03a69091b9632a59104faf93d9fc0be1f07913c651f55d"
     },
     {
       "path": "CLOUD_API_GUIDE.md",
@@ -67,8 +67,8 @@
     },
     {
       "path": "GITHUB_MANUAL_UPDATE.md",
-      "bytes": 7457,
-      "sha256": "1734a935fae7531cdab74cec5e3245d4b04c5b37cb1f145447a39a0bccac3f75"
+      "bytes": 8231,
+      "sha256": "9c5f673b2bf41d8c1d36aee0c8cbbc8c44b0f30e130a4760a6d38591f57a0c95"
     },
     {
       "path": "MARKET_DEBUG_LOGGING.md",
@@ -107,8 +107,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 9976,
-      "sha256": "81dcccf639dd404c61f927e817a75daf22a6df87fddfb55e4a862e7d61d7e4d3"
+      "bytes": 10281,
+      "sha256": "8154fac3e99f7cc9ca82d0c8b8a32597a58433d2c26d028cdf48c765ce79ac27"
     },
     {
       "path": "README_HOW_TO_BUILD.md",
@@ -156,9 +156,14 @@
       "sha256": "ed574a805e53c3daf93d442cf8cedab59e51360aa49c84ba66986b4c113b8b22"
     },
     {
+      "path": "UNIVERSE_CLOSE_FIX.md",
+      "bytes": 3342,
+      "sha256": "901c9011d4cec1318254935525c28cfb0a8211b1f5284f0ba3ac3285005847c6"
+    },
+    {
       "path": "UPDATE_FILES.txt",
-      "bytes": 1579,
-      "sha256": "b536a5ebd33104dfbf31f29c65cd17f3797add2f3035db4f61148f1523b06851"
+      "bytes": 1126,
+      "sha256": "ab02a555835130faede285961bf40334ff4286b2709480df0d04b391c9e962d3"
     },
     {
       "path": "US_UNIVERSE_FIX.md",
@@ -552,8 +557,8 @@
     },
     {
       "path": "lib/services/stock_universe_service.dart",
-      "bytes": 40276,
-      "sha256": "f6be3361152bb633b8e78c5a50453e1455a2e418e1441e3dac6ce5d6d13ec9f6"
+      "bytes": 40678,
+      "sha256": "02bb4c4d151427f23e62b68de11ef4a9f1047eab66642a0c61c936faa1fa4f48"
     },
     {
       "path": "lib/services/strategy_engine.dart",

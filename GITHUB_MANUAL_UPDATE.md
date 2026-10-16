@@ -1,3 +1,13 @@
+# 本次最小覆蓋：名單服務關閉例外
+
+版本仍為 **1.4.4+11**。這次核心只需覆蓋 `lib/services/stock_universe_service.dart` 的完整檔案，讓關閉後的JSON／CSV取消一致回傳StateError。兩個測試、工作流及所有門禁不改動。
+
+下載 `martin_luk_universe_close_fix_updates_20261016.zip` 解壓後依路徑覆蓋，或使用單獨下載的完整Dart檔貼到上述GitHub路徑。分支為 `fix/refresh-live-gate-20261014`。必須提交新commit再看Actions；重跑舊提交不會帶入修正。
+
+本包也包含本次指南及更新狀態／清單，核心修改及驗證限制見 [UNIVERSE_CLOSE_FIX.md](UNIVERSE_CLOSE_FIX.md)。不要刪除失敗測試或改為接受任意例外。下方為前次功能更新說明。
+
+---
+
 # GitHub 網頁覆蓋：1.4.4+11 目標價顯示修正
 
 請使用 `martin_luk_r_targets_updates_20261016.zip`，解壓後依 `UPDATE_FILES.txt` 原路徑覆蓋 `fix/refresh-live-gate-20261014` 分支。此包包含目前 GitHub 基線缺少的上一版官方 CSV 備援，不需另外依序疊加舊更新包。完整專案為 `martin_luk_r_targets_20261016.zip`。

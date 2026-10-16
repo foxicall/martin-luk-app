@@ -1,3 +1,13 @@
+# 最新修正：名單服務關閉例外契約（仍為1.4.4+11）
+
+2026-10-16（台北時間）。已讀取 GitHub run `38862604909` 完整日誌：3R／5R及風控群78項通過，網路／控制器／輪掃群195項通過，台股官方備援群37項通過、2項失敗。兩項都預期關閉服務回傳StateError，實際卻收到已取消HTTP的RequestAbortedException。
+
+本次只修核心 `StockUniverseService._load` 的共用錯誤邊界：若服務已關閉，以原stack回傳StateError；一般HTTP錯誤及快取退避不變。兩項測試、全部斷言、NetworkRequest、工作流與pubspec均保持失敗commit原樣，已比對雜湊。
+
+本機指定測試因缺少Flutter退出127，修正後仍需新提交Actions驗證。上述run的真實行情與APK步驟均未執行。詳見 [UNIVERSE_CLOSE_FIX.md](UNIVERSE_CLOSE_FIX.md)。下方為之前交付紀錄，舊版「尚未執行Dart」不代表上面已取得的CI結果。
+
+---
+
 # 最新交付狀態：1.4.4+11 目標價與股數分開計算
 
 2026-10-16（台北時間）。確認原始碼會因快取或無效本金令 `PositionPlan` 為 null，而一起隱藏停損與3R／5R；截圖不足以判定1727.TW原始資料有沒有停損。
