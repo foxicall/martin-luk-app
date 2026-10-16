@@ -1,4 +1,12 @@
-# 最新覆蓋：1.6.0+13 美股完整名單手機輪掃
+# 最新覆蓋：1.6.0+13 畫面測試修正
+
+下載 `martin_luk_ui_test_fix_updates_20261016.zip`，解壓後完整覆蓋3個檔案：`test/market_scan_progress_test.dart`、`test/mobile_us_scope_test.dart`、`test/production_ui_test.dart`。分支為`fix/refresh-live-gate-20261014`，需提交新commit觸發Actions。
+
+版本仍為1.6.0+13，美股完整名單輪掃與正式程式不改；本次只修捲動／點擊layout及新暫停狀態斷言。其餘更新清單可一起覆蓋；完整專案為 `martin_luk_ui_test_fix_20261016.zip`。錯誤證據、保留的斷言與未能本機執行Flutter的限制見 [US_UI_TEST_FIX.md](US_UI_TEST_FIX.md)。
+
+---
+
+# 1.6.0+13 美股完整名單手機輪掃
 
 下載 `martin_luk_mobile_us_updates_20261016.zip`，解壓後依`UPDATE_FILES.txt`將完整檔案覆蓋`fix/refresh-live-gate-20261014`分支，再提交新commit。完整專案為`martin_luk_mobile_us_20261016.zip`。
 

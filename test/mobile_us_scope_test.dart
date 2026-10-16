@@ -287,9 +287,18 @@ void main() {
     expect(find.descendant(of: card,
         matching: find.textContaining('建議部位 ')), findsNothing);
     final disclosures = find.byKey(const ValueKey('dashboard-source-disclosures'));
-    await tester.scrollUntilVisible(disclosures, 250,
+    final disclosureHeader = find.descendant(of: disclosures,
+        matching: find.text('資料來源與限制（2 則）'));
+    // The tile can be laid out while its tappable header remains clipped by
+    // the viewport. Scroll to the actual title, lay out the new position, and
+    // prove the tap will hit it before testing expansion of the source notes.
+    await tester.scrollUntilVisible(disclosureHeader, 250,
         scrollable: find.byType(Scrollable).first);
-    await tester.tap(find.text('資料來源與限制（2 則）'));
+    await tester.ensureVisible(disclosureHeader);
+    await tester.pumpAndSettle();
+    expect(disclosureHeader.hitTestable(), findsOneWidget);
+    expect(find.textContaining(_warning), findsNothing);
+    await tester.tap(disclosureHeader.hitTestable());
     await tester.pumpAndSettle();
     expect(find.textContaining(_warning), findsOneWidget);
     expect(tester.takeException(), isNull);

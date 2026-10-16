@@ -3,7 +3,7 @@
   "hash_algorithm": "SHA256",
   "archive_layout": "project files at archive root",
   "manifest_excludes_itself": true,
-  "file_count": 233,
+  "file_count": 234,
   "files": [
     {
       "path": ".dockerignore",
@@ -52,8 +52,8 @@
     },
     {
       "path": "BUILD_STATUS.md",
-      "bytes": 19807,
-      "sha256": "3abe533480835746c005289a098659d04f402c39e266870e2bac5b42bb1fc1c4"
+      "bytes": 20846,
+      "sha256": "1701248cd9c17db35adcfd11dd6e24a936d364e86127bf8560543e1ebfb81562"
     },
     {
       "path": "CLOUD_API_GUIDE.md",
@@ -77,8 +77,8 @@
     },
     {
       "path": "GITHUB_MANUAL_UPDATE.md",
-      "bytes": 11086,
-      "sha256": "417515a5fbe5cf857ca2e52525788b71bb8cecabe922c9b2d00793fe7576cfd1"
+      "bytes": 11736,
+      "sha256": "bd3f1c27e5049b1dd278895f24f1bd489a3ccfdd7e0ea157a877adffcfeb3ca0"
     },
     {
       "path": "MARKET_DEBUG_LOGGING.md",
@@ -122,8 +122,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 11219,
-      "sha256": "1280ea57590271e468be2dd5cf05485266e1b747784e2d43449fea09c8cdafe8"
+      "bytes": 11441,
+      "sha256": "cd4a80ee7807c84567990ca04b92c1ffa9ea801887aed5a079832022a1e530fa"
     },
     {
       "path": "README_HOW_TO_BUILD.md",
@@ -177,8 +177,13 @@
     },
     {
       "path": "UPDATE_FILES.txt",
-      "bytes": 2036,
-      "sha256": "f0f7743f5edc71448c9d1ff82d8856fbcaf1120dd7e6399f8766d694d4a5d702"
+      "bytes": 1283,
+      "sha256": "56ae89de4ce207ee2bf3c24689dd231a202765d4958e9b9eca17deddfb0982c9"
+    },
+    {
+      "path": "US_UI_TEST_FIX.md",
+      "bytes": 3799,
+      "sha256": "b5afc1b60632c7f36ba7bb2c592db61bbdf63c52e0257b2e862f47ad7eb5cfab"
     },
     {
       "path": "US_UNIVERSE_FIX.md",
@@ -962,8 +967,8 @@
     },
     {
       "path": "test/market_scan_progress_test.dart",
-      "bytes": 18302,
-      "sha256": "a3a7f45fed266c08f1602fd65d945f8b723d48288003a33da6ac5fd97988677f"
+      "bytes": 21217,
+      "sha256": "da5f46c0c1010eefdaa4c4953b5f0d60922cecb333fe778478e1c8cb91539240"
     },
     {
       "path": "test/market_scan_timeout_test.dart",
@@ -997,8 +1002,8 @@
     },
     {
       "path": "test/mobile_us_scope_test.dart",
-      "bytes": 13830,
-      "sha256": "d49e8b33500b5f43abd36e019e4e5d7085380bc87d4930c57d32ad02f0f147f6"
+      "bytes": 14384,
+      "sha256": "c38e07a974cb64534668f61b470027fcfca521135db130a91a643389a9b7f67a"
     },
     {
       "path": "test/model_test.dart",
@@ -1037,8 +1042,8 @@
     },
     {
       "path": "test/production_ui_test.dart",
-      "bytes": 10999,
-      "sha256": "3cb3882f47e889968257d1b92ab5e7ffbe5aea78110434402e8bc2e4a0209bc7"
+      "bytes": 11801,
+      "sha256": "ee43e417b263dd6256d9a8b7be1dd56ebf9da2bb48b2ac8f4a4965ec3ea1824f"
     },
     {
       "path": "test/recommendation_trade_levels_test.dart",

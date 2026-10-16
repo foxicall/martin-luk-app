@@ -1,44 +1,26 @@
-2026-10-16 / App 1.6.0+13 / 手機美股完整名單分批輪掃
-GitHub成功基線commit: 4f19e9b97c1894b629e1d0a2585f022654bd0105
+2026-10-16 / App仍為1.6.0+13 / 六項畫面測試修正
+GitHub失敗基線commit: 5f2c597e7c41281bb9f085da9ac34c872cc0ce69
 目標分支: fix/refresh-live-gate-20261014
 
-所有檔案均為完整可覆蓋內容，依相同相對路徑合併；不要只上傳ZIP，不多套一層資料夾。
-務必含.github、pubspec、資料層／checkpoint／controller／畫面與全部新舊測試。
-美股不再只取核心30：依實際取得完整名單逐頁續掃，每頁最多30、每批最多5。
-名單數量動態，5118為畫面當時數量，不冒稱每檔皆成功；每卡保留原行情時間與頁內RS。
-US/TW進度與ADR分開，US未完成輪跨NY日界續掃；TW舊儲存鍵／schema1相容。
-使用手機正式Yahoo直連即可，無需先部署Python API；背景續掃需明確啟動Android服務。
-操作：提交新commit→Actions通過固定及真實行情門禁→安裝1.6.0+13→切美股下拉→查看30/60/90。
-本機Flutter命令退出127，尚無新版Dart／APK成功結果；不得將前版成功CI當成本版測試。
-原風控、普通股分類、已修生命週期、Android服務及零推薦門禁保留。
-詳見 MOBILE_US_SCAN.md；未啟用背景服務時切背景仍暫停，省電或強制停止仍可能中止。
+核心只需覆蓋3個完整測試檔：market_scan_progress_test、mobile_us_scope_test、production_ui_test。
+實際按鈕／標題捲動與layout完成後驗證hitTestable再真點擊；停止狀態改精確驗證暫停。
+空卡片捲到可視後驗證30/900、剩870，不把當頁零候選當成全市場零買點。
+其餘為指南、狀態、逐檔清單及GitHub仍缺的隱藏配置。全部為完整可覆蓋內容。
+正式lib／Android／資料／pubspec／CI與失敗commit保持相同，已比對98個受保護檔案。
+美股完整名單輪掃、跨日續掃、背景服務、0.5%風控與零推薦門禁保留。
+解壓後依原路徑覆蓋，不要只上傳ZIP，不多套一層目錄；提交新commit觸發Actions。
+本機Flutter命令退出127，修正後Dart測試與APK仍待新提交CI確認。
+完整證據、操作及限制見 US_UI_TEST_FIX.md。
 
 .dockerignore
-.github/workflows/build_apk.yml
 .gitignore
 .metadata
-ANDROID_BACKGROUND_SCAN.md
 BUILD_STATUS.md
 FILE_MANIFEST.json
-FULL_MARKET_SETUP.md
 GITHUB_MANUAL_UPDATE.md
-MOBILE_TW_SCAN.md
-MOBILE_US_SCAN.md
 README.md
 UPDATE_FILES.txt
-lib/app_controller.dart
-lib/screens/dashboard_screen.dart
-lib/screens/settings_screen.dart
-lib/services/live_candidate_repository.dart
-lib/services/mobile_scan_checkpoint.dart
-pubspec.yaml
-scripts/verify_deliverable.py
-test/background_scan_controller_test.dart
-test/core_market_pool_test.dart
-test/dashboard_scope_test.dart
-test/live_repositories_test.dart
+US_UI_TEST_FIX.md
 test/market_scan_progress_test.dart
-test/mobile_tw_polling_test.dart
-test/mobile_us_polling_test.dart
-test/mobile_us_rolling_repository_test.dart
 test/mobile_us_scope_test.dart
+test/production_ui_test.dart

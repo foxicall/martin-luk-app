@@ -339,10 +339,35 @@ void main() {
     await tester.pump();
     await running;
     expect(find.byKey(const ValueKey('market-scan-progress')), findsNothing);
-    expect(find.text('重試'), findsOneWidget);
-    expect(find.text('市場評估未完成，請重試'), findsOneWidget);
     expect(controller.loading, isFalse);
+    expect(controller.isEvaluatingMarket, isFalse);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(controller.mobileScanPaused, isTrue);
+    expect(controller.marketScanProgress!.finished, isTrue);
+    expect(controller.marketScanProgress!.stage, '掃描已停止');
+    expect(controller.snapshot!.isFallback, isTrue);
+    expect(find.text('重試'), findsOneWidget);
+
+    // A manual stop is an explicit mobile pause, even when the retained
+    // snapshot is a diagnostic fallback. The empty card is the second sliver,
+    // after the tall overview; bring it onstage before asserting its text.
+    final paused = find.text('台股輪掃已暫停');
+    final dashboardScroll = find.descendant(
+      of: find.byType(CustomScrollView), matching: find.byType(Scrollable)).first;
+    await tester.scrollUntilVisible(paused, 250, scrollable: dashboardScroll);
+    await tester.pump();
+    expect(paused, findsOneWidget);
+    expect(find.textContaining('已保留本輪進度'), findsOneWidget);
+    expect(find.text('市場評估未完成，請重試'), findsNothing);
+
+    // The cancelled request may finish later, but cannot silently resume the
+    // phone's paused scan or replace the fallback with a success snapshot.
     scans.calls.last.completion.complete(_snapshot(StockMarket.tw));
+    await tester.pump();
+    expect(controller.mobileScanPaused, isTrue);
+    expect(controller.snapshot!.isFallback, isTrue);
+    expect(controller.loading, isFalse);
+    expect(find.byKey(const ValueKey('market-scan-progress')), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -355,15 +380,42 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: DashboardScreen(controller: controller)));
     await tester.pumpAndSettle();
     expect(controller.snapshot!.adrMatchCount, 0);
-    expect(find.textContaining('資料更新時間：'), findsOneWidget);
+    expect(controller.snapshot!.generatedAt, _timestamp);
+    expect(controller.snapshot!.scanCompletedAt, _timestamp);
+    expect(controller.snapshot!.isFallback, isFalse);
+    expect(controller.snapshot!.stale, isFalse);
+    expect(controller.snapshot!.candidatesAreCumulative, isTrue);
+    expect(controller.snapshot!.universeCount, 900);
+    expect(controller.snapshot!.coverageTotalCount, 900);
     expect(controller.snapshot!.coverageScannedCount, 30);
+    expect(controller.snapshot!.coverageEvaluatedCount, 30);
     expect(controller.snapshot!.coverageRemainingCount, 870);
-    expect(find.text('本輪目前尚無符合條件的標的'), findsOneWidget);
+    expect(controller.snapshot!.scanPoolSize, 30);
+    expect(controller.loading, isFalse);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(controller.mobileScanPaused, isFalse);
+    expect(find.textContaining('資料更新時間：'), findsOneWidget);
+    expect(find.byKey(const ValueKey('market-scan-progress')), findsNothing);
+    expect(find.text('重試'), findsNothing);
+
+    // A valid zero-candidate PAGE is not an empty whole-market verdict. The
+    // empty-state sliver sits below the overview and must be scrolled onstage.
+    final empty = find.text('本輪目前尚無符合條件的標的');
+    final dashboardScroll = find.descendant(
+      of: find.byType(CustomScrollView), matching: find.byType(Scrollable)).first;
+    await tester.scrollUntilVisible(empty, 250, scrollable: dashboardScroll);
+    await tester.pump();
+    expect(empty, findsOneWidget);
     expect(find.textContaining('仍有 870 檔尚未嘗試'), findsOneWidget);
+    expect(find.textContaining('本頁沒有新候選不代表整個台股市場都沒有買點'),
+        findsOneWidget);
+    expect(find.text('本輪已取得資料尚無符合標的'), findsNothing);
+    expect(find.text('目前沒有符合條件的標的'), findsNothing);
     expect(find.text('尚未取得評估快照'), findsNothing);
     expect(find.byKey(const ValueKey('market-scan-progress')), findsNothing);
     expect(find.text('重試'), findsNothing);
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('failed cold scan retains counts with an explicit diagnostic fallback', (tester) async {

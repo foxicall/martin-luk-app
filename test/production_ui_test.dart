@@ -81,6 +81,23 @@ AppController _controller(_LiveFixtureRepository repository) => AppController(
       portfolioRepositoryFactory: (_) => _QuoteFixtureRepository(),
     );
 
+/// Scrolling updates the position before the render tree has laid out again.
+/// In particular, tapping immediately after ensureVisible can still use a
+/// button's previous off-screen center. Target the actual control/header,
+/// settle layout, center it in the viewport, then verify the physical hit.
+Future<void> _tapVisible(WidgetTester tester, Finder target) async {
+  await tester.scrollUntilVisible(target, 250,
+      scrollable: find.byType(Scrollable).first);
+  await tester.pumpAndSettle();
+  expect(target, findsOneWidget);
+  await Scrollable.ensureVisible(tester.element(target), alignment: 0.5);
+  await tester.pumpAndSettle();
+  final hit = target.hitTestable();
+  expect(hit, findsOneWidget);
+  await tester.tap(hit);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({
         'martin_luk_settings_v1': jsonEncode(const AppSettings(
@@ -99,10 +116,9 @@ void main() {
     expect(find.byKey(const ValueKey('settings-data-provider')), findsOneWidget);
     expect(find.byKey(const ValueKey('settings-backend-url')), findsNothing);
     expect(find.byKey(const ValueKey('settings-auto-refresh')), findsOneWidget);
-    final save = find.text('儲存設定並更新');
-    await tester.ensureVisible(save);
-    await tester.tap(save);
-    await tester.pumpAndSettle();
+    final save = find.ancestor(of: find.text('儲存設定並更新'),
+        matching: find.byWidgetPredicate((widget) => widget is FilledButton));
+    await _tapVisible(tester, save);
     expect(controller.settings.useMockData, isFalse);
     expect(controller.settings.dataProvider, 'direct');
     expect(controller.settings.apiBaseUrl, isEmpty);
@@ -131,10 +147,9 @@ void main() {
     expect(find.textContaining(_universeWarning), findsNothing);
     expect(find.textContaining('排名僅涵蓋可用資料'), findsOneWidget);
     final disclosures = find.byKey(const ValueKey('dashboard-source-disclosures'));
-    await tester.scrollUntilVisible(disclosures, 200,
-        scrollable: find.byType(Scrollable).first);
-    await tester.tap(find.text('資料來源與限制（1 則）'));
-    await tester.pumpAndSettle();
+    final disclosureHeader = find.descendant(of: disclosures,
+        matching: find.text('資料來源與限制（1 則）'));
+    await _tapVisible(tester, disclosureHeader);
     expect(find.textContaining('尚未確認完整最新上市成分'), findsOneWidget);
     expect(find.textContaining(_universeWarning), findsOneWidget);
     final before = repository.calls;
@@ -156,10 +171,9 @@ void main() {
     expect(find.textContaining('測試網路中斷'), findsOneWidget);
     expect(controller.visibleCandidates, isEmpty);
     final before = repository.calls;
-    final retry = find.text('重試');
-    await tester.ensureVisible(retry);
-    await tester.tap(retry);
-    await tester.pumpAndSettle();
+    final retry = find.ancestor(of: find.text('重試'),
+        matching: find.byWidgetPredicate((widget) => widget is TextButton));
+    await _tapVisible(tester, retry);
     expect(repository.calls, before + 1);
     expect(repository.lastForceRefresh, isTrue);
     expect(find.text('2330.TW'), findsNothing);
