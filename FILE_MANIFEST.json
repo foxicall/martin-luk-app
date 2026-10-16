@@ -3,7 +3,7 @@
   "hash_algorithm": "SHA256",
   "archive_layout": "project files at archive root",
   "manifest_excludes_itself": true,
-  "file_count": 191,
+  "file_count": 192,
   "files": [
     {
       "path": ".dockerignore",
@@ -64,6 +64,11 @@
       "path": "MARKET_DEBUG_LOGGING.md",
       "bytes": 2039,
       "sha256": "c3a18875ed92e703a5d6c0820fbec0f857858658b3b0510f01ef97c256fdbe8a"
+    },
+    {
+      "path": "NETWORK_DISPOSE_TEST_FIX.md",
+      "bytes": 2152,
+      "sha256": "0c90f6a4446131341cdb0e82c2e92e6cb75c26df5ef6ff294c396c536c5ee535"
     },
     {
       "path": "POLLING_TEST_FIX.md",
@@ -827,8 +832,8 @@
     },
     {
       "path": "test/network_request_test.dart",
-      "bytes": 13290,
-      "sha256": "60458d6135ea53b7019728dfc5681a57cf187e6576e97b4d84fd69cb35e456ec"
+      "bytes": 13778,
+      "sha256": "b28534678b3d3a6d69be6a4147eda929c9540f69db9475b6c5ea87eddd818c7f"
     },
     {
       "path": "test/portfolio_controller_test.dart",

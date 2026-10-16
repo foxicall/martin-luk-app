@@ -250,6 +250,7 @@ void main() {
   test('disposing aborts active work without closing an injected client', () async {
     final waiting = Completer<http.StreamedResponse>();
     final started = Completer<void>();
+    final abortObserved = Completer<void>();
     var aborted = false;
     final client = ControllableHttpClient((request) {
       (request as http.AbortableRequest).abortTrigger!.then((_) {
@@ -257,17 +258,23 @@ void main() {
         if (!waiting.isCompleted) {
           waiting.completeError(http.RequestAbortedException(request.url));
         }
+        abortObserved.complete();
       });
       started.complete();
       return waiting.future;
     });
     final transport = NetworkRequest(client: client);
+    addTearDown(transport.close);
     final result = transport.get(uri);
     final expectation = expectLater(result,
         throwsA(isA<http.RequestAbortedException>()));
-    await started.future;
+    await started.future.timeout(const Duration(seconds: 1));
     transport.close();
-    await expectation;
+    await expectation.timeout(const Duration(seconds: 1));
+    // The wrapper and the injected client observe the same abort trigger with
+    // separate listeners. Completion of the wrapper does not acknowledge that
+    // the client's listener has run; wait for that actual notification too.
+    await abortObserved.future.timeout(const Duration(seconds: 1));
     expect(aborted, isTrue);
     expect(client.closeCalls, 0);
     await expectLater(transport.get(uri), throwsStateError);
