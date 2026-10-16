@@ -630,28 +630,62 @@ void main() {
     api.dailyFailures['AAPL'] = const MarketDataException('HTTP 429', statusCode: 429);
     api.dailyCharts['TSLA'] = _daily('TSLA', lowAdr: true);
     final progress = <MarketScanProgress>[];
+    var observerErrors = 0;
     final repository = DirectLiveCandidateRepository(api: api, universe: universe,
       preferences: preferences, now: () => _now, interBatchDelay: Duration.zero);
-    final snapshot = await repository.fetchWithProgress(StockMarket.us,
-      adrThreshold: 5, forceRefresh: true, onProgress: (value) {
-        progress.add(value);
-        if (value.completedCount == 5) throw StateError('Faulty UI observer');
-      });
-    expect(progress.where((row) => !row.finished && row.completedCount > 0)
-        .map((row) => row.completedCount), [5, 10, 12]);
-    final finished = progress.last;
-    expect(finished.finished, true);
-    expect(finished.attemptedCount, 12);
-    expect(finished.completedCount, 12);
-    expect(finished.evaluatedCount, 11);
-    expect(finished.failedCount, 1);
-    expect(finished.adrMatchCount, 10);
-    expect(finished.fraction, 1);
-    expect(finished.label, contains('已掃描 12/12 檔'));
-    expect(snapshot.adrMatchCount, 10);
-    expect(snapshot.candidates.length, 10);
-    expect(snapshot.missingSymbols, ['AAPL']);
-    repository.close(); api.close(); universe.close();
+    try {
+      final snapshot = await repository.fetchWithProgress(StockMarket.us,
+        adrThreshold: 5, forceRefresh: true, onProgress: (value) {
+          progress.add(value);
+          if (value.completedCount == 5) {
+            observerErrors++;
+            throw StateError('Faulty UI observer');
+          }
+        });
+      // Validated daily data is published per stock, then may be updated by
+      // intraday data and a batch boundary. Do not require exactly one event
+      // per batch: that would reject useful partial data while a sibling waits.
+      final completed = progress
+          .where((row) => !row.finished && row.completedCount > 0)
+          .map((row) => row.completedCount).toList();
+      expect(completed, containsAllInOrder([5, 10, 12]),
+          reason: 'Every completed batch must still be reported in order.');
+      expect(progress.any((row) => !row.finished &&
+          row.completedCount > 0 && row.completedCount < 5 &&
+          row.partialSnapshot != null), isTrue,
+          reason: 'Validated observations must be visible before the first batch finishes.');
+      for (var index = 1; index < progress.length; index++) {
+        expect(progress[index].completedCount,
+            greaterThanOrEqualTo(progress[index - 1].completedCount),
+            reason: 'Daily/intraday updates must not double-count or rewind progress.');
+        expect(progress[index].attemptedCount,
+            greaterThanOrEqualTo(progress[index - 1].attemptedCount));
+      }
+      for (final row in progress) {
+        expect(row.completedCount, row.evaluatedCount + row.failedCount,
+            reason: 'A failed symbol is completed work, never a successful evaluation.');
+        expect(row.completedCount, inInclusiveRange(0, row.attemptedCount));
+        expect(row.attemptedCount, inInclusiveRange(0, row.poolSize));
+        expect(row.adrMatchCount, inInclusiveRange(0, row.evaluatedCount));
+      }
+      expect(observerErrors, greaterThan(0),
+          reason: 'The faulty observer must actually run before testing isolation.');
+      expect(progress.where((row) => row.finished), hasLength(1));
+      final finished = progress.last;
+      expect(finished.finished, true);
+      expect(finished.attemptedCount, 12);
+      expect(finished.completedCount, 12);
+      expect(finished.evaluatedCount, 11);
+      expect(finished.failedCount, 1);
+      expect(finished.adrMatchCount, 10);
+      expect(finished.fraction, 1);
+      expect(finished.label, contains('已掃描 12/12 檔'));
+      expect(snapshot.adrMatchCount, 10);
+      expect(snapshot.candidates.length, 10);
+      expect(snapshot.missingSymbols, ['AAPL']);
+    } finally {
+      repository.close(); api.close(); universe.close();
+    }
   });
 
   test('disposed progressive scan does not commit or notify after a late response', () async {

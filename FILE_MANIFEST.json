@@ -3,7 +3,7 @@
   "hash_algorithm": "SHA256",
   "archive_layout": "project files at archive root",
   "manifest_excludes_itself": true,
-  "file_count": 202,
+  "file_count": 203,
   "files": [
     {
       "path": ".dockerignore",
@@ -31,14 +31,19 @@
       "sha256": "eaff706bccb0f2d2c9fb3e4c8208bc6611d1451740d4c13828ba84a2e3a71187"
     },
     {
+      "path": "BATCH_PROGRESS_TEST_FIX.md",
+      "bytes": 2747,
+      "sha256": "7bcd543160e60009cd0b1a91579d0c83d5a017238d0acf104bf9b79cf1573395"
+    },
+    {
       "path": "BUILD_ANDROID.md",
       "bytes": 4993,
       "sha256": "373ad3f71ac475ec345c52fdc7bfd61c9aedce8b8aa3b3732034d552faf44b34"
     },
     {
       "path": "BUILD_STATUS.md",
-      "bytes": 8101,
-      "sha256": "1437aa23c3fdb65da4486262a538cd167504c888644527abc4e608062d151d48"
+      "bytes": 8870,
+      "sha256": "8ebffae98c678075ac3ec840916e0182c68dc1d5beb056da8f762f62510729c6"
     },
     {
       "path": "CLOUD_API_GUIDE.md",
@@ -127,8 +132,8 @@
     },
     {
       "path": "UPDATE_FILES.txt",
-      "bytes": 1317,
-      "sha256": "2fff2cbdbcc534d2d5ee382c8d64882f7259c144a4187a7f6921f7b9fb736c84"
+      "bytes": 917,
+      "sha256": "dadfe19066e445e5324659c2a6e3c53fd9fb8988aa6a013ea84ef32a836a4be4"
     },
     {
       "path": "US_UNIVERSE_FIX.md",
@@ -832,8 +837,8 @@
     },
     {
       "path": "test/live_repositories_test.dart",
-      "bytes": 41510,
-      "sha256": "643956e3adc00056f0342f6fabad885a2b49753aadd9fcbac598c3881f5b9ca2"
+      "bytes": 43332,
+      "sha256": "8afb559ae2ecbdb04658828bb25434d0b2d45d0c084b890e9f53203a6fa7758d"
     },
     {
       "path": "test/live_risk_helpers_test.dart",

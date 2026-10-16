@@ -1,30 +1,15 @@
-2026-10-16 / App 1.4.0+7 / 手機台股完整名單分批輪掃
-本包每個檔案均為完整可覆蓋內容，依原路徑覆蓋 GitHub 分支 fix/refresh-live-gate-20261014。
-適用已套用 martin_luk_full_market_setup_20261016.zip（1.3.2+6）的專案；舊版不確定時使用完整包。
-台股可選 Yahoo Finance 手機直接連線，無需部署 Python API；美股手機核心池仍最多 30 檔。
-含本機續掃、失敗跳過、跨頁候選、暫停/恢復與四項設定/總覽 CI 失敗修正。
-操作見 MOBILE_TW_SCAN.md。此環境無 Flutter SDK，Dart 測試與 APK 必須由新版 Actions 驗證。
-請將下列檔案依路徑上傳，不要只將 ZIP 上傳至 repository。
+2026-10-16 / App 1.4.0+7 / 逐檔進度測試修正
+適用上一份 martin_luk_mobile_tw_20261016.zip 或該更新包已完整套用的專案。
+每個檔案都是完整內容，依原路徑覆蓋 GitHub 分支 fix/refresh-live-gate-20261014。
+功能測試檔只修改 test/live_repositories_test.dart 的一項測試，其餘測試保留。
+正式 App、台股輪掃、行情 API、策略及 CI 工作流均未改動，版本保持 1.4.0+7。
+失敗原因是舊測試要求進度事件只能 [5,10,12]，新服務會逐檔回報。
+修正保留精確終態斷言，增加進度不倒退、計數一致及 observer 確實觸發檢查。
+本環境無 Flutter SDK，尚無修正後 Dart 測試或 APK 成功證據；請提交後由 Actions 驗證。
+詳細原因與操作見 BATCH_PROGRESS_TEST_FIX.md。
 
-.github/workflows/build_apk.yml
+BATCH_PROGRESS_TEST_FIX.md
 BUILD_STATUS.md
-CLOUD_API_GUIDE.md
 FILE_MANIFEST.json
-FULL_MARKET_SETUP.md
-GITHUB_MANUAL_UPDATE.md
-MOBILE_TW_SCAN.md
-README.md
 UPDATE_FILES.txt
-lib/app_controller.dart
-lib/screens/dashboard_screen.dart
-lib/screens/settings_screen.dart
-lib/services/candidate_repository.dart
-lib/services/live_candidate_repository.dart
-lib/services/mobile_scan_checkpoint.dart
-pubspec.yaml
-scripts/verify_deliverable.py
-test/backend_setup_settings_test.dart
-test/dashboard_scope_test.dart
 test/live_repositories_test.dart
-test/mobile_tw_polling_test.dart
-test/mobile_tw_rolling_repository_test.dart
