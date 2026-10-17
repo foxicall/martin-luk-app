@@ -9,7 +9,7 @@ import io.flutter.embedding.engine.FlutterEngine
  * No background isolate is started, so a resumed screen cannot race a second
  * scanner for the same persisted cursor.
  */
-class MainActivity : FlutterActivity() {
+open class MainActivity : FlutterActivity() {
     override fun provideFlutterEngine(context: Context): FlutterEngine? =
         ScanServiceBridge.cachedEngine()
 

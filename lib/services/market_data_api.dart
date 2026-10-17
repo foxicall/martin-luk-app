@@ -3,7 +3,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as timezone_data;
@@ -34,6 +34,7 @@ class MarketDataApi {
     http.Client? client,
     SharedPreferences? preferences,
     Future<SharedPreferences> Function()? preferencesLoader,
+    Future<bool> Function(SharedPreferences, String, String)? cacheWriter,
     DateTime Function()? now,
     Future<void> Function(Duration)? delay,
     this.requestTimeout = defaultTimeout,
@@ -42,6 +43,7 @@ class MarketDataApi {
        _ownsClient = client == null,
        _preferences = preferences,
        _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance,
+       _cacheWriter = cacheWriter,
        _now = now ?? DateTime.now,
        _delay = delay ?? Future<void>.delayed {
     if (requestTimeout <= Duration.zero || requestTimeout > defaultTimeout) {
@@ -58,6 +60,14 @@ class MarketDataApi {
   static const Duration defaultTimeout = Duration(seconds: 8);
   static const Duration defaultStorageTimeout = Duration(seconds: 2);
   static const int maximumConcurrentRequests = 5;
+  /// These limits apply to expendable OHLC payloads, never to holdings,
+  /// account settings, exchange metadata or the rolling scan journal.
+  static const int maximumCacheEntries = 96;
+  static const int maximumCacheBytes = 8 * 1024 * 1024;
+  static const int maximumCacheEntryBytes = 512 * 1024;
+  static const Duration maximumCacheAge = Duration(days: 7);
+  static const String cachePrefix = 'market-data-yahoo-v1:';
+  static final _cacheStores = Expando<_ChartCacheStore>('bounded Yahoo cache');
   static const Map<String, String> requestHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
         'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -74,15 +84,25 @@ class MarketDataApi {
   SharedPreferences? _preferences;
   Future<SharedPreferences?>? _preferencesFuture;
   final Future<SharedPreferences> Function() _preferencesLoader;
+  // Optional storage seam for verifying a hung platform write. Production
+  // uses SharedPreferences.setString; the live verification gate injects none.
+  final Future<bool> Function(SharedPreferences, String, String)? _cacheWriter;
   final DateTime Function() _now;
   final Future<void> Function(Duration) _delay;
   final Duration requestTimeout;
   final Duration storageTimeout;
-  final Map<String, _CachedChart> _memoryCache = {};
+  final _memoryCache = LinkedHashMap<String, _CachedChart>();
+  int _memoryCacheBytes = 0;
   final Map<String, Future<MarketChart>> _pending = {};
   DateTime? _rateLimitedUntil;
   bool _closed = false;
-  static const _prefix = 'market-data-yahoo-v1:';
+  bool _cachePrepared = false;
+
+  @visibleForTesting
+  int get debugMemoryCacheEntries => _memoryCache.length;
+  /// Encoded payload bytes are a deterministic budget, not a Dart heap profiler.
+  @visibleForTesting
+  int get debugMemoryCacheBytes => _memoryCacheBytes;
 
   Future<MarketChart> fetchDaily(String symbol, StockMarket market,
       {bool forceRefresh = false}) => _fetch(symbol, market,
@@ -211,9 +231,15 @@ class MarketDataApi {
       final chart = _parse(decoded, symbol: symbol, market: market,
           interval: interval, fetchedAt: fetchedAt);
       if (_closed) throw StateError('行情服務已關閉。');
-      await _saveCache(key, _CachedChart(decoded, fetchedAt));
+      // A valid but unexpectedly huge provider response may be displayed; it
+      // must not become a permanent payload copied into Android preferences.
+      if (received.bodyBytes.length <= maximumCacheEntryBytes) {
+        await _saveCache(key, _CachedChart.encode(decoded, fetchedAt));
+      }
+      if (_closed) throw StateError('行情服務已關閉。');
       return chart;
     } catch (error) {
+      if (_closed) throw StateError('行情服務已關閉。');
       if (error is TimeoutException) {
         debugPrint('[MarketAPI] [TIMEOUT] $symbol ($interval / $endpointHost): $error');
       } else {
@@ -556,52 +582,211 @@ class MarketDataApi {
     }
   }
 
+  bool _isRetained(DateTime fetchedAt) {
+    final age = _now().toUtc().difference(fetchedAt);
+    return !age.isNegative && age <= maximumCacheAge;
+  }
+
+  void _forgetMemory(String key) {
+    final previous = _memoryCache.remove(key);
+    if (previous != null) _memoryCacheBytes -= previous.bytes;
+  }
+
+  void _remember(String key, _CachedChart chart) {
+    _forgetMemory(key);
+    if (_closed || chart.bytes > maximumCacheEntryBytes ||
+        !_isRetained(chart.fetchedAt)) return;
+    // Both disk reads and HTTP successes use this path. In particular, an
+    // offline sweep cannot bypass the old save-only 96-entry limit.
+    _memoryCache[key] = chart;
+    _memoryCacheBytes += chart.bytes;
+    while (_memoryCache.length > maximumCacheEntries ||
+        _memoryCacheBytes > maximumCacheBytes) {
+      _forgetMemory(_memoryCache.keys.first);
+    }
+  }
+
+  _ChartCacheStore _store(SharedPreferences preferences) =>
+      _cacheStores[preferences] ??= _ChartCacheStore();
+
+  /// Remove only expendable market data. Never call preferences.clear(): that
+  /// would destroy account capital, holdings and the saved universe cursor.
+  /// Reserve room BEFORE a write so even an interrupted write cannot exceed
+  /// the budget. Access order is shared by API instances using the same prefs.
+  Future<void> _trimDisk(SharedPreferences preferences, _ChartCacheStore store,
+      _ChartCacheLease lease, {String? replacementKey, _CachedChart? replacement}) async {
+    final discovered = <String, _ChartDiskEntry>{};
+    final remove = <String>[];
+    if (!store.initialized) {
+      var inspected = 0;
+      for (final key in preferences.getKeys()) {
+        if (!key.startsWith(cachePrefix)) continue;
+        if (++inspected % 32 == 0) {
+          await Future<void>.delayed(Duration.zero);
+          if (!lease.active) return;
+        }
+        try {
+          final raw = preferences.getString(key);
+          if (raw == null || raw.length > maximumCacheEntryBytes) {
+            remove.add(key);
+            continue;
+          }
+          final bytes = utf8.encode(raw).length;
+          // Inspect the short envelope, never decode all cached candle arrays.
+          final stamp = RegExp(r'"fetched_at"\s*:\s*"([^"\\]+)"')
+              .firstMatch(raw.substring(0, math.min(raw.length, 160)))?.group(1);
+          final fetchedAt = stamp == null ? null : DateTime.tryParse(stamp)?.toUtc();
+          if (bytes > maximumCacheEntryBytes || fetchedAt == null ||
+              !_isRetained(fetchedAt)) {
+            remove.add(key);
+            continue;
+          }
+          discovered[key] = _ChartDiskEntry(key, bytes, fetchedAt);
+        } catch (_) {
+          remove.add(key);
+        }
+      }
+    }
+    // After the one-time scan, only tiny metadata is inspected. A full market
+    // sweep must not repeatedly encode/decode every retained 8 MiB cache.
+    final indexed = store.initialized ? store.entries : discovered;
+    final records = <_ChartDiskEntry>[];
+    for (final entry in indexed.values) {
+      if (entry.key == replacementKey) continue;
+      if (!_isRetained(entry.fetchedAt)) {
+        remove.add(entry.key);
+      } else {
+        records.add(entry);
+      }
+    }
+    records.sort((left, right) {
+      final leftAccess = store.accessed[left.key];
+      final rightAccess = store.accessed[right.key];
+      if (leftAccess != null && rightAccess != null) {
+        return rightAccess.compareTo(leftAccess);
+      }
+      if (leftAccess != null) return -1;
+      if (rightAccess != null) return 1;
+      final time = right.fetchedAt.compareTo(left.fetchedAt);
+      return time != 0 ? time : left.key.compareTo(right.key);
+    });
+    var count = replacement == null ? 0 : 1;
+    var bytes = replacement?.bytes ?? 0;
+    for (final entry in records) {
+      if (count >= maximumCacheEntries || bytes + entry.bytes > maximumCacheBytes) {
+        remove.add(entry.key);
+      } else {
+        count++;
+        bytes += entry.bytes;
+      }
+    }
+    for (final key in remove) {
+      if (!lease.active) return;
+      if (!await lease.write(() => preferences.remove(key))) return;
+      store.accessed.remove(key);
+      indexed.remove(key);
+    }
+    if (!lease.active) return;
+    if (!store.initialized) {
+      store.entries.addAll(discovered);
+      store.initialized = true;
+    }
+    store.accessed.removeWhere((key, _) => !store.entries.containsKey(key));
+  }
+
   Future<_CachedChart?> _readCache(String key) async {
-    if (_memoryCache.containsKey(key)) return _memoryCache[key];
+    final memory = _memoryCache[key];
+    if (memory != null) {
+      if (_isRetained(memory.fetchedAt)) {
+        _remember(key, memory);
+        final preferences = _preferences;
+        if (preferences != null) _store(preferences).touch('$cachePrefix$key');
+        return memory;
+      }
+      _forgetMemory(key);
+    }
     final preferences = await _getPreferences();
+    if (_closed || preferences == null) return null;
+    final store = _store(preferences);
+    // Old versions may have persisted one large JSON value for every stock.
+    // Android also performs a native pre-engine cleanup; this is the bounded
+    // cross-platform safety net and never blocks a real HTTP request forever.
+    if (!_cachePrepared) {
+      _cachePrepared = await store.run(storageTimeout, () => _closed, (lease) =>
+          _trimDisk(preferences, store, lease));
+      if (_closed) return null;
+    }
     try {
-      final raw = preferences?.getString('$_prefix$key');
-      if (raw == null) return null;
+      final raw = preferences.getString('$cachePrefix$key');
+      if (raw == null) {
+        store.entries.remove('$cachePrefix$key');
+        return null;
+      }
+      if (raw.length > maximumCacheEntryBytes ||
+          utf8.encode(raw).length > maximumCacheEntryBytes) {
+        throw const FormatException('行情快取超過單筆容量上限。');
+      }
       final row = jsonDecode(raw);
       if (row is! Map<String, dynamic> || row['document'] is! Map<String, dynamic> ||
           row['fetched_at'] is! String) throw const FormatException('快取格式無效。');
       final time = DateTime.parse(row['fetched_at'] as String).toUtc();
-      final cache = _CachedChart(row['document'] as Map<String, dynamic>, time);
-      _memoryCache[key] = cache;
+      if (!_isRetained(time)) throw const FormatException('行情快取已超過保留期限。');
+      final cache = _CachedChart(row['document'] as Map<String, dynamic>, time, raw);
+      _remember(key, cache);
+      store.touch('$cachePrefix$key');
       return cache;
     } catch (_) {
-      try {
-        await preferences?.remove('$_prefix$key').timeout(storageTimeout);
-      } catch (_) { /* Broken persistence cannot block a live request. */ }
+      await _removeCache(key);
       return null;
     }
   }
 
   Future<void> _saveCache(String key, _CachedChart chart) async {
-    _memoryCache[key] = chart;
-    // Bound process memory during all-universe scans; persisted daily caches
-    // remain available for the next app launch or a network interruption.
-    if (_memoryCache.length > 96) _memoryCache.remove(_memoryCache.keys.first);
+    if (_closed || chart.bytes > maximumCacheEntryBytes) return;
+    _remember(key, chart);
     try {
       final preferences = await _getPreferences();
-      await preferences?.setString('$_prefix$key', jsonEncode({
-        'fetched_at': chart.fetchedAt.toIso8601String(), 'document': chart.json,
-      })).timeout(storageTimeout);
+      if (_closed || preferences == null) return;
+      final store = _store(preferences);
+      await store.run(storageTimeout, () => _closed, (lease) async {
+        await _trimDisk(preferences, store, lease,
+            replacementKey: '$cachePrefix$key', replacement: chart);
+        if (!lease.active) return;
+        if (!await lease.write(() => _cacheWriter?.call(
+            preferences, '$cachePrefix$key', chart.raw) ??
+            preferences.setString('$cachePrefix$key', chart.raw))) return;
+        // Updating the lightweight index is valid even if close() happened
+        // during a native write: that write already exists on disk. It does
+        // not resurrect this API's RAM cache or start another native write.
+        store.entries['$cachePrefix$key'] =
+            _ChartDiskEntry('$cachePrefix$key', chart.bytes, chart.fetchedAt);
+        if (lease.active) store.touch('$cachePrefix$key');
+      });
     } catch (_) {
-      // Cache write failures must not discard a successful live response.
+      // Cache failures cannot discard a valid quote or hold the refresh lock.
     }
   }
 
   Future<void> _removeCache(String key) async {
-    _memoryCache.remove(key);
+    _forgetMemory(key);
+    if (_closed) return;
     try {
-      await (await _getPreferences())?.remove('$_prefix$key').timeout(storageTimeout);
+      final preferences = await _getPreferences();
+      if (_closed || preferences == null) return;
+      final store = _store(preferences);
+      await store.run(storageTimeout, () => _closed, (lease) async {
+        if (!await lease.write(() => preferences.remove('$cachePrefix$key'))) return;
+        store.accessed.remove('$cachePrefix$key');
+        store.entries.remove('$cachePrefix$key');
+      });
     } catch (_) { /* Removal is best effort. */ }
   }
 
   void close() {
     if (_closed) return;
     _closed = true;
+    _memoryCache.clear();
+    _memoryCacheBytes = 0;
     for (final pending in _activeRequests) { pending.cancel(); }
     _activeRequests.clear();
     if (_ownsClient) _client.close();
@@ -667,9 +852,106 @@ class _YahooRequestSlot {
 }
 
 class _CachedChart {
-  const _CachedChart(this.json, this.fetchedAt);
+  _CachedChart(this.json, this.fetchedAt, this.raw)
+      : bytes = utf8.encode(raw).length;
+  factory _CachedChart.encode(Map<String, dynamic> json, DateTime fetchedAt) =>
+      _CachedChart(json, fetchedAt, jsonEncode({
+        'fetched_at': fetchedAt.toIso8601String(), 'document': json,
+      }));
   final Map<String, dynamic> json;
   final DateTime fetchedAt;
+  final String raw;
+  final int bytes;
+}
+
+class _ChartDiskEntry {
+  const _ChartDiskEntry(this.key, this.bytes, this.fetchedAt);
+  final String key;
+  final int bytes;
+  final DateTime fetchedAt;
+}
+
+/// A shared, bounded writer lane for one preferences instance. Only eight
+/// operations may be queued; excess cache work is expendable. A timed-out
+/// platform write quarantines this cache writer for this instance, so stalled
+/// native callbacks cannot accumulate indefinitely behind repeated scans.
+class _ChartCacheStore {
+  static const maximumPending = 8;
+  final accessed = LinkedHashMap<String, int>();
+  int _accessSequence = 0;
+  final entries = <String, _ChartDiskEntry>{};
+  bool initialized = false;
+  Future<void> _tail = Future<void>.value();
+  int _pending = 0;
+  bool _disabled = false;
+
+  void touch(String key) {
+    if (!entries.containsKey(key)) return;
+    accessed.remove(key);
+    accessed[key] = ++_accessSequence;
+    while (accessed.length > MarketDataApi.maximumCacheEntries) {
+      accessed.remove(accessed.keys.first);
+    }
+  }
+
+  Future<bool> run(Duration timeout, bool Function() closed,
+      Future<void> Function(_ChartCacheLease) action) {
+    if (_disabled || closed() || _pending >= maximumPending) {
+      return Future<bool>.value(false);
+    }
+    _pending++;
+    final lease = _ChartCacheLease(timeout, closed, () { _disabled = true; });
+    final operation = _tail.then<bool>((_) async {
+      if (_disabled || !lease.active) return false;
+      try {
+        await action(lease);
+        return lease.active;
+      } catch (_) {
+        return false;
+      }
+    });
+    final bounded = operation.timeout(timeout, onTimeout: () {
+      // Both timers share a deadline. Quarantine synchronously here as well,
+      // before the next lane item can run, if a native write is still pending.
+      if (lease.writing) lease.stalled();
+      lease.cancel();
+      return false;
+    });
+    _tail = bounded.then<void>((_) {});
+    return bounded.whenComplete(() { _pending--; });
+  }
+}
+
+class _ChartCacheLease {
+  _ChartCacheLease(this.timeout, this.closed, this.onStalledWrite);
+  final Duration timeout;
+  final bool Function() closed;
+  final void Function() onStalledWrite;
+  final _watch = Stopwatch()..start();
+  bool _cancelled = false;
+  bool writing = false;
+  bool get active => !_cancelled && !closed() && _watch.elapsed < timeout;
+  void cancel() { _cancelled = true; }
+  void stalled() {
+    cancel();
+    onStalledWrite();
+  }
+
+  Future<bool> write(Future<bool> Function() operation) async {
+    if (!active) return false;
+    final left = timeout - _watch.elapsed;
+    writing = true;
+    try {
+      final saved = await operation().timeout(left);
+      if (!saved) throw StateError('行情快取未能儲存。');
+      return true;
+    } on TimeoutException {
+      stalled();
+      rethrow;
+    } finally {
+      writing = false;
+    }
+  }
 }
 
 /// Canonical Yahoo class-share spelling and TWSE/TPEx suffix. Index IDs are only

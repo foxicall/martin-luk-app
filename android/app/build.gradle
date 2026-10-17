@@ -74,4 +74,8 @@ flutter {
 dependencies {
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
     implementation 'androidx.multidex:multidex:2.0.1'
+    testImplementation 'junit:junit:4.13.2'
+    // The Android runtime provides XmlPullParser. JVM migration tests use its
+    // standalone implementation without creating an Android/Flutter engine.
+    testImplementation 'net.sf.kxml:kxml2:2.3.0'
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/market_data.dart';
@@ -13,6 +14,13 @@ import 'market_data_api.dart';
 import 'market_scan_progress.dart';
 import 'mobile_scan_checkpoint.dart';
 import 'stock_universe_service.dart';
+
+/// Only the immutable checkpoint is sent across the isolate boundary. Parsing
+/// and validation of a saved 5,000-member universe must not block UI frames.
+MobileScanCheckpoint _decodeMobileScanCheckpoint(String text) =>
+    MobileScanCheckpoint.fromJson(jsonDecode(text) as Map<String, dynamic>);
+
+typedef CheckpointPreferenceWriter = Future<bool> Function(String key, String value);
 
 /// Serverless scanner: both markets resume pages across every returned member.
 /// Each immutable round uses the actual provider universe. Five-stock chunks
@@ -27,6 +35,7 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
     int? usPageSize,
     this.twPageSize = 30,
     this.batchSize = 5,
+    CheckpointPreferenceWriter? checkpointWriter,
     this.interBatchDelay = const Duration(milliseconds: 150)})
       : _api = api ?? MarketDataApi(preferences: preferences, now: now),
         _universe = universe ?? StockUniverseService(preferences: preferences, now: now,
@@ -36,7 +45,8 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
         usPageSize = usPageSize ?? corePoolSize ?? 30,
         scanBudget = _boundedBudget(scanBudget, 'scanBudget'),
         quoteRefreshBudget = _boundedBudget(quoteRefreshBudget, 'quoteRefreshBudget'),
-        _preferences = preferences, _now = now ?? DateTime.now {
+        _preferences = preferences, _now = now ?? DateTime.now,
+        _checkpointWriter = checkpointWriter {
     if (batchSize < 1 || batchSize > 5) throw ArgumentError.value(batchSize, 'batchSize');
     if (corePoolSize != null && usPageSize != null && corePoolSize != usPageSize) {
       throw ArgumentError('corePoolSize 與 usPageSize 同時設定時必須相同。');
@@ -70,6 +80,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
   final int twPageSize;
   final int batchSize;
   final Duration interBatchDelay;
+  // Optional storage transport for deterministic write/failure regression tests.
+  // Production still uses the existing keys and SharedPreferences instance.
+  final CheckpointPreferenceWriter? _checkpointWriter;
   SharedPreferences? _preferences;
   final _engine = const LiveStrategyEngine();
   final Map<String, CandidateSnapshot> _snapshots = {};
@@ -243,8 +256,15 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
       final intradayPending = <String>{};
       CandidateSnapshot? partial;
       var storageFailed = false;
+      var checkpointRevision = 0;
+      var builtRevision = -1;
+      var builtFinalPage = false;
+      MobileScanCheckpoint? builtCheckpoint;
 
       MobileScanCheckpoint buildCheckpoint({bool finalPage = false}) {
+        final cached = builtCheckpoint;
+        if (cached != null && builtRevision == checkpointRevision &&
+            builtFinalPage == finalPage) return cached;
         final pageCandidates = _engine.rank(evaluations.values.toList())
             .where((row) => row.adrPercent >= threshold)
             .map(_withPageRankingNote).toList();
@@ -263,7 +283,7 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
         final pageComplete = attempted.length == pool.length &&
             evaluations.length == pool.length && intradayPending.isEmpty;
         final now = _now().toUtc();
-        return MobileScanCheckpoint(market: market, symbols: symbols, threshold: threshold,
+        final value = MobileScanCheckpoint(market: market, symbols: symbols, threshold: threshold,
           members: roundMembers,
           universeWarnings: initial.universeWarnings,
           day: initial.day, round: initial.round, attempted: allAttempted,
@@ -306,6 +326,10 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
             if (storageFailed)
               '本機進度未儲存，僅暫存在記憶體，重啟可能重掃；行情計算結果仍可查看。',
           ]);
+        builtCheckpoint = value;
+        builtRevision = checkpointRevision;
+        builtFinalPage = finalPage;
+        return value;
       }
 
       void report({bool finished = false}) {
@@ -332,25 +356,30 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
         _checkpoints[key] = value;
         _activeThresholds[market] = threshold;
         if (!await _saveCheckpoint(value, budget: run.remaining)) {
-          storageFailed = true;
+          if (!storageFailed) {
+            storageFailed = true;
+            checkpointRevision++;
+          }
         }
       }
 
       void record(LiveEvaluation value) {
         if (_closed || !run.active) return;
         evaluations[value.stock.symbol] = value;
+        checkpointRevision++;
         report();
       }
 
       Future<void> evaluateStock(String symbol) async {
         if (_closed || !run.active) return;
-        attempted.add(symbol);
+        if (attempted.add(symbol)) checkpointRevision++;
         final stock = bySymbol[symbol];
         if (stock == null) {
           // Older journals did not store company metadata. Preserve their
           // attempted prefix and disclose unavailable members; never invent a
           // security name or silently restart the first thirty stocks.
           failures[symbol] = '舊版進度缺少此檔股票元資料且最新名單未提供，已跳過。';
+          checkpointRevision++;
           report();
           return;
         }
@@ -366,7 +395,7 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
               benchmark: benchmark, now: _now().toUtc());
           if (_closed || !run.active) return;
           if (adr < threshold) { record(dailyEvaluation); return; }
-          intradayPending.add(stock.symbol);
+          if (intradayPending.add(stock.symbol)) checkpointRevision++;
           record(dailyEvaluation);
           try {
             final intraday = await run.wait(_api.fetchIntraday(stock.symbol, market,
@@ -377,11 +406,12 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
           } catch (error) {
             if (_closed || !run.active) return;
             intradayFailures[stock.symbol] = _errorReason(error);
+            checkpointRevision++;
             bundle = ChartBundle(daily: daily,
                 intradayError: '盤中資料取得失敗：${_errorReason(error)}');
           }
           if (_closed || !run.active) return;
-          intradayPending.remove(stock.symbol);
+          if (intradayPending.remove(stock.symbol)) checkpointRevision++;
           record(_engine.evaluate(stock: stock, data: bundle,
               benchmark: benchmark, now: _now().toUtc()));
         } catch (error) {
@@ -389,8 +419,10 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
           if (evaluations.containsKey(stock.symbol)) {
             intradayPending.remove(stock.symbol);
             intradayFailures[stock.symbol] = _errorReason(error);
+            checkpointRevision++;
           } else {
             failures[stock.symbol] = _errorReason(error);
+            checkpointRevision++;
           }
         } finally {
           if (!_closed && run.active) report();
@@ -402,16 +434,25 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
         for (var offset = 0; offset < pool.length; offset += batchSize) {
           if (_closed || !run.active) break;
           final chunk = pool.skip(offset).take(batchSize).toList();
-          // Start at most five real symbols. Record that actual attempted
-          // prefix immediately, so background/disposal can resume correctly.
+          // Save the first started prefix immediately. Thereafter commit each
+          // completed chunk once; duplicating the full 5,000-member journal at
+          // both ends of every chunk amplified Android preference-file writes.
+          // Stopping a later in-flight chunk may repeat at most five symbols
+          // after restart, but never skips an unattempted or unverified member.
           final work = Future.wait(chunk.map(evaluateStock));
           // Observe both futures in this event turn. A slow storage plugin
           // cannot leave an aggregate network failure temporarily unhandled.
-          await Future.wait<void>([
-            persistProgress(), run.wait(work).then<void>((_) {}),
-          ]);
+          if (offset == 0) {
+            await Future.wait<void>([
+              persistProgress(), run.wait(work).then<void>((_) {}),
+            ]);
+          } else {
+            await run.wait(work);
+          }
           if (_closed || !run.active) break;
-          await persistProgress();
+          // The last verified chunk is included in the final commit below,
+          // with its completion timestamp, rather than written twice.
+          if (offset + chunk.length < pool.length) await persistProgress();
           report();
           if (offset + chunk.length < pool.length) {
             await run.pause(interBatchDelay);
@@ -424,13 +465,17 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
       run.seal();
       if (_closed) throw RepositoryException('$marketLabel輪掃已取消。');
       for (final symbol in attempted.difference(evaluations.keys.toSet())) {
-        failures.putIfAbsent(symbol, () => '整批期限內未完成日 K 或 RS 評估。');
+        if (!failures.containsKey(symbol)) {
+          failures[symbol] = '整批期限內未完成日 K 或 RS 評估。';
+          checkpointRevision++;
+        }
       }
       var result = buildCheckpoint(finalPage: true);
       _checkpoints[key] = result;
       _activeThresholds[market] = threshold;
       if (!await _saveCheckpoint(result, budget: run.remaining)) {
         storageFailed = true;
+        checkpointRevision++;
         result = buildCheckpoint(finalPage: true);
         _checkpoints[key] = result;
       }
@@ -482,8 +527,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
       if (active != null) _activeThresholds.putIfAbsent(market, () => active);
       final text = preferences.getString(_checkpointKey(market, threshold));
       if (text == null || text.length > 32 * 1024 * 1024) return null;
-      final value = MobileScanCheckpoint.fromJson(
-          jsonDecode(text) as Map<String, dynamic>);
+      final value = text.length >= 256 * 1024
+          ? await compute(_decodeMobileScanCheckpoint, text)
+          : _decodeMobileScanCheckpoint(text);
       if (value.market != market || value.threshold != threshold || value.updatedAt.isAfter(_now().toUtc()) ||
           _now().toUtc().difference(value.updatedAt) > const Duration(days: 7)) return null;
       if (_closed || !run.active) return null;
@@ -502,14 +548,24 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
       var left = limit - watch.elapsed;
       if (_closed || left <= Duration.zero ||
           !identical(_checkpoints['${value.market.name}:${value.threshold}'], value)) return false;
-      final saved = await preferences.setString(_checkpointKey(value.market, value.threshold),
-          jsonEncode(value.toJson())).timeout(left);
+      final checkpointKey = _checkpointKey(value.market, value.threshold);
+      final encoded = jsonEncode(value.toJson());
+      left = limit - watch.elapsed;
+      if (_closed || left <= Duration.zero ||
+          !identical(_checkpoints['${value.market.name}:${value.threshold}'], value)) return false;
+      final saved = await (_checkpointWriter?.call(checkpointKey, encoded) ??
+          preferences.setString(checkpointKey, encoded)).timeout(left);
       if (!saved) return false;
       left = limit - watch.elapsed;
       if (_closed || left <= Duration.zero ||
           !identical(_checkpoints['${value.market.name}:${value.threshold}'], value)) return false;
-      return await preferences.setString(_activeThresholdKey(value.market),
-          value.threshold.toString()).timeout(left);
+      final thresholdKey = _activeThresholdKey(value.market);
+      final thresholdText = value.threshold.toString();
+      // This tiny value used to cause a second whole Android preference-file
+      // write for every checkpoint, even when its value had not changed.
+      if (preferences.getString(thresholdKey) == thresholdText) return true;
+      return await (_checkpointWriter?.call(thresholdKey, thresholdText) ??
+          preferences.setString(thresholdKey, thresholdText)).timeout(left);
     } catch (_) { return false; }
   }
 

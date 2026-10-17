@@ -236,7 +236,7 @@ class ScanForegroundService : Service() {
         val open = PendingIntent.getActivity(
             this,
             7300,
-            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            Intent(this, CacheRecoveryActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             flags,
         )
         val total = (progress["total"] as? Number)?.toInt()?.coerceAtLeast(0) ?: 0

@@ -1,26 +1,40 @@
-2026-10-16 / App仍為1.6.0+13 / 六項畫面測試修正
-GitHub失敗基線commit: 5f2c597e7c41281bb9f085da9ac34c872cc0ce69
+2026-10-16 / 1.6.1+14 / 長時間輪掃快取與啟動復原
+GitHub成功基線commit: 0c25530e886bd4c6bd6ed284232e6a672df10f21
 目標分支: fix/refresh-live-gate-20261014
 
-核心只需覆蓋3個完整測試檔：market_scan_progress_test、mobile_us_scope_test、production_ui_test。
-實際按鈕／標題捲動與layout完成後驗證hitTestable再真點擊；停止狀態改精確驗證暫停。
-空卡片捲到可視後驗證30/900、剩870，不把當頁零候選當成全市場零買點。
-其餘為指南、狀態、逐檔清單及GitHub仍缺的隱藏配置。全部為完整可覆蓋內容。
-正式lib／Android／資料／pubspec／CI與失敗commit保持相同，已比對98個受保護檔案。
-美股完整名單輪掃、跨日續掃、背景服務、0.5%風控與零推薦門禁保留。
-解壓後依原路徑覆蓋，不要只上傳ZIP，不多套一層目錄；提交新commit觸發Actions。
-本機Flutter命令退出127，修正後Dart測試與APK仍待新提交CI確認。
-完整證據、操作及限制見 US_UI_TEST_FIX.md。
+所有內容為完整可覆蓋檔案；不是補丁腳本。解壓後依原路徑上傳專案根目錄。
+必須一併覆蓋 Dart API、輪掃儲存、Kotlin 原生入口、Manifest、Gradle、pubspec、測試與工作流。
+行情快取 96 筆/8MiB、單筆512KiB、7日；寫入排隊上限8與逾時隔離。
+升級前強制停止 App；同簽章覆蓋安裝，首次開啟原生整理舊行情，持股本金進度保留。
+不要解除安裝、不要清除 App 資料；不同簽章先保留舊 App。
+美股/台股完整名單輪掃、0.5%風控、實際低點與原時間、真實行情門禁及零推薦合法保留。
+25項Python測試與來源配置靜態檢查通過；Flutter測試實際執行退出127。
+本機沒有Flutter/Android/Kotlin SDK，尚無新版APK或兩天實機驗證結果。
+提交新commit，待Actions全部通過後下載APK覆蓋安裝；詳見 LONG_RUN_RECOVERY.md。
 
 .dockerignore
+.github/workflows/build_apk.yml
 .gitignore
 .metadata
+ANDROID_BACKGROUND_SCAN.md
 BUILD_STATUS.md
 FILE_MANIFEST.json
 GITHUB_MANUAL_UPDATE.md
+LONG_RUN_RECOVERY.md
 README.md
 UPDATE_FILES.txt
-US_UI_TEST_FIX.md
-test/market_scan_progress_test.dart
-test/mobile_us_scope_test.dart
-test/production_ui_test.dart
+android/app/build.gradle
+android/app/src/main/AndroidManifest.xml
+android/app/src/main/kotlin/com/martinluk/martin_luk_app/CacheRecoveryActivity.kt
+android/app/src/main/kotlin/com/martinluk/martin_luk_app/FlutterHostActivity.kt
+android/app/src/main/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheRecovery.kt
+android/app/src/main/kotlin/com/martinluk/martin_luk_app/MainActivity.kt
+android/app/src/main/kotlin/com/martinluk/martin_luk_app/MartinLukApplication.kt
+android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanForegroundService.kt
+android/app/src/test/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheXmlTest.kt
+lib/services/live_candidate_repository.dart
+lib/services/market_data_api.dart
+pubspec.yaml
+scripts/verify_deliverable.py
+test/market_data_cache_bounds_test.dart
+test/mobile_scan_storage_budget_test.dart

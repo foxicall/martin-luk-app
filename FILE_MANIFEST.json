@@ -3,7 +3,7 @@
   "hash_algorithm": "SHA256",
   "archive_layout": "project files at archive root",
   "manifest_excludes_itself": true,
-  "file_count": 234,
+  "file_count": 242,
   "files": [
     {
       "path": ".dockerignore",
@@ -12,8 +12,8 @@
     },
     {
       "path": ".github/workflows/build_apk.yml",
-      "bytes": 10164,
-      "sha256": "45344631c258fe8d52cedbe3efc0ada135cfdc278d57d89e4d64b4680a452d53"
+      "bytes": 11717,
+      "sha256": "3470b3e9105b9e74e7ae6d42740563fc5f9a915791a9b9262781c3155f68d03e"
     },
     {
       "path": ".gitignore",
@@ -32,8 +32,8 @@
     },
     {
       "path": "ANDROID_BACKGROUND_SCAN.md",
-      "bytes": 8619,
-      "sha256": "41e7f92823e336e90676e128cbea8b799c44e96dc25c2f454f67353016b17610"
+      "bytes": 9004,
+      "sha256": "93a30f60256cdd70128557df85e31cc4e810418c68edca8bebad21f4ae6ba419"
     },
     {
       "path": "BACKGROUND_LIFECYCLE_TEST_FIX.md",
@@ -52,8 +52,8 @@
     },
     {
       "path": "BUILD_STATUS.md",
-      "bytes": 20846,
-      "sha256": "1701248cd9c17db35adcfd11dd6e24a936d364e86127bf8560543e1ebfb81562"
+      "bytes": 22339,
+      "sha256": "cb3b5a6efe4efd0d0e94b715ba62848cd04b5837e00835a2301c1ca78d9730ee"
     },
     {
       "path": "CLOUD_API_GUIDE.md",
@@ -77,8 +77,13 @@
     },
     {
       "path": "GITHUB_MANUAL_UPDATE.md",
-      "bytes": 11736,
-      "sha256": "bd3f1c27e5049b1dd278895f24f1bd489a3ccfdd7e0ea157a877adffcfeb3ca0"
+      "bytes": 12849,
+      "sha256": "b0c416e33ef44018e25f03b8095dc7b2ac42f14ce17a6a6f79163dfc4924c86c"
+    },
+    {
+      "path": "LONG_RUN_RECOVERY.md",
+      "bytes": 6649,
+      "sha256": "4c16cce80b8d0c00b607c773e9f9103ce791524fc82a0ad871bbfbd519e26943"
     },
     {
       "path": "MARKET_DEBUG_LOGGING.md",
@@ -122,8 +127,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 11441,
-      "sha256": "cd4a80ee7807c84567990ca04b92c1ffa9ea801887aed5a079832022a1e530fa"
+      "bytes": 12080,
+      "sha256": "cf7e5e5ada6474da588ed05049655ab4a54a0a6aaac4d7967778211827b4fa44"
     },
     {
       "path": "README_HOW_TO_BUILD.md",
@@ -177,8 +182,8 @@
     },
     {
       "path": "UPDATE_FILES.txt",
-      "bytes": 1283,
-      "sha256": "56ae89de4ce207ee2bf3c24689dd231a202765d4958e9b9eca17deddfb0982c9"
+      "bytes": 2115,
+      "sha256": "9e4df82eef9764c7cca9a9a9de20f410fbfb570b2e4e36d905e13a74b453b1a1"
     },
     {
       "path": "US_UI_TEST_FIX.md",
@@ -207,8 +212,8 @@
     },
     {
       "path": "android/app/build.gradle",
-      "bytes": 2567,
-      "sha256": "3f7ad722a733bf21641f21cc5fcddd519d75d977561d2d64530fcd453455f58b"
+      "bytes": 2816,
+      "sha256": "3cc122f1878b2be2c1ca87c44c8e3f1c48a3841796b7011bb259781bb511bb57"
     },
     {
       "path": "android/app/src/debug/AndroidManifest.xml",
@@ -222,18 +227,38 @@
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
-      "bytes": 2840,
-      "sha256": "0f0cb0725f7cbc3db20a1e0d382ca79161ee0274274491f7629e91bb88e9bf7d"
+      "bytes": 3396,
+      "sha256": "c41e331d6eb82e0f5e4b48b0606dcd34920b467ef3c5e08e5cdbd9b11663dfa1"
+    },
+    {
+      "path": "android/app/src/main/kotlin/com/martinluk/martin_luk_app/CacheRecoveryActivity.kt",
+      "bytes": 4747,
+      "sha256": "6c0ad7ca6bc77127f0fa52ff0b23957303b61dc7568d7840749893a073098174"
+    },
+    {
+      "path": "android/app/src/main/kotlin/com/martinluk/martin_luk_app/FlutterHostActivity.kt",
+      "bytes": 404,
+      "sha256": "8115eb62b37f42ce23031e780e44302f5ac5a52f35370fce98a47a78db127b5e"
+    },
+    {
+      "path": "android/app/src/main/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheRecovery.kt",
+      "bytes": 9969,
+      "sha256": "88505532a8042801cf1ec2ad1db9d8a245a9ace66a4ba30e563a7469547b0543"
     },
     {
       "path": "android/app/src/main/kotlin/com/martinluk/martin_luk_app/MainActivity.kt",
-      "bytes": 1694,
-      "sha256": "2df0d810da527544e8ac822d9c3023e6a623fbd7978e3bd0f299caa5d0b178ba"
+      "bytes": 1699,
+      "sha256": "d071e0806f990f144f48dd1d44302e80d3001f933086d76e3f6c924b441946fe"
+    },
+    {
+      "path": "android/app/src/main/kotlin/com/martinluk/martin_luk_app/MartinLukApplication.kt",
+      "bytes": 1930,
+      "sha256": "eacda61df2a8bca6c3081f270f61bd90e6cc1131ca33c7d53681eab120b31417"
     },
     {
       "path": "android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanForegroundService.kt",
-      "bytes": 11421,
-      "sha256": "41120e5e27e57453462e2392750ad47f783a88f99b5da3678d48a9272c483ab0"
+      "bytes": 11430,
+      "sha256": "ec01cd63d06a1e8fb7b598e182d4c9bd55a318a48186b3ed6087bbb7a851098c"
     },
     {
       "path": "android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanServiceBridge.kt",
@@ -274,6 +299,11 @@
       "path": "android/app/src/profile/AndroidManifest.xml",
       "bytes": 149,
       "sha256": "678647a824ef7ab16066708585790ab265135d32fdf84bcd918a4b050f8891b9"
+    },
+    {
+      "path": "android/app/src/test/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheXmlTest.kt",
+      "bytes": 6904,
+      "sha256": "3294810b389eb11ec7d391deed9c0d20491af225d5bcfafa1da2d566c4b7740b"
     },
     {
       "path": "android/build.gradle",
@@ -547,8 +577,8 @@
     },
     {
       "path": "lib/services/live_candidate_repository.dart",
-      "bytes": 38217,
-      "sha256": "2b9653d06f4c8c81962b048fa8ffff2382c96bde65a4c23b645fcc098f9ff20a"
+      "bytes": 41106,
+      "sha256": "2df4642ed08e4c5c46ad8c836fb8f053134b40aef6df7052c3e13b43ebe7adb4"
     },
     {
       "path": "lib/services/live_portfolio_repository.dart",
@@ -562,8 +592,8 @@
     },
     {
       "path": "lib/services/market_data_api.dart",
-      "bytes": 32254,
-      "sha256": "e62e3a09824c5bd048f086ace99b672f151c4e50ed473bd4a6aa68e5568b5561"
+      "bytes": 43320,
+      "sha256": "b72e0d77a624d4717a932caa0545cff51c77fd9db522019ae9f0eefb703051c7"
     },
     {
       "path": "lib/services/market_scan_progress.dart",
@@ -678,7 +708,7 @@
     {
       "path": "pubspec.yaml",
       "bytes": 636,
-      "sha256": "743bdfb12cfb0d94e629a8855f6860d0f88e755199d8327ef12d7a54a9d04d50"
+      "sha256": "cec9deda9f189ff5067abac60752f82601eaaa20a725d5630430a3e3c67c53d1"
     },
     {
       "path": "render.yaml",
@@ -817,8 +847,8 @@
     },
     {
       "path": "scripts/verify_deliverable.py",
-      "bytes": 25748,
-      "sha256": "ce147692572d0abc2aa03cdda5477498d0ad126b8e8a6b75ea640b7854a1f9b1"
+      "bytes": 28960,
+      "sha256": "274e92386331b29d1db21c46bfe42da2d4fc4ca8911668549ce4a95fd52b176b"
     },
     {
       "path": "standalone_preview.html",
@@ -966,6 +996,11 @@
       "sha256": "6c66513022112b12c91fcb8fc8b7b30b0c96f86806ddf450465c89472b4c5644"
     },
     {
+      "path": "test/market_data_cache_bounds_test.dart",
+      "bytes": 13400,
+      "sha256": "12cf555f23c6c7ab885e21ccc02da9e11f094e1ca966814078c1a4a6aff5231b"
+    },
+    {
       "path": "test/market_scan_progress_test.dart",
       "bytes": 21217,
       "sha256": "da5f46c0c1010eefdaa4c4953b5f0d60922cecb333fe778478e1c8cb91539240"
@@ -979,6 +1014,11 @@
       "path": "test/market_transport_regression_test.dart",
       "bytes": 6001,
       "sha256": "70ef4001dde1e35bc4009519cc9368c82ea57ba95cd038356ee28c9147a08186"
+    },
+    {
+      "path": "test/mobile_scan_storage_budget_test.dart",
+      "bytes": 10912,
+      "sha256": "55523e506ad30b14b6a3bdfccd9a2e8bb3787191b153d5d3c92fb50464c25147"
     },
     {
       "path": "test/mobile_tw_polling_test.dart",

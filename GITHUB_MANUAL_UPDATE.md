@@ -1,3 +1,15 @@
+# 最新覆蓋：1.6.1+14 長時間卡死與啟動修正
+
+下載 `martin_luk_long_run_recovery_updates_20261016.zip`，解壓後依 `UPDATE_FILES.txt` 將所有完整檔案覆蓋至 `fix/refresh-live-gate-20261014`。包含 Dart API／輪掃儲存、新 Kotlin 復原入口／Host、MainActivity、Manifest、Gradle、測試及 workflow；不能只貼 Dart。完整專案為 `martin_luk_long_run_recovery_20261016.zip`。
+
+提交新 commit，確認版本 `1.6.1+14`；Actions 需通過固定測試、真實行情與計算、APK 建置及原生保留資料測試後才上傳 `martin-luk-app-release`。若任一步失敗，下載 `martin-luk-live-scan-evidence`，不要略過門禁。
+
+手機先強制停止舊 App，再以同簽章 APK **覆蓋安裝**；不要解除安裝或清除資料。第一次開啟顯示原生行情整理畫面，完成才進 Flutter，持股、本金與保存進度保留。若簽章不同，先保留舊 App。操作及目前未能本機編譯／實機驗證的限制見 [LONG_RUN_RECOVERY.md](LONG_RUN_RECOVERY.md)。
+
+以下為歷史紀錄，以上方版本與包名為準。
+
+---
+
 # 最新覆蓋：1.6.0+13 畫面測試修正
 
 下載 `martin_luk_ui_test_fix_updates_20261016.zip`，解壓後完整覆蓋3個檔案：`test/market_scan_progress_test.dart`、`test/mobile_us_scope_test.dart`、`test/production_ui_test.dart`。分支為`fix/refresh-live-gate-20261014`，需提交新commit觸發Actions。

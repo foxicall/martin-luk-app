@@ -38,6 +38,13 @@ EXCLUDED_FILE_PATTERNS = (
     "apply_market_scan_fix.py", "apply_market_scan_timeout_fix.py",
 )
 REQUIRED_FILES = (
+    "LONG_RUN_RECOVERY.md", "test/market_data_cache_bounds_test.dart",
+    "test/mobile_scan_storage_budget_test.dart",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/MartinLukApplication.kt",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/CacheRecoveryActivity.kt",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/FlutterHostActivity.kt",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheRecovery.kt",
+    "android/app/src/test/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheXmlTest.kt",
     "MOBILE_US_SCAN.md", "test/mobile_us_rolling_repository_test.dart",
     "test/mobile_us_polling_test.dart", "test/mobile_us_scope_test.dart",
     "ANDROID_BACKGROUND_SCAN.md", "lib/services/background_scan_service.dart",
@@ -303,6 +310,8 @@ def validate_contents(files: dict[str, bytes]) -> None:
         "test/trade_levels_test.dart test/manual_trade_levels_test.dart",
         "test/background_scan_uninitialized_test.dart test/background_scan_service_test.dart",
         "test/mobile_us_rolling_repository_test.dart test/mobile_us_polling_test.dart test/mobile_us_scope_test.dart",
+        "test/market_data_cache_bounds_test.dart test/mobile_scan_storage_budget_test.dart",
+        ":app:testReleaseUnitTest", "steps.native-recovery-test.outcome == 'success'",
     ):
         require(marker in workflow, f"Actions 工作流缺少：{marker}")
     android_app = files["android/app/build.gradle"].decode("utf-8")
@@ -330,6 +339,38 @@ def validate_contents(files: dict[str, bytes]) -> None:
     require("android.permission.INTERNET" in android, "Android 缺少網路權限")
     ns = "{http://schemas.android.com/apk/res/android}"
     manifest = ET.fromstring(android)
+    application = manifest.find("application")
+    require(application is not None and application.get(ns + "name") == ".MartinLukApplication",
+            "Android 啟動必須先經過非同步行情快取復原")
+    activities = {entry.get(ns + "name"): entry for entry in application.findall("activity")}
+    for activity_name in (".CacheRecoveryActivity", ".FlutterHostActivity"):
+        require(activity_name in activities
+                and activities[activity_name].get(ns + "exported") == "false",
+                f"Android 缺少非公開復原／Flutter 入口：{activity_name}")
+    aliases = application.findall("activity-alias")
+    require(len(aliases) == 1 and aliases[0].get(ns + "name") == ".MainActivity"
+            and aliases[0].get(ns + "targetActivity") == ".CacheRecoveryActivity"
+            and aliases[0].get(ns + "exported") == "true",
+            "舊桌面 MainActivity 元件必須透過 alias 先進入復原畫面")
+    require(list(application).index(activities[".CacheRecoveryActivity"])
+            < list(application).index(aliases[0]), "alias 的 target Activity 必須先宣告")
+    launcher_entries = [entry for entry in list(activities.values()) + aliases
+                        if any(category.get(ns + "name") == "android.intent.category.LAUNCHER"
+                               for category in entry.findall("intent-filter/category"))]
+    require(launcher_entries == aliases, "只能有唯一的復原 launcher alias")
+    kotlin_root = "android/app/src/main/kotlin/com/martinluk/martin_luk_app/"
+    recovery_source = files[kotlin_root + "LegacyQuoteCacheRecovery.kt"].decode("utf-8")
+    api_source = files["lib/services/market_data_api.dart"].decode("utf-8")
+    require("market-data-yahoo-v1:" in api_source
+            and '"flutter.market-data-yahoo-v1:"' in recovery_source
+            and '"market-data-yahoo-v1:"' in recovery_source
+            and "noBackupFilesDir" in recovery_source,
+            "行情復原命名空間或不可備份標記缺失")
+    require("FlutterHostActivity::class.java" in files[kotlin_root + "CacheRecoveryActivity.kt"].decode("utf-8")
+            and "CacheRecoveryActivity::class.java" in files[kotlin_root + "ScanForegroundService.kt"].decode("utf-8"),
+            "原生入口未先復原，或存在 alias 導航循環")
+    require("junit:junit:4.13.2" in android_app and "net.sf.kxml:kxml2:2.3.0" in android_app,
+            "原生復原 JVM 測試依賴缺失")
     permissions = {entry.get(ns + "name") for entry in manifest.findall("uses-permission")}
     require({"android.permission.FOREGROUND_SERVICE",
              "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
