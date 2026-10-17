@@ -3,7 +3,7 @@
   "hash_algorithm": "SHA256",
   "archive_layout": "project files at archive root",
   "manifest_excludes_itself": true,
-  "file_count": 243,
+  "file_count": 244,
   "files": [
     {
       "path": ".dockerignore",
@@ -12,8 +12,8 @@
     },
     {
       "path": ".github/workflows/build_apk.yml",
-      "bytes": 11717,
-      "sha256": "3470b3e9105b9e74e7ae6d42740563fc5f9a915791a9b9262781c3155f68d03e"
+      "bytes": 11539,
+      "sha256": "9d046c92c818c6d460b8a21c61ba935e6ed9be416a3a6ab0446c1c00795c0ea8"
     },
     {
       "path": ".gitignore",
@@ -36,6 +36,11 @@
       "sha256": "93a30f60256cdd70128557df85e31cc4e810418c68edca8bebad21f4ae6ba419"
     },
     {
+      "path": "ANDROID_TOOLCHAIN_FIX.md",
+      "bytes": 4960,
+      "sha256": "ec2347ace154310e8c95a874d3d81173bbdbbf59d23e9ddb5b643732321fcef2"
+    },
+    {
       "path": "BACKGROUND_LIFECYCLE_TEST_FIX.md",
       "bytes": 3518,
       "sha256": "a3efe2edda0b8323fb31cf9141faa44b8809fdf386ea57f71712ea5dbb362a36"
@@ -47,13 +52,13 @@
     },
     {
       "path": "BUILD_ANDROID.md",
-      "bytes": 4993,
-      "sha256": "373ad3f71ac475ec345c52fdc7bfd61c9aedce8b8aa3b3732034d552faf44b34"
+      "bytes": 4781,
+      "sha256": "d21003eaf4172ef3e6304a5957a4d8262bcf26f98e4196341474128c7a1f0716"
     },
     {
       "path": "BUILD_STATUS.md",
-      "bytes": 23100,
-      "sha256": "4d42ec9cc328e843d8c8584fda3a251f212acf1b32183a1018e2c5fc774da338"
+      "bytes": 24178,
+      "sha256": "f524781733381026aa058960ecc79f3fcb8b7e6f5a9fc46e45fe11d47f458844"
     },
     {
       "path": "CACHE_TEST_FIX.md",
@@ -82,13 +87,13 @@
     },
     {
       "path": "GITHUB_MANUAL_UPDATE.md",
-      "bytes": 13649,
-      "sha256": "9c9bf33233a1e5b492d18b3dea47b88f5d5bd7b26692b6736104db61a420b8d4"
+      "bytes": 14674,
+      "sha256": "e81d9b5d8b038718872646940e44963ae250877873ec22633c9e4b96739808ee"
     },
     {
       "path": "LONG_RUN_RECOVERY.md",
-      "bytes": 6840,
-      "sha256": "1e1d939d54a1dcf88d474ba028f4a0f93aa680588889bda4d90174a9804f642b"
+      "bytes": 6938,
+      "sha256": "f5aca10c8e2b077eddcd29349257796170dedfad9d1fd4a20c403ed15d0e1552"
     },
     {
       "path": "MARKET_DEBUG_LOGGING.md",
@@ -127,18 +132,18 @@
     },
     {
       "path": "PRODUCTION_GUIDE.md",
-      "bytes": 10167,
-      "sha256": "2d97765d11d20c45b89a2e6c4674a643c7e0eee48c83b4cc9cb5c0c840d89532"
+      "bytes": 10232,
+      "sha256": "fd36226b9e232450c98a889b1d353b6c081a3207e5c21e91bb7dfd23ae024a8d"
     },
     {
       "path": "README.md",
-      "bytes": 12359,
-      "sha256": "9d29fd2a46e941c6c2a7248c58650ba7d7aa18c47c20ebcbd79c73e4972c5f66"
+      "bytes": 12605,
+      "sha256": "67f940f29f902f8065e1fbe91b2ee4e0abc81be982491c4c8639d94a5b2ada34"
     },
     {
       "path": "README_HOW_TO_BUILD.md",
-      "bytes": 6124,
-      "sha256": "eadb712d144d3c2c24692295b03e0caca14e4cd261567af8712185562e6fbb85"
+      "bytes": 6139,
+      "sha256": "22c5c35334080512a089120f7d4e56b063e1db1cafb74b57ea4d842c0a077d22"
     },
     {
       "path": "RECOMMENDATION_LEVELS.md",
@@ -187,8 +192,8 @@
     },
     {
       "path": "UPDATE_FILES.txt",
-      "bytes": 1394,
-      "sha256": "6bb4b42ca1afbf9c8c3c5e4c7df3d2922cdba3317f918fad8b87c64dca568f50"
+      "bytes": 1787,
+      "sha256": "50d5dcfc1a020c5ff993008c9d45a14ec293854a7e664cbb0e5b3944b8d73aaa"
     },
     {
       "path": "US_UI_TEST_FIX.md",
@@ -217,8 +222,8 @@
     },
     {
       "path": "android/app/build.gradle",
-      "bytes": 2816,
-      "sha256": "3cc122f1878b2be2c1ca87c44c8e3f1c48a3841796b7011bb259781bb511bb57"
+      "bytes": 2882,
+      "sha256": "78711afcbe92036d35fd70a563c3a319ba624ac5bad3e418c2e73f05b298c7ff"
     },
     {
       "path": "android/app/src/debug/AndroidManifest.xml",
@@ -322,8 +327,8 @@
     },
     {
       "path": "android/gradle/wrapper/gradle-wrapper.properties",
-      "bytes": 253,
-      "sha256": "b572c144e8d4332df7394cff7950eeee36d60c0d1d813c56b359d82c3f9ed4ad"
+      "bytes": 251,
+      "sha256": "f78b2c51f28bfe9e80ef556bee85ad9b7d47860ebb873149b8109442da363463"
     },
     {
       "path": "android/gradlew",
@@ -342,8 +347,8 @@
     },
     {
       "path": "android/settings.gradle",
-      "bytes": 1080,
-      "sha256": "7dab5cbbca2be951eea829764d8a5106b5d9a7404196492c9577e3fca0b6171c"
+      "bytes": 1086,
+      "sha256": "2643375b68c24bcc121c0ba71900292bc79ae5adaf21ce2e439d617ac0c2e9ac"
     },
     {
       "path": "assets/fonts/MartinPreviewSans.otf",
@@ -802,8 +807,8 @@
     },
     {
       "path": "scripts/prepare_android.py",
-      "bytes": 2763,
-      "sha256": "78037d20c42bd943df433f1b80d9def034566cdc3b0fb15e4bd79ab773b0153b"
+      "bytes": 2762,
+      "sha256": "525fa9e44d6c35bbf226c1186b82234d0547f109c3f57f688659982b84f241a9"
     },
     {
       "path": "scripts/prepare_preview_font.py",
@@ -852,8 +857,8 @@
     },
     {
       "path": "scripts/verify_deliverable.py",
-      "bytes": 28960,
-      "sha256": "274e92386331b29d1db21c46bfe42da2d4fc4ca8911668549ce4a95fd52b176b"
+      "bytes": 29776,
+      "sha256": "7749b931d03f14c0f1a42f6bef4b4dc3231c3fb1f8f968fa925e3a012b45e4f7"
     },
     {
       "path": "standalone_preview.html",

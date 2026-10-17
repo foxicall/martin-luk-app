@@ -37,7 +37,8 @@ android {
 
     defaultConfig {
         applicationId = 'com.martinluk.martin_luk_app'
-        minSdk = 21
+        // Flutter 3.47.7 requires Android 6.0 / API 23 or newer.
+        minSdk = 23
         targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName

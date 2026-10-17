@@ -34,6 +34,8 @@ XML 使用串流轉寫與 AtomicFile；完成寫入後驗證大小及 SHA256，�
 
 ## 驗證與限制
 
+Android 工具版本後續對齊見 [ANDROID_TOOLCHAIN_FIX.md](ANDROID_TOOLCHAIN_FIX.md)；Flutter 3.47.7 需要 Android 6.0／minSdk 23。
+
 後續兩項測試資料修正見 [CACHE_TEST_FIX.md](CACHE_TEST_FIX.md)；版本維持 1.6.1+14，正式快取與 Android 原始碼不變。
 
 新增 `test/market_data_cache_bounds_test.dart` 十一項：150 檔循環、離線大量回填、容量與 LRU、精確命名空間、共享索引、關閉後晚到結果及掛起平台寫入；包含拒絕不可能的未來報價反例。
@@ -46,7 +48,7 @@ Actions 先跑固定測試與真實行情／ADR／EMA／RS 門禁（仍允許零
 
 ```bash
 flutter test test/market_data_cache_bounds_test.dart test/mobile_scan_storage_budget_test.dart test/market_data_api_test.dart test/market_transport_regression_test.dart test/refresh_recovery_test.dart --dart-define=USE_MOCK_DATA=false --timeout=90s --reporter=expanded
-flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+flutter build apk --release --dart-define=USE_MOCK_DATA=false
 cd android
 bash ./gradlew :app:testReleaseUnitTest --no-daemon --console=plain
 ```

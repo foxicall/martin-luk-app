@@ -1,5 +1,7 @@
 # Martin Luk 台美股動能策略 App
 
+本次 **1.6.1+14** 對齊 Android 建置工具：Flutter 3.47.7／AGP 8.11.1／Kotlin 2.2.20／Gradle 8.14／Java 17，最低 Android 6.0（API 23），建置與原生測試均實際檢查相容性。完整覆蓋及驗證狀態見 [ANDROID_TOOLCHAIN_FIX.md](ANDROID_TOOLCHAIN_FIX.md)。
+
 本次版本仍為 **1.6.1+14**：修正兩項測試的指數網址解碼及快取報價時間，保留正式快取／風控／啟動復原與全部門禁。完整可覆蓋檔案與 CI 失敗證據見 [CACHE_TEST_FIX.md](CACHE_TEST_FIX.md)；修正後仍待新提交 Actions。
 
 最新版本 **1.6.1+14** 處理長時間輪掃後卡死／無法啟動的資源累積：行情快取加入筆數、容量、期限與寫入排隊限制，升級啟動先在原生工作執行緒整理可重建的舊行情；保留持股、獨立本金及輪掃進度。完整台美股輪掃與風控不變。**不要解除安裝或清除 App 資料**；以同簽章的新 APK 覆蓋安裝。更新、測試與實機驗證限制見 [LONG_RUN_RECOVERY.md](LONG_RUN_RECOVERY.md)。
@@ -95,9 +97,9 @@ python -m unittest discover -s backend/tests -v
 python -m unittest discover -s scripts/tests -p 'test_*.py' -v
 flutter pub get
 flutter test
-flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+flutter build apk --release --dart-define=USE_MOCK_DATA=false
 ```
 
-CI 以實際行情取得與 ADR／EMA／RS 計算正確為門禁；**零推薦合法**，不為了產出候選降低門檻。門禁只驗其指定測試標的，不代表全市場當日行情全部已成功掃描。Android 配置為 minSdk 21、targetSdk 34、compileSdk 36。正式 APK 預設不使用 Mock；離線 HTML 及明確開啟的 Mock 始終標示示範資料。
+CI 以實際行情取得與 ADR／EMA／RS 計算正確為門禁；**零推薦合法**，不為了產出候選降低門檻。門禁只驗其指定測試標的，不代表全市場當日行情全部已成功掃描。Android 配置為 minSdk 23、targetSdk 34、compileSdk 36。正式 APK 預設不使用 Mock；離線 HTML 及明確開啟的 Mock 始終標示示範資料。
 
 檔案配置及 APK 操作見 [README_HOW_TO_BUILD.md](README_HOW_TO_BUILD.md)，GitHub 網頁覆蓋見 [GITHUB_MANUAL_UPDATE.md](GITHUB_MANUAL_UPDATE.md)，後端合約見 [backend/README.md](backend/README.md)，搜尋見 [SEARCH_GUIDE.md](SEARCH_GUIDE.md)，本次可確認狀態見 [BUILD_STATUS.md](BUILD_STATUS.md)。

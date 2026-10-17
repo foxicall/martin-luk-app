@@ -38,6 +38,7 @@ EXCLUDED_FILE_PATTERNS = (
     "apply_market_scan_fix.py", "apply_market_scan_timeout_fix.py",
 )
 REQUIRED_FILES = (
+    "ANDROID_TOOLCHAIN_FIX.md",
     "LONG_RUN_RECOVERY.md", "test/market_data_cache_bounds_test.dart",
     "test/mobile_scan_storage_budget_test.dart",
     "android/app/src/main/kotlin/com/martinluk/martin_luk_app/MartinLukApplication.kt",
@@ -295,7 +296,7 @@ def validate_contents(files: dict[str, bytes]) -> None:
         "actions/setup-java@v4", "distribution: temurin", "java-version: '17'",
         "subosito/flutter-action@v2", "channel: stable",
         "flutter pub get", "flutter test", "flutter build apk --release",
-        "USE_MOCK_DATA=false", "--android-skip-build-dependency-validation",
+        "USE_MOCK_DATA=false", "flutter-version: '3.47.7'",
         "martin-luk-app-release", "actions/upload-artifact@v4",
         "**/build/app/outputs/flutter-apk/*.apk", "retention-days: 7",
         "martin-luk-live-scan-evidence", "**/test_logs/verification.log", "if: always()",
@@ -317,6 +318,17 @@ def validate_contents(files: dict[str, bytes]) -> None:
     android_app = files["android/app/build.gradle"].decode("utf-8")
     require(bool(re.search(r"\bcompileSdk\s*=\s*36\b", android_app)),
             "Android compileSdk 必須符合 shared_preferences_android 的 API 36 要求")
+    require(bool(re.search(r"\bminSdk\s*=\s*23\b", android_app)),
+            "Flutter 3.47.7 要求 Android minSdk 23")
+    settings = files["android/settings.gradle"].decode("utf-8")
+    require("id 'com.android.application' version '8.11.1'" in settings
+            and "id 'org.jetbrains.kotlin.android' version '2.2.20'" in settings,
+            "AGP／Kotlin 版本未符合 Flutter 3.47.7 的要求")
+    wrapper = files["android/gradle/wrapper/gradle-wrapper.properties"].decode("utf-8")
+    require("gradle-8.14-all.zip" in wrapper, "Gradle Wrapper 必須一併更新為 8.14")
+    require("--android-skip-build-dependency-validation" not in workflow
+            and "skipDependencyChecks" not in workflow,
+            "正式建置與原生測試應實際通過版本驗證，不應略過")
     require("android-actions/setup-android" not in workflow and "sdkmanager" not in workflow,
             "Actions 不應再次依賴額外 Android SDK 安裝步驟")
     require("apply_market_scan" not in workflow and "market-scan-updated-source.zip" not in workflow,

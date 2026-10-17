@@ -1,28 +1,38 @@
-2026-10-17 Asia/Taipei / App仍為1.6.1+14 / 兩項行情快取測試修正
-GitHub失敗基線commit: d8d540795478de323374069188ed46b989304e32
-失敗run: 39010655225 / job: 117332338081
+2026-10-17 Asia/Taipei / App仍為1.6.1+14 / Android建置工具相容修正
+GitHub失敗基線commit: 8e18bc91838eb799329006a0230d83a36447a4dc
+失敗run: 39011383757 / job: 117334467798
 目標分支: fix/refresh-live-gate-20261014
+Drive存放: Martin_Luk_App / folder 1Nu2lpsfv-Z0ib1pRZQalVl_DZOEhdSBq
 
-核心覆蓋兩個完整test檔：test/market_data_api_test.dart、test/market_data_cache_bounds_test.dart。
-指數代碼用解碼後pathSegments；快取fixture報價時間對齊原抓取時間。
-保留96筆/8MiB上限與未來報價拒絕，另加不可能時間負向測試（cache共11項）。
-正式lib/Android/CI/版本/字典/風控不變；已核對79個正式與門禁檔案。
-其餘為指南、完整性清單與GitHub尚缺的隱藏專案配置，可一併覆蓋。
-完整原始碼，非補丁腳本。解壓後依原路徑上傳，不多套一層目錄，勿只上傳ZIP。
-提交新commit觸發Actions，不能只重跑原失敗commit。
-25項Python及來源靜態檢查通過，本機Flutter命令退出127，修正後待新提交CI。
-本包不含已編譯APK；待全部門禁成功，再用同簽章APK覆蓋安裝，不清除資料。
-精確原因、實際日誌證據與驗證限制見 CACHE_TEST_FIX.md。
+核心四檔必須一併覆蓋：android/settings.gradle、android/gradle/wrapper/gradle-wrapper.properties、
+android/app/build.gradle、.github/workflows/build_apk.yml。
+固定Flutter3.47.7 stable / AGP8.11.1 / Kotlin2.2.20 / Gradle8.14 / JDK17。
+minSdk提高23，最低Android6.0；compile36/target34不變。
+Release與原生測試不略過版本檢查；CI僅驗證Wrapper，不臨時改寫來源。
+實際基線Dart/真實行情門禁/Release編譯已成功，其後native設定階段失敗，APK尚未上傳。
+全部交易邏輯、行情、輪掃、持股與門禁測試保留，未略過任何測試。
+其餘為建置指南、完整性檢查、缺SDK提示及GitHub尚缺的隱藏專案配置。
+解壓後依原路徑覆蓋，不只上傳ZIP、不多套一層目錄；提交新commit觸發Actions。
+本機25項Python/配置靜態檢查通過，Flutter建置命令退出127，新配置仍待新CI。
+APK須同簽章才可覆蓋安裝；若不同先保留舊App，不解除安裝或清除資料。
+詳細證據與版本影響見 ANDROID_TOOLCHAIN_FIX.md。
 
 .dockerignore
+.github/workflows/build_apk.yml
 .gitignore
 .metadata
+ANDROID_TOOLCHAIN_FIX.md
+BUILD_ANDROID.md
 BUILD_STATUS.md
-CACHE_TEST_FIX.md
 FILE_MANIFEST.json
 GITHUB_MANUAL_UPDATE.md
 LONG_RUN_RECOVERY.md
+PRODUCTION_GUIDE.md
 README.md
+README_HOW_TO_BUILD.md
 UPDATE_FILES.txt
-test/market_data_api_test.dart
-test/market_data_cache_bounds_test.dart
+android/app/build.gradle
+android/gradle/wrapper/gradle-wrapper.properties
+android/settings.gradle
+scripts/prepare_android.py
+scripts/verify_deliverable.py

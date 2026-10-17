@@ -1,3 +1,15 @@
+# 最新覆蓋：1.6.1+14 Android 工具版本對齊
+
+下載 `martin_luk_android_toolchain_fix_updates_20261017.zip`，依 `UPDATE_FILES.txt` 覆蓋至 `fix/refresh-live-gate-20261014`。核心四檔為 `android/settings.gradle`、`android/gradle/wrapper/gradle-wrapper.properties`、`android/app/build.gradle` 與 `.github/workflows/build_apk.yml`，必須一起更新。完整專案為 `martin_luk_android_toolchain_fix_20261017.zip`，兩包均放在指定 `Martin_Luk_App` Google Drive 資料夾。
+
+提交新 commit 後再看 Actions。Flutter 固定 3.47.7，AGP 8.11.1、Kotlin 2.2.20、Wrapper 8.14；minSdk 23（Android 6.0 以上）。APK 及原生測試都要通過版本檢查，不略過任何門禁。詳細原因、實際舊 CI 成功／失敗位置及新配置尚待執行的限制見 [ANDROID_TOOLCHAIN_FIX.md](ANDROID_TOOLCHAIN_FIX.md)。
+
+待原生測試成功並上傳 APK 後，使用相同簽章覆蓋安裝；不要解除安裝或清除資料。
+
+以下為歷史紀錄，以上方包名為準。
+
+---
+
 # 最新覆蓋：1.6.1+14 兩項行情測試修正
 
 下載 `martin_luk_cache_test_fix_updates_20261017.zip`，解壓後依原路徑覆蓋 `test/market_data_api_test.dart`、`test/market_data_cache_bounds_test.dart` 到 `fix/refresh-live-gate-20261014` 分支。其餘指南、逐檔清單與隱藏配置可一起上傳；完整專案為 `martin_luk_cache_test_fix_20261017.zip`。
