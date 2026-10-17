@@ -64,6 +64,11 @@ jobs:
               'android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanServiceBridge.kt',
               'android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanForegroundService.kt',
               'android/app/src/main/res/drawable/ic_stat_scan.xml',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/MartinLukApplication.kt',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/CacheRecoveryActivity.kt',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/FlutterHostActivity.kt',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheRecovery.kt',
+              'android/app/src/test/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheXmlTest.kt',
           }
           required.update(re.findall(r'\btest/[A-Za-z0-9_/-]+\.dart\b', workflow))
           missing = sorted(path for path in required
@@ -159,6 +164,13 @@ jobs:
           set -euo pipefail
           flutter test test/mobile_us_rolling_repository_test.dart test/mobile_us_polling_test.dart test/mobile_us_scope_test.dart test/market_scan_progress_test.dart test/production_ui_test.dart --dart-define=USE_MOCK_DATA=false --timeout=90s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
+      - name: 驗證長時間行情快取上限與輪掃存檔負荷
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter test test/market_data_cache_bounds_test.dart test/mobile_scan_storage_budget_test.dart test/market_data_api_test.dart test/market_transport_regression_test.dart test/refresh_recovery_test.dart --dart-define=USE_MOCK_DATA=false --timeout=90s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+
       - name: 執行真實行情與指標門禁測試（允許零推薦）
         id: run-gate-test
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
@@ -175,6 +187,21 @@ jobs:
           python3 scripts/validate_live_scan_evidence.py build/live-scan-evidence.json 2>&1 | tee -a test_logs/verification.log
           flutter test test/us_universe_http_smoke_test.dart --dart-define=RUN_LIVE_UNIVERSE_TEST=true --dart-define=USE_MOCK_DATA=false --timeout=30s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
+      - name: 編譯正式版 Release APK
+        if: ${{ success() && steps.run-gate-test.outcome == 'success' }}
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        run: flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+
+      - name: 驗證原生啟動復原保留帳戶與持股
+        id: native-recovery-test
+        if: ${{ success() && steps.run-gate-test.outcome == 'success' }}
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd android
+          bash ./gradlew :app:testReleaseUnitTest --no-daemon --console=plain 2>&1 | tee -a ../test_logs/verification.log
+
       - name: 保存實測紀錄
         if: always()
         uses: actions/upload-artifact@v4
@@ -184,12 +211,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: 編譯正式版 Release APK
-        if: ${{ success() && steps.run-gate-test.outcome == 'success' }}
-        working-directory: ${{ steps.locate-project.outputs.project_dir }}
-        run: flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
-
       - name: 上傳 APK 成品
+        if: ${{ success() && steps.native-recovery-test.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: martin-luk-app-release
