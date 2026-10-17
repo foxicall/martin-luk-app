@@ -1,40 +1,28 @@
-2026-10-16 / 1.6.1+14 / 長時間輪掃快取與啟動復原
-GitHub成功基線commit: 0c25530e886bd4c6bd6ed284232e6a672df10f21
+2026-10-17 Asia/Taipei / App仍為1.6.1+14 / 兩項行情快取測試修正
+GitHub失敗基線commit: d8d540795478de323374069188ed46b989304e32
+失敗run: 39010655225 / job: 117332338081
 目標分支: fix/refresh-live-gate-20261014
 
-所有內容為完整可覆蓋檔案；不是補丁腳本。解壓後依原路徑上傳專案根目錄。
-必須一併覆蓋 Dart API、輪掃儲存、Kotlin 原生入口、Manifest、Gradle、pubspec、測試與工作流。
-行情快取 96 筆/8MiB、單筆512KiB、7日；寫入排隊上限8與逾時隔離。
-升級前強制停止 App；同簽章覆蓋安裝，首次開啟原生整理舊行情，持股本金進度保留。
-不要解除安裝、不要清除 App 資料；不同簽章先保留舊 App。
-美股/台股完整名單輪掃、0.5%風控、實際低點與原時間、真實行情門禁及零推薦合法保留。
-25項Python測試與來源配置靜態檢查通過；Flutter測試實際執行退出127。
-本機沒有Flutter/Android/Kotlin SDK，尚無新版APK或兩天實機驗證結果。
-提交新commit，待Actions全部通過後下載APK覆蓋安裝；詳見 LONG_RUN_RECOVERY.md。
+核心覆蓋兩個完整test檔：test/market_data_api_test.dart、test/market_data_cache_bounds_test.dart。
+指數代碼用解碼後pathSegments；快取fixture報價時間對齊原抓取時間。
+保留96筆/8MiB上限與未來報價拒絕，另加不可能時間負向測試（cache共11項）。
+正式lib/Android/CI/版本/字典/風控不變；已核對79個正式與門禁檔案。
+其餘為指南、完整性清單與GitHub尚缺的隱藏專案配置，可一併覆蓋。
+完整原始碼，非補丁腳本。解壓後依原路徑上傳，不多套一層目錄，勿只上傳ZIP。
+提交新commit觸發Actions，不能只重跑原失敗commit。
+25項Python及來源靜態檢查通過，本機Flutter命令退出127，修正後待新提交CI。
+本包不含已編譯APK；待全部門禁成功，再用同簽章APK覆蓋安裝，不清除資料。
+精確原因、實際日誌證據與驗證限制見 CACHE_TEST_FIX.md。
 
 .dockerignore
-.github/workflows/build_apk.yml
 .gitignore
 .metadata
-ANDROID_BACKGROUND_SCAN.md
 BUILD_STATUS.md
+CACHE_TEST_FIX.md
 FILE_MANIFEST.json
 GITHUB_MANUAL_UPDATE.md
 LONG_RUN_RECOVERY.md
 README.md
 UPDATE_FILES.txt
-android/app/build.gradle
-android/app/src/main/AndroidManifest.xml
-android/app/src/main/kotlin/com/martinluk/martin_luk_app/CacheRecoveryActivity.kt
-android/app/src/main/kotlin/com/martinluk/martin_luk_app/FlutterHostActivity.kt
-android/app/src/main/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheRecovery.kt
-android/app/src/main/kotlin/com/martinluk/martin_luk_app/MainActivity.kt
-android/app/src/main/kotlin/com/martinluk/martin_luk_app/MartinLukApplication.kt
-android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanForegroundService.kt
-android/app/src/test/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheXmlTest.kt
-lib/services/live_candidate_repository.dart
-lib/services/market_data_api.dart
-pubspec.yaml
-scripts/verify_deliverable.py
+test/market_data_api_test.dart
 test/market_data_cache_bounds_test.dart
-test/mobile_scan_storage_budget_test.dart

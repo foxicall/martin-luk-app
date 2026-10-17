@@ -52,7 +52,9 @@ void main() {
         expect(chart.isCached, isTrue);
         expect(chart.isStale, isTrue);
         expect(chart.fetchedAt, now.subtract(Duration(seconds: 120 - index)));
-        expect(chart.quoteTimestamp, DateTime.utc(2026, 10, 16, 16));
+        // A cached provider quote cannot come from after its original fetch.
+        expect(chart.quoteTimestamp, now.subtract(Duration(seconds: 120 - index)));
+        expect(chart.quoteTimestamp.isAfter(chart.fetchedAt), isFalse);
       } on MarketDataException {
         // Entries evicted from the old unbounded cache are an honest error,
         // never a fabricated quote or a reason to abort a rolling market scan.
@@ -61,6 +63,26 @@ void main() {
     }
     expect(cachedCount, MarketDataApi.maximumCacheEntries);
     expect(api.debugMemoryCacheEntries, MarketDataApi.maximumCacheEntries);
+  });
+
+  test('offline fallback still rejects an impossible future quote timestamp', () async {
+    final fetchedAt = now.subtract(const Duration(minutes: 2));
+    SharedPreferences.setMockInitialValues({
+      _key('NVDA'): jsonEncode({
+        'fetched_at': fetchedAt.toIso8601String(),
+        // Deliberately invalid: the provider quote is later than the fetch.
+        'document': _chart('NVDA', quoteAt: now),
+      }),
+    });
+    final preferences = await SharedPreferences.getInstance();
+    final api = MarketDataApi(preferences: preferences, now: () => now,
+        client: MockClient((_) async => http.Response('offline', 503)));
+    addTearDown(api.close);
+    await expectLater(api.fetchDaily('NVDA', StockMarket.us, forceRefresh: true),
+        throwsA(isA<MarketDataException>()));
+    expect(preferences.containsKey(_key('NVDA')), isFalse);
+    expect(api.debugMemoryCacheEntries, 0);
+    _expectBounds(api, preferences);
   });
 
   test('the byte budget evicts payloads even before the entry limit', () async {
@@ -269,17 +291,18 @@ void _expectBounds(MarketDataApi api, SharedPreferences preferences) {
 }
 
 String _envelope(String symbol, DateTime fetchedAt) => jsonEncode({
-  'fetched_at': fetchedAt.toIso8601String(), 'document': _chart(symbol),
+  'fetched_at': fetchedAt.toIso8601String(),
+  'document': _chart(symbol, quoteAt: fetchedAt),
 });
 
-Map<String, dynamic> _chart(String symbol, {double price = 102}) {
+Map<String, dynamic> _chart(String symbol, {double price = 102, DateTime? quoteAt}) {
   int unix(DateTime time) => time.millisecondsSinceEpoch ~/ 1000;
   final start = DateTime.utc(2026, 10, 16, 13, 30);
   return {'chart': {'error': null, 'result': [{
     'meta': {'symbol': symbol, 'currency': 'USD',
       'exchangeTimezoneName': 'America/New_York', 'gmtoffset': -14400,
       'regularMarketPrice': price,
-      'regularMarketTime': unix(DateTime.utc(2026, 10, 16, 16)),
+      'regularMarketTime': unix(quoteAt ?? DateTime.utc(2026, 10, 16, 16)),
       'currentTradingPeriod': {'regular': {
         'start': unix(start), 'end': unix(DateTime.utc(2026, 10, 16, 20)),
       }}},

@@ -34,7 +34,9 @@ XML 使用串流轉寫與 AtomicFile；完成寫入後驗證大小及 SHA256，�
 
 ## 驗證與限制
 
-新增 `test/market_data_cache_bounds_test.dart` 十項：150 檔循環、離線大量回填、容量與 LRU、精確命名空間、共享索引、關閉後晚到結果及掛起平台寫入。
+後續兩項測試資料修正見 [CACHE_TEST_FIX.md](CACHE_TEST_FIX.md)；版本維持 1.6.1+14，正式快取與 Android 原始碼不變。
+
+新增 `test/market_data_cache_bounds_test.dart` 十一項：150 檔循環、離線大量回填、容量與 LRU、精確命名空間、共享索引、關閉後晚到結果及掛起平台寫入；包含拒絕不可能的未來報價反例。
 
 新增 `test/mobile_scan_storage_budget_test.dart` 三項：5118 檔檢查點保存次數、第二批中斷續掃，以及相同計數下更新真實停損仍會存檔。
 

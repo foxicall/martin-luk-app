@@ -3,7 +3,7 @@
   "hash_algorithm": "SHA256",
   "archive_layout": "project files at archive root",
   "manifest_excludes_itself": true,
-  "file_count": 242,
+  "file_count": 243,
   "files": [
     {
       "path": ".dockerignore",
@@ -52,8 +52,13 @@
     },
     {
       "path": "BUILD_STATUS.md",
-      "bytes": 22339,
-      "sha256": "cb3b5a6efe4efd0d0e94b715ba62848cd04b5837e00835a2301c1ca78d9730ee"
+      "bytes": 23100,
+      "sha256": "4d42ec9cc328e843d8c8584fda3a251f212acf1b32183a1018e2c5fc774da338"
+    },
+    {
+      "path": "CACHE_TEST_FIX.md",
+      "bytes": 3479,
+      "sha256": "a8a65865e00c6624d947f49bcdede250ec64008c057e02d846315b5d597d93d6"
     },
     {
       "path": "CLOUD_API_GUIDE.md",
@@ -77,13 +82,13 @@
     },
     {
       "path": "GITHUB_MANUAL_UPDATE.md",
-      "bytes": 12849,
-      "sha256": "b0c416e33ef44018e25f03b8095dc7b2ac42f14ce17a6a6f79163dfc4924c86c"
+      "bytes": 13649,
+      "sha256": "9c9bf33233a1e5b492d18b3dea47b88f5d5bd7b26692b6736104db61a420b8d4"
     },
     {
       "path": "LONG_RUN_RECOVERY.md",
-      "bytes": 6649,
-      "sha256": "4c16cce80b8d0c00b607c773e9f9103ce791524fc82a0ad871bbfbd519e26943"
+      "bytes": 6840,
+      "sha256": "1e1d939d54a1dcf88d474ba028f4a0f93aa680588889bda4d90174a9804f642b"
     },
     {
       "path": "MARKET_DEBUG_LOGGING.md",
@@ -127,8 +132,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 12080,
-      "sha256": "cf7e5e5ada6474da588ed05049655ab4a54a0a6aaac4d7967778211827b4fa44"
+      "bytes": 12359,
+      "sha256": "9d29fd2a46e941c6c2a7248c58650ba7d7aa18c47c20ebcbd79c73e4972c5f66"
     },
     {
       "path": "README_HOW_TO_BUILD.md",
@@ -182,8 +187,8 @@
     },
     {
       "path": "UPDATE_FILES.txt",
-      "bytes": 2115,
-      "sha256": "9e4df82eef9764c7cca9a9a9de20f410fbfb570b2e4e36d905e13a74b453b1a1"
+      "bytes": 1394,
+      "sha256": "6bb4b42ca1afbf9c8c3c5e4c7df3d2922cdba3317f918fad8b87c64dca568f50"
     },
     {
       "path": "US_UI_TEST_FIX.md",
@@ -992,13 +997,13 @@
     },
     {
       "path": "test/market_data_api_test.dart",
-      "bytes": 29131,
-      "sha256": "6c66513022112b12c91fcb8fc8b7b30b0c96f86806ddf450465c89472b4c5644"
+      "bytes": 29582,
+      "sha256": "9d6d7d3eb1a84f87f72238987a822b620672a83cd9ed091870a07ea2bb92b4e2"
     },
     {
       "path": "test/market_data_cache_bounds_test.dart",
-      "bytes": 13400,
-      "sha256": "12cf555f23c6c7ab885e21ccc02da9e11f094e1ca966814078c1a4a6aff5231b"
+      "bytes": 14555,
+      "sha256": "b2f423c848e1a8d4c34d94c4eae2c0d2214f7da9d1af3f0669d82e17927c7f3f"
     },
     {
       "path": "test/market_scan_progress_test.dart",

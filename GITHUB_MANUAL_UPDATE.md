@@ -1,3 +1,13 @@
+# 最新覆蓋：1.6.1+14 兩項行情測試修正
+
+下載 `martin_luk_cache_test_fix_updates_20261017.zip`，解壓後依原路徑覆蓋 `test/market_data_api_test.dart`、`test/market_data_cache_bounds_test.dart` 到 `fix/refresh-live-gate-20261014` 分支。其餘指南、逐檔清單與隱藏配置可一起上傳；完整專案為 `martin_luk_cache_test_fix_20261017.zip`。
+
+提交新 commit 後再看 Actions，重跑原失敗 commit 不會載入修正。版本仍為 1.6.1+14；正式行情、快取限制與 Android 啟動復原不變。全部門禁成功後才下載該提交的新 APK，同簽章覆蓋安裝，不清除資料。精確失敗原因與未能本機執行 Flutter 的限制見 [CACHE_TEST_FIX.md](CACHE_TEST_FIX.md)。
+
+以下為歷史紀錄，以上方包名為準。
+
+---
+
 # 最新覆蓋：1.6.1+14 長時間卡死與啟動修正
 
 下載 `martin_luk_long_run_recovery_updates_20261016.zip`，解壓後依 `UPDATE_FILES.txt` 將所有完整檔案覆蓋至 `fix/refresh-live-gate-20261014`。包含 Dart API／輪掃儲存、新 Kotlin 復原入口／Host、MainActivity、Manifest、Gradle、測試及 workflow；不能只貼 Dart。完整專案為 `martin_luk_long_run_recovery_20261016.zip`。
