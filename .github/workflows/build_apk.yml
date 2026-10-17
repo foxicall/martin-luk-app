@@ -90,9 +90,10 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.7'
           cache: true
 
-      - name: 升級 Gradle Wrapper 至 8.14
+      - name: 確認 Gradle Wrapper 為 8.14
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
         shell: bash
         run: |
@@ -103,11 +104,8 @@ jobs:
             exit 1
           fi
           if ! grep -Eq '^distributionUrl=.*gradle-8\.14-(all|bin)\.zip$' "$WRAPPER_FILE"; then
-            if grep -Eq '^distributionSha256Sum=' "$WRAPPER_FILE"; then
-              echo '::error::Wrapper 有 SHA256 校驗值，升級 Gradle 時須一併更新對應校驗值。'
-              exit 1
-            fi
-            sed -i -E 's#(gradle-)[0-9.]+-(all|bin)\.zip#\18.14-\2.zip#' "$WRAPPER_FILE"
+            echo '::error::請將 gradle-wrapper.properties 一併更新為 Gradle 8.14；CI 不會改寫原始碼。'
+            exit 1
           fi
           grep -E '^distributionUrl=.*gradle-8\.14-(all|bin)\.zip$' "$WRAPPER_FILE" | tee -a test_logs/verification.log
 
@@ -190,7 +188,7 @@ jobs:
       - name: 編譯正式版 Release APK
         if: ${{ success() && steps.run-gate-test.outcome == 'success' }}
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
-        run: flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+        run: flutter build apk --release --dart-define=USE_MOCK_DATA=false
 
       - name: 驗證原生啟動復原保留帳戶與持股
         id: native-recovery-test
