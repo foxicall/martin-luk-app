@@ -1,0 +1,45 @@
+name: Momentum full-market background scan
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 7,22 * * 1-5'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/momentum-background.yml'
+      - 'momentum-cloud/**'
+permissions:
+  contents: write
+concurrency:
+  group: momentum-full-market-scan
+  cancel-in-progress: false
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Prepare dedicated generated-data branch
+        env:
+          SCAN_DATA_DIR: ${{ runner.temp }}/momentum-scan-data
+        run: |
+          git config user.name 'Momentum scanner'
+          git config user.email 'actions@users.noreply.github.com'
+          if git ls-remote --exit-code origin refs/heads/momentum-scan-data > /dev/null; then
+            git fetch --depth=1 origin momentum-scan-data
+            git worktree add --detach "$SCAN_DATA_DIR" FETCH_HEAD
+            test "$(cat "$SCAN_DATA_DIR/.momentum-generated")" = 'public-market-data-only'
+          else
+            git worktree add --detach "$SCAN_DATA_DIR" HEAD
+            git -C "$SCAN_DATA_DIR" switch --orphan momentum-scan-data
+            printf 'public-market-data-only\n' > "$SCAN_DATA_DIR/.momentum-generated"
+          fi
+      - name: Scan all US and Taiwan stocks and publish progress
+        env:
+          SCAN_DATA_DIR: ${{ runner.temp }}/momentum-scan-data
+        run: node momentum-cloud/cloud/runner.mjs
