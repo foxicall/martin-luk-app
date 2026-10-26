@@ -34,3 +34,7 @@ test('partial 20/60 reference ranks are labeled with unchanged full denominator 
  const mixed=[...rows().slice(0,10),...rows().slice(10,15).map(r=>({...r,metrics:{...r.metrics,asOf:'2026-10-22'}}))];const r=rankResults(mixed,c);assert.equal(r.find(r=>r.symbol==='S0').rsReference.sample,10);assert.equal(r.find(r=>r.symbol==='S10').rsReference.sample,5);
  const old=rankResults(input.map(r=>({...r,strategyVersion:'legacy'})),c);assert.ok(old.every(r=>!r.rsReference));
 });
+test('duplicate symbols or a sample larger than the declared universe cannot produce reference ranks',()=>{
+ const input=rows().slice(0,4);input[0].symbol=input[1].symbol;assert.ok(rankResults(input,snapshotCoverage(manifest)).every(r=>!r.rsReference));
+ assert.ok(rankResults(rows(),{US:{total:99,scope:'full-market',complete:true}}).every(r=>!r.rsReference&&r.rankSample===0));
+});
