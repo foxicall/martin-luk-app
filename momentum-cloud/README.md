@@ -1,0 +1,9 @@
+# PWA cloud ranking data
+
+The PWA's Hybrid 1.3.0 client needs 20- and 60-session **stock close returns**, strategy provenance and the full market directory denominator. The previous cloud strategy emitted benchmark-relative 5/20-session values without a 60-session return, and compact serialization omitted the strategy version. Those rows cannot be promoted to the new ranking method.
+
+This change synchronizes the cloud strategy/provider with the PWA, retains strategy version, return method and checks in compact daily summaries, and publishes per-market ranking readiness. The provider drops only provable trailing zero-volume placeholders after the last quoted session; it does not discard ordinary zero-volume history. Original directory membership and missing stocks remain in the denominator.
+
+Only a full, unique, same-date market with all required returns can qualify its top 5%/3% scanners. A separate same-date sample reference can be shown when history is missing; it never qualifies a scanner. Corporate/order-flow evidence stays missing and daily summaries cannot create entries. Existing positions, account data, schedules and Android code are untouched. After merge, the existing main-push workflow runs a new market scan; the old snapshot cannot be repaired by relabeling its fields.
+
+Validation: `node --test --test-isolation=none momentum-cloud/tests/*.test.mjs` (11 tests). The PR checks are read-only and use synthetic market data plus local temporary Git repositories; they do not run a live scan or publish generated data. The existing scheduled scan workflow remains unchanged.

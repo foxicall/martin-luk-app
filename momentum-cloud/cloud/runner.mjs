@@ -4,11 +4,11 @@ import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {loadUniverse} from '../src/universe.js';
 import {scanMarket} from '../src/provider.js';
-import {analyze} from '../src/strategy.js';
+import {analyze,STRATEGY_VERSION,snapshotCoverage,rankReadiness} from '../src/strategy.js';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const iso=()=>new Date().toISOString();
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
-export function compactResult(raw,listing){const r=analyze({...raw,name:listing.name||raw.name});return {symbol:r.symbol,name:r.name,market:r.market,source:r.source,sector:listing.sector||r.sector,status:r.status,metrics:r.metrics,missing:r.missing,scanners:r.scanners,checks:[],bars:[],setups:[],setup:null,largeLiquid:r.largeLiquid||false,freshIntraday:false,dailyOnly:true,evaluatedAt:raw.evaluatedAt||Date.now()/1000,raw:{error:raw.error||null,notes:raw.notes||[],quoteTime:raw.quoteTime||null}};}
+export function compactResult(raw,listing){const r=analyze({...raw,name:listing.name||raw.name});return {strategyVersion:STRATEGY_VERSION,returnMethod:'close-return-20-60-v1',symbol:r.symbol,name:r.name,market:r.market,source:r.source,sector:listing.sector||r.sector,status:r.status,metrics:r.metrics,missing:r.missing,scanners:r.scanners,checks:r.checks,bars:[],setups:[],setup:null,largeLiquid:r.largeLiquid||false,freshIntraday:false,dailyOnly:true,evaluatedAt:raw.evaluatedAt||Date.now()/1000,raw:{error:raw.error||null,notes:raw.notes||[],quoteTime:raw.quoteTime||null}};}
 export async function scanQueue(queue,{fetcher=scanMarket,onCheckpoint=async()=>{},batchSize=8,pauseMs=800,checkpointEvery=60000,clock=Date.now,stop=()=>false,seed=[]}={}){
  const results=new Map(seed.map(r=>[r.symbol,r]));let last=0,consecutiveFailures=0;
  const remaining=queue.filter(r=>!results.has(r.symbol));
@@ -26,7 +26,8 @@ export async function scanQueue(queue,{fetcher=scanMarket,onCheckpoint=async()=>
 export async function writeSnapshot(directory,manifest,results){
  const pages=[];for(let i=0;i<results.length;i+=250){const payload=JSON.stringify({runId:manifest.runId,results:results.slice(i,i+250)}),digest=hash(payload),path=`runs/${manifest.runId}/page-${i/250}-${digest.slice(0,20)}.json`;await mkdir(resolve(directory,`runs/${manifest.runId}`),{recursive:true});await writeFile(resolve(directory,path),payload);pages.push({path,sha256:digest,count:Math.min(250,results.length-i)});}
  const failed=results.filter(r=>r.raw.error).length,missing=results.filter(r=>!r.raw.error&&r.missing.length).length;
- const next={...manifest,updatedAt:iso(),processed:results.length,failed,missing,valid:results.length-failed-missing,remaining:Math.max(0,(manifest.total||0)-results.length),pages};
+ const next={...manifest,strategyVersion:STRATEGY_VERSION,returnMethod:'close-return-20-60-v1',updatedAt:iso(),processed:results.length,failed,missing,valid:results.length-failed-missing,remaining:Math.max(0,(manifest.total||0)-results.length),pages};
+ const coverage=snapshotCoverage(next);next.ranking=Object.fromEntries(['TW','US'].map(market=>[market,rankReadiness(results.filter(r=>r.market===market),coverage[market])]));
  await writeFile(resolve(directory,'latest.json'),JSON.stringify(next));return next;
 }
 function git(directory,args){const r=spawnSync('git',['-C',directory,...args],{encoding:'utf8',maxBuffer:1e6});if(r.status!==0){const reason=r.stderr.split('\n').filter(x=>/error:|fatal:|rejected|remote:/.test(x)).join(' ').replace(/https?:\/\/[^\s]+/g,'[remote]').replace(/gh[pousr]_[A-Za-z0-9_]+/g,'[redacted]').slice(0,350);throw new Error(`Git ${args[0]} failed (${r.status}): ${reason}`);};return r.stdout.trim();}
