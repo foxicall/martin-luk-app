@@ -77,7 +77,8 @@ void main() {
     expect(result.stopSource, 'day_low');
     expect(result.signalTime, DateTime.utc(2026, 10, 14, 13, 40));
     final candidate = result.toCandidate(rsScore: 50, rsRank: 1);
-    expect(candidate.isConfirmed, true);
+    expect(candidate.priceSignalConfirmed, true);
+    expect(candidate.isConfirmed, false); // OHLCV does not verify Hybrid order flow.
     expect(candidate.quotePrice, 102);
     expect(candidate.ema9, 100);
   });
@@ -102,36 +103,36 @@ void main() {
   });
   test('ORH excludes premarket and requires the actual opening candle', () {
     final result = evaluate(intraday([
-      minute(-5, open: 106, high: 200, low: 106, close: 110),
-      minute(0, open: 103, high: 104, low: 102, close: 103, volume: 40000),
-      minute(5, open: 103, high: 106, low: 102.5, close: 105, volume: 40000),
+      minute(-5, open: 108, high: 202, low: 108, close: 112),
+      minute(0, open: 105, high: 106, low: 104, close: 105, volume: 40000),
+      minute(5, open: 105, high: 108, low: 104.5, close: 107, volume: 40000),
     ]));
     expect(result.triggerType, 'ORH');
-    expect(result.trigger, 104);
-    expect(result.stop, 102);
-    expect(result.patterns, contains('Episodic Pivot 量增'));
+    expect(result.trigger, 106);
+    expect(result.stop, 104);
+    expect(result.patterns, contains('ORH 價格觀察（催化劑／同時段量待核實）'));
     final missingOpening = evaluate(intraday([
-      minute(5, open: 103, high: 104, low: 102, close: 103, volume: 40000),
-      minute(10, open: 103, high: 106, low: 102.5, close: 105, volume: 40000),
+      minute(5, open: 105, high: 106, low: 104, close: 105, volume: 40000),
+      minute(10, open: 105, high: 108, low: 104.5, close: 107, volume: 40000),
     ]));
     expect(missingOpening.triggerType, 'PDH');
     expect(missingOpening.patterns, isNot(contains('ORH 突破')));
   });
   test('gap without volume cannot manufacture an EP or ORH signal', () {
     final result = evaluate(intraday([
-      minute(0, open: 103, high: 104, low: 102, close: 103, volume: 1),
-      minute(5, open: 103, high: 106, low: 102.5, close: 105, volume: 1),
+      minute(0, open: 105, high: 106, low: 104, close: 105, volume: 1),
+      minute(5, open: 105, high: 108, low: 104.5, close: 107, volume: 1),
     ]));
-    expect(result.patterns, isNot(contains('Episodic Pivot 量增')));
+    expect(result.patterns, isNot(contains('ORH 價格觀察（催化劑／同時段量待核實）')));
     expect(result.stop, null);
   });
   test('volume observed after a crossing cannot backdate an ORH confirmation', () {
     final result = evaluate(intraday([
-      minute(0, open: 103, high: 104, low: 102, close: 103, volume: 1),
-      minute(5, open: 103, high: 106, low: 102.5, close: 105, volume: 1),
-      minute(10, open: 105, high: 108, low: 104, close: 106, volume: 1000000),
+      minute(0, open: 105, high: 106, low: 104, close: 105, volume: 1),
+      minute(5, open: 105, high: 108, low: 104.5, close: 107, volume: 1),
+      minute(10, open: 107, high: 110, low: 106, close: 108, volume: 1000000),
     ]));
-    expect(result.patterns, contains('Episodic Pivot 量增'));
+    expect(result.patterns, contains('ORH 價格觀察（催化劑／同時段量待核實）'));
     expect(result.stop, null);
   });
   test('missing regular candles cannot establish a complete breakout day low', () {
@@ -145,7 +146,7 @@ void main() {
   test('real premarket gap is watch-only until an opening range exists', () {
     final at = DateTime.utc(2026, 10, 14, 12, 50);
     final result = evaluate(intraday([
-      minute(-45, open: 102, high: 104, low: 102, close: 103),
+      minute(-45, open: 104, high: 106, low: 104, close: 105),
     ], quoteTime: at), at: at);
     expect(result.stop, null);
     expect(result.patterns.any((pattern) => pattern.contains('盤前跳空')), true);

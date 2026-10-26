@@ -44,7 +44,8 @@ void main() {
       expect(candidate.market, StockMarket.us);
       expect(candidate.entryPrice, 100);
       expect(candidate.stopPercent, 2);
-      expect(candidate.isConfirmed, isTrue);
+      expect(candidate.priceSignalConfirmed, isTrue);
+      expect(candidate.isConfirmed, isFalse); // Old payload lacks Hybrid evidence.
       expect(candidate.signalTimestamp, DateTime.utc(2026, 10, 13, 6));
       final roundTrip = StockCandidate.fromJson(candidate.toJson());
       expect(roundTrip.toJson(), candidate.toJson());
@@ -164,7 +165,7 @@ void main() {
     test('real API sends market/ADR and parses snapshot metadata', () async {
       final client = MockClient((request) async {
         expect(request.url.path, '/api/v1/candidates');
-        expect(request.url.queryParameters, {'market': 'us', 'adr_threshold': '5.0'});
+        expect(request.url.queryParameters, {'market': 'us', 'adr_threshold': '5.0', 'background': 'true', 'force_refresh': 'false'});
         return http.Response(jsonEncode(snapshotJson()), 200,
             headers: {'content-type': 'application/json; charset=utf-8'});
       });

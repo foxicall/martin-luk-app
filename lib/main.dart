@@ -34,8 +34,9 @@ class _MartinLukAppState extends State<MartinLukApp> with WidgetsBindingObserver
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Inactive, hidden and paused all stop the timer. This is foreground
-    // monitoring rather than Android background work or unattended trading.
+    // The controller pauses ordinary polling when hidden. Explicit Android
+    // foreground-service ownership may retain that SAME poller and scan page;
+    // the Activity must not start a second controller or background isolate.
     _controller.setForeground(state == AppLifecycleState.resumed);
   }
 

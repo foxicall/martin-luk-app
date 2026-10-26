@@ -25,6 +25,7 @@ void main() {
     expect(tester.takeException(), isNull);
     final button = find.text('調整示範市價／收盤').first;
     await tester.ensureVisible(button);
+    await tester.pumpAndSettle();
     await tester.tap(button);
     await tester.pumpAndSettle();
     final priceField = find.widgetWithText(TextFormField, '目前市價');

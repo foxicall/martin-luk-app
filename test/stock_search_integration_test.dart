@@ -6,8 +6,11 @@ import 'package:martin_luk_app/app_controller.dart';
 import 'package:martin_luk_app/main.dart';
 import 'package:martin_luk_app/models/stock_candidate.dart';
 import 'package:martin_luk_app/screens/calculator_screen.dart';
+import 'package:martin_luk_app/services/stock_search_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async { await StockSearchService.load(); });
   setUp(seedMockPreferences);
 
   testWidgets('Chinese cross-market search opens the matching native-currency calculator', (tester) async {
@@ -20,10 +23,13 @@ void main() {
         of: find.byKey(const ValueKey('dashboard-stock-search')),
         matching: find.byType(TextFormField));
     await tester.ensureVisible(search);
+    await tester.pumpAndSettle();
     await tester.enterText(search, '輝達');
+    await tester.pump(); // Apply focus before advancing the debounce clock.
     await tester.pump(const Duration(milliseconds: 200));
     final result = find.byKey(const ValueKey('stock-suggestion-us:NVDA'));
-    await tester.ensureVisible(result);
+    await tester.scrollUntilVisible(result, 100, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     await tester.tap(result);
     await tester.pumpAndSettle();
     expect(controller.market, StockMarket.us);
@@ -45,16 +51,20 @@ void main() {
         of: find.byKey(const ValueKey('dashboard-stock-search')),
         matching: find.byType(TextFormField));
     await tester.ensureVisible(search);
+    await tester.pumpAndSettle();
     await tester.enterText(search, 'BRK.B');
+    await tester.pump(); // Apply focus before advancing the debounce clock.
     await tester.pump(const Duration(milliseconds: 200));
     final result = find.byKey(const ValueKey('stock-suggestion-us:BRK-B'));
-    await tester.ensureVisible(result);
+    await tester.scrollUntilVisible(result, 100, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     await tester.tap(result);
     await tester.pumpAndSettle();
     expect(find.byType(CalculatorScreen), findsNothing);
     expect(controller.market, StockMarket.us);
     final add = find.text('將標準代碼帶入新增持股');
     await tester.ensureVisible(add);
+    await tester.pumpAndSettle();
     await tester.tap(add);
     await tester.pumpAndSettle();
     final symbol = find.descendant(
@@ -87,9 +97,11 @@ void main() {
       of: find.byKey(const ValueKey('holding-stock-search')),
       matching: find.byType(TextFormField));
     await tester.enterText(symbol, '特斯拉');
+    await tester.pump(); // Apply focus before advancing the debounce clock.
     await tester.pump(const Duration(milliseconds: 200));
     final result = find.byKey(const ValueKey('stock-suggestion-us:TSLA'));
-    await tester.ensureVisible(result);
+    await tester.scrollUntilVisible(result, 100, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     await tester.tap(result);
     await tester.pump();
     expect(tester.widget<TextFormField>(symbol).controller!.text, 'TSLA');

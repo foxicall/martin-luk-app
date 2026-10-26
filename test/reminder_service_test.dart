@@ -15,6 +15,7 @@ void main() {
 
   setUp(() {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    AndroidFlutterLocalNotificationsPlugin.registerWith();
     calls.clear();
     permissionGranted = true;
     initializationWorks = true;

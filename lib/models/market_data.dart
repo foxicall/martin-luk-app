@@ -15,9 +15,19 @@ class PriceBar {
     required this.volume,
     this.interval = const Duration(days: 1),
   }) : timestamp = timestamp.toUtc() {
-    if ([open, high, low, close].any((value) => !value.isFinite || value <= 0) ||
-        !volume.isFinite || volume < 0 || high < low ||
-        high < open || high < close || low > open || low > close ||
+    if ([
+          open,
+          high,
+          low,
+          close,
+        ].any((value) => !value.isFinite || value <= 0) ||
+        !volume.isFinite ||
+        volume < 0 ||
+        high < low ||
+        high < open ||
+        high < close ||
+        low > open ||
+        low > close ||
         interval <= Duration.zero) {
       throw const FormatException('OHLCV 價格、成交量或 K 棒週期無效。');
     }
@@ -52,16 +62,23 @@ class MarketChart {
     this.isCached = false,
     this.isStale = false,
     this.cacheWarning,
+    this.marketCap,
+    this.exchangeName,
     this.source = 'Yahoo Finance 公開行情（可能延遲，不保證即時）',
   }) : bars = List.unmodifiable(bars),
        quoteTimestamp = quoteTimestamp.toUtc(),
        fetchedAt = fetchedAt.toUtc(),
        regularSessionStart = regularSessionStart?.toUtc(),
        regularSessionEnd = regularSessionEnd?.toUtc() {
-    if (symbol.trim().isEmpty || currency != market.currency ||
-        exchangeTimezoneName.isEmpty || !latestPrice.isFinite ||
-        latestPrice <= 0 || bars.isEmpty || !['1d', '1m', '5m'].contains(interval) ||
-        (this.regularSessionStart == null) != (this.regularSessionEnd == null) ||
+    if (symbol.trim().isEmpty ||
+        currency != market.currency ||
+        exchangeTimezoneName.isEmpty ||
+        !latestPrice.isFinite ||
+        latestPrice <= 0 ||
+        bars.isEmpty ||
+        !['1d', '1m', '5m'].contains(interval) ||
+        (this.regularSessionStart == null) !=
+            (this.regularSessionEnd == null) ||
         (this.regularSessionStart != null &&
             !this.regularSessionEnd!.isAfter(this.regularSessionStart!))) {
       throw const FormatException('股票、幣別、交易時段或行情資料無效。');
@@ -90,10 +107,15 @@ class MarketChart {
   final bool isStale;
   final String? cacheWarning;
   final String source;
+  final double? marketCap;
+  final String? exchangeName;
 
   /// A date-only value in the exchange's IANA timezone, including US DST.
   DateTime localSessionDate(DateTime timestamp) {
-    final local = tz.TZDateTime.from(timestamp.toUtc(), _location(exchangeTimezoneName));
+    final local = tz.TZDateTime.from(
+      timestamp.toUtc(),
+      _location(exchangeTimezoneName),
+    );
     return DateTime.utc(local.year, local.month, local.day);
   }
 
@@ -105,24 +127,33 @@ class MarketChart {
     final today = localSessionDate(fetchedAt);
     final sessionStart = regularSessionStart;
     final sessionEnd = regularSessionEnd;
-    final sessionDate = sessionStart == null ? null : localSessionDate(sessionStart);
-    return List.unmodifiable(bars.where((bar) {
-      final date = localSessionDate(bar.timestamp);
-      if (sessionDate != null && date == sessionDate) {
-        return sessionEnd != null &&
-            !fetchedAt.isBefore(sessionEnd.add(const Duration(minutes: 15))) &&
-            !quoteTimestamp.isBefore(sessionEnd.subtract(const Duration(minutes: 1)));
-      }
-      if (date.isBefore(today)) return true;
-      if (date != today || sessionDate == null) return false;
-      // Yahoo can roll currentTradingPeriod to tomorrow before changing the
-      // daily history. Today's completed candle still needs a consistent close
-      // test; simply comparing its date with fetchedAt would discard it.
-      // The normal exchange close is conservative on early-close sessions.
-      final close = dailyCloseTimestamp(bar);
-      return !fetchedAt.isBefore(close.add(const Duration(minutes: 15))) &&
-          !quoteTimestamp.isBefore(close.subtract(const Duration(minutes: 1)));
-    }));
+    final sessionDate =
+        sessionStart == null ? null : localSessionDate(sessionStart);
+    return List.unmodifiable(
+      bars.where((bar) {
+        final date = localSessionDate(bar.timestamp);
+        if (sessionDate != null && date == sessionDate) {
+          return sessionEnd != null &&
+              !fetchedAt.isBefore(
+                sessionEnd.add(const Duration(minutes: 15)),
+              ) &&
+              !quoteTimestamp.isBefore(
+                sessionEnd.subtract(const Duration(minutes: 1)),
+              );
+        }
+        if (date.isBefore(today)) return true;
+        if (date != today || sessionDate == null) return false;
+        // Yahoo can roll currentTradingPeriod to tomorrow before changing the
+        // daily history. Today's completed candle still needs a consistent close
+        // test; simply comparing its date with fetchedAt would discard it.
+        // The normal exchange close is conservative on early-close sessions.
+        final close = dailyCloseTimestamp(bar);
+        return !fetchedAt.isBefore(close.add(const Duration(minutes: 15))) &&
+            !quoteTimestamp.isBefore(
+              close.subtract(const Duration(minutes: 1)),
+            );
+      }),
+    );
   }
 
   /// Extended-hours bars never form the regular opening range.
@@ -130,11 +161,15 @@ class MarketChart {
     final start = regularSessionStart;
     final end = regularSessionEnd;
     if (interval == '1d' || start == null || end == null) return const [];
-    return List.unmodifiable(bars.where((bar) =>
-        !bar.timestamp.isBefore(start) && bar.timestamp.isBefore(end)));
+    return List.unmodifiable(
+      bars.where(
+        (bar) => !bar.timestamp.isBefore(start) && bar.timestamp.isBefore(end),
+      ),
+    );
   }
 
-  bool get quoteIsInRegularSession => regularSessionStart != null &&
+  bool get quoteIsInRegularSession =>
+      regularSessionStart != null &&
       !quoteTimestamp.isBefore(regularSessionStart!) &&
       quoteTimestamp.isBefore(regularSessionEnd!);
 
@@ -142,16 +177,25 @@ class MarketChart {
   /// close date and US daylight-saving offset. Use the exchange's wall clock.
   DateTime dailyCloseTimestamp(PriceBar bar) {
     final date = localSessionDate(bar.timestamp);
-    if (regularSessionStart != null && regularSessionEnd != null &&
+    if (regularSessionStart != null &&
+        regularSessionEnd != null &&
         date == localSessionDate(regularSessionStart!)) {
       return regularSessionEnd!;
     }
-    return tz.TZDateTime(_location(exchangeTimezoneName),
-        date.year, date.month, date.day, market == StockMarket.tw ? 13 : 16,
-        market == StockMarket.tw ? 30 : 0).toUtc();
+    return tz.TZDateTime(
+      _location(exchangeTimezoneName),
+      date.year,
+      date.month,
+      date.day,
+      market == StockMarket.tw ? 13 : 16,
+      market == StockMarket.tw ? 30 : 0,
+    ).toUtc();
   }
 
-  bool isQuoteFresh(DateTime now, {Duration maxAge = const Duration(minutes: 15)}) {
+  bool isQuoteFresh(
+    DateTime now, {
+    Duration maxAge = const Duration(minutes: 15),
+  }) {
     final age = now.toUtc().difference(quoteTimestamp);
     return !age.isNegative && age <= maxAge && !isStale && cacheWarning == null;
   }

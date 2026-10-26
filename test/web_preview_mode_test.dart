@@ -123,7 +123,8 @@ void main() {
       controller.settings.copyWith(useMockData: false),
     );
     expect(controller.settings.useMockData, isFalse);
-    expect(controller.snapshot, isNull);
+    expect(controller.snapshot?.isFallback, isTrue);
+    expect(controller.snapshot?.candidates, isEmpty);
     expect(controller.visibleCandidates, isEmpty);
     expect(controller.error, contains('無法連線 API'));
     expect(requestedModes, [true, false]);
@@ -142,7 +143,8 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize(initializeReminders: false);
     expect(controller.settings.useMockData, isFalse);
-    expect(controller.snapshot, isNull);
+    expect(controller.snapshot?.isFallback, isTrue);
+    expect(controller.snapshot?.candidates, isEmpty);
     expect(controller.error, contains('無法連線 API'));
     expect(requestedModes, [false]);
   });

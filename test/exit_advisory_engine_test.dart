@@ -5,7 +5,7 @@ import 'package:martin_luk_app/services/exit_advisory_engine.dart';
 
 PortfolioPosition holding({double entry = 100, double stop = 98,
     int shares = 100, double peak = 0, double? trailing,
-    int ema = 9, bool uptrend = false}) => PortfolioPosition(
+    int ema = 9, bool uptrend = false}) => PortfolioPosition(strategyVersion: 'legacy',
   id: 'test-nvda', symbol: 'NVDA', market: StockMarket.us,
   entryPrice: entry, shares: shares, initialStop: stop, peakR: peak,
   trailingStop: trailing, trailingEma: ema, mainUptrend: uptrend,
@@ -95,9 +95,9 @@ void main() {
     expect(() => holding(stop: 100), throwsFormatException);
     expect(() => holding(shares: 0), throwsFormatException);
     expect(() => holding(peak: -1), throwsFormatException);
-    expect(() => PortfolioPosition(id: 'bad', symbol: '23300.TW', market: StockMarket.tw,
+    expect(() => PortfolioPosition(strategyVersion: 'legacy',id: 'bad', symbol: '23300.TW', market: StockMarket.tw,
       entryPrice: 100, shares: 1, initialStop: 98), throwsFormatException);
-    expect(() => PortfolioPosition(id: 'bad', symbol: 'BRK.B', market: StockMarket.us,
+    expect(() => PortfolioPosition(strategyVersion: 'legacy',id: 'bad', symbol: 'BRK.B', market: StockMarket.us,
       entryPrice: 100, shares: 1, initialStop: 98), throwsFormatException);
     expect(() => ExitAdvisoryEngine.evaluate(holding(), quote(100), double.nan), throwsArgumentError);
     expect(() => ExitAdvisoryEngine.evaluate(holding(), quote(100), 100000,

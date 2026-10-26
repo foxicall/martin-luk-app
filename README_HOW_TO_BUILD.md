@@ -4,7 +4,7 @@
 
 ## 1. 解壓並覆蓋
 
-下載 `martin_luk_all_stocks_20261015.zip`，完整解壓，再將包內專案內容合併至現有根目錄，例如 `C:\Users\a1258\projects\martin_luk_trading_app`。ZIP 是原始碼覆蓋包，不是 Android 安裝檔；不要改副檔名為 `.apk`。
+下載 `martin_luk_android_toolchain_fix_20261017.zip`，完整解壓，再將包內專案內容合併至現有根目錄，例如 `C:\Users\a1258\projects\martin_luk_trading_app`。ZIP 是原始碼覆蓋包，不是 Android 安裝檔；不要改副檔名為 `.apk`。
 
 根目錄應直接看到 `pubspec.yaml`、`lib/`、`backend/`、`android/`、`Dockerfile`、`render.yaml` 與隱藏 `.github/`。請保留自己的私密簽署設定，勿上傳 keystore、金鑰密碼或 `.env`。本次不要只複製某一段 Dart 或 Python：搜尋資產、代碼驗證、輪掃 DTO、UI 與後端合約必須一起更新。
 
@@ -18,7 +18,7 @@
 
 1. 提交至 `main`、`master` 或 `fix/refresh-live-gate-20261014`，會觸發 **Build Android APK with Verification Gate**。
 2. 也可在 **Actions → 該工作流 → Run workflow** 手動選分支。GitHub 要求手動入口的 workflow 已存在於預設分支；看不到按鈕時，先確認預設分支及 repository 的 Actions 權限。
-3. 工作流安裝 Java 17／Flutter stable，驗證 Python 後端、報告驗證器、Dart 策略／輪掃合約與指定真實 HTTP 行情計算，再編譯 Release APK。
+3. 工作流安裝 Java 17／Flutter 3.47.7 stable，驗證 Python 後端、報告驗證器、Dart 策略／輪掃合約與指定真實 HTTP 行情計算，再編譯 Release APK。
 4. 現行門禁要求必要真實行情與 ADR／EMA／RS 計算正確；`candidates: []` 可以通過。HTTP、解析、必要資料缺漏、錯誤數學或逾時仍會阻擋建置。它不是全市場所有股票均可下載的認證。
 5. 成功後下載 `martin-luk-app-release` artifact，解壓取得 `app-release.apk`，保留 7 天。`martin-luk-live-scan-evidence` 保存驗證日誌，不論成功或失敗都可供診斷。
 
@@ -28,7 +28,7 @@ Android 手機開啟 APK 後，依系統提示允許目前的檔案管理器／�
 
 ## 4. 本機 Flutter 建置
 
-需 Flutter／Dart、JDK 17 及相容 Android SDK。Android 專案使用 minSdk 21、targetSdk 34、compileSdk 36；Gradle／AGP 的實際版本以專案及 workflow 為準。
+需 Flutter 3.47.7／Dart、JDK 17 及相容 Android SDK。Android 專案使用 minSdk 23、targetSdk 34、compileSdk 36；Gradle 8.14、AGP 8.11.1、Kotlin 2.2.20，最低 Android 6.0。最新修正見 [ANDROID_TOOLCHAIN_FIX.md](ANDROID_TOOLCHAIN_FIX.md)。
 
 ```bash
 flutter doctor -v
@@ -36,8 +36,8 @@ flutter pub get
 python3 scripts/prepare_android.py
 flutter analyze
 flutter test
-flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
-flutter build apk --release --split-per-abi --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+flutter build apk --release --dart-define=USE_MOCK_DATA=false
+flutter build apk --release --split-per-abi --dart-define=USE_MOCK_DATA=false
 ```
 
 輸出位於 `build/app/outputs/flutter-apk/`。除錯測試可執行：
