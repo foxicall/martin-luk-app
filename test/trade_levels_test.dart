@@ -74,7 +74,7 @@ void main() {
     // Invalid/insufficient capital still prevents a new position plan. It does
     // not remove the independently verified historical price calculation.
     for (final equity in [0.0, -1.0, double.nan, double.infinity, 1.0]) {
-      expect(() => StrategyEngine.calculate(candidate, equity),
+      expect(() => StrategyEngine.calculatePrices(entryPrice: candidate.entryPrice, stopPrice: candidate.stopPrice!, equity: equity, isLargeLiquid: candidate.isLargeLiquid),
           throwsArgumentError);
     }
     expect(levels.targetPrice(3), 78.3);
@@ -82,7 +82,7 @@ void main() {
     expect(candidate.status, 'confirmed');
   });
 
-  test('position sizing reuses exactly the same decimal price levels', () {
+  test('manual sizing uses exactly the same decimal price levels', () {
     for (final candidate in [
       _candidate(dayLow: 73.5),
       _candidate(entry: 100, stop: 95, dayLow: 95, large: true),
@@ -92,7 +92,7 @@ void main() {
     ]) {
       final levels = StrategyEngine.calculateTradeLevels(candidate);
       for (final equity in [50000.0, 1000000.0]) {
-        final plan = StrategyEngine.calculate(candidate, equity);
+        final plan = StrategyEngine.calculatePrices(entryPrice: candidate.entryPrice, stopPrice: candidate.stopPrice!, equity: equity, isLargeLiquid: candidate.isLargeLiquid);
         expect(plan.riskPerShare, levels.riskPerShare);
         expect(plan.stopPercent, levels.stopPercent);
         expect(plan.targets, levels.targets);

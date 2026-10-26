@@ -220,7 +220,8 @@ void main() {
     addTearDown(api.close);
     addTearDown(universe.close);
     final first = await repository.fetch(StockMarket.us, adrThreshold: 5);
-    expect(first.candidates.single.isConfirmed, isTrue);
+    expect(first.candidates.single.priceSignalConfirmed, isTrue);
+    expect(first.candidates.single.isConfirmed, isFalse);
     expect(first.candidates.single.stopSource, 'entry_bar_low');
     expect(first.candidates.single.stopPrice, 102);
     now = now.add(const Duration(minutes: 1));

@@ -18,6 +18,10 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize(initializeReminders: false);
     await tester.pumpWidget(MartinLukApp(controller: controller));
+    await tester.runAsync(() async {
+      await StockSearchService.load();
+      await Future<void>.delayed(Duration.zero);
+    });
     await tester.pumpAndSettle();
     final search = find.descendant(
         of: find.byKey(const ValueKey('dashboard-stock-search')),
@@ -26,9 +30,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(search, '輝達');
     await tester.pump(); // Apply focus before advancing the debounce clock.
-    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
     final result = find.byKey(const ValueKey('stock-suggestion-us:NVDA'));
-    await tester.scrollUntilVisible(result, 100, scrollable: find.byType(Scrollable).first);
+    await tester.ensureVisible(result);
     await tester.pumpAndSettle();
     await tester.tap(result);
     await tester.pumpAndSettle();
@@ -46,6 +51,10 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize(initializeReminders: false);
     await tester.pumpWidget(MartinLukApp(controller: controller));
+    await tester.runAsync(() async {
+      await StockSearchService.load();
+      await Future<void>.delayed(Duration.zero);
+    });
     await tester.pumpAndSettle();
     final search = find.descendant(
         of: find.byKey(const ValueKey('dashboard-stock-search')),
@@ -54,9 +63,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(search, 'BRK.B');
     await tester.pump(); // Apply focus before advancing the debounce clock.
-    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
     final result = find.byKey(const ValueKey('stock-suggestion-us:BRK-B'));
-    await tester.scrollUntilVisible(result, 100, scrollable: find.byType(Scrollable).first);
+    await tester.ensureVisible(result);
     await tester.pumpAndSettle();
     await tester.tap(result);
     await tester.pumpAndSettle();
@@ -88,19 +98,26 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize(initializeReminders: false);
     await tester.pumpWidget(MartinLukApp(controller: controller));
+    await tester.runAsync(() async {
+      await StockSearchService.load();
+      await Future<void>.delayed(Duration.zero);
+    });
     await tester.pumpAndSettle();
     await tester.tap(find.text('我的持股'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('新增持股'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async { await Future<void>.delayed(Duration.zero); });
     await tester.pumpAndSettle();
     final symbol = find.descendant(
       of: find.byKey(const ValueKey('holding-stock-search')),
       matching: find.byType(TextFormField));
     await tester.enterText(symbol, '特斯拉');
     await tester.pump(); // Apply focus before advancing the debounce clock.
-    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
     final result = find.byKey(const ValueKey('stock-suggestion-us:TSLA'));
-    await tester.scrollUntilVisible(result, 100, scrollable: find.byType(Scrollable).first);
+    await tester.ensureVisible(result);
     await tester.pumpAndSettle();
     await tester.tap(result);
     await tester.pump();
