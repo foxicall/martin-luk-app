@@ -55,6 +55,10 @@ def write_json(path, data):
 
 def audit(config, network=False):
     refs = []
+    for name in ("render.yaml", "Dockerfile", "vercel.json", "netlify.toml",
+                 "firebase.json", "wrangler.toml", "web/CNAME", "deployment/pwa-target.json"):
+        if (ROOT / name).is_file():
+            refs.append(name)
     for directory in (ROOT / ".github/workflows", ROOT / "web"):
         for path in sorted(directory.rglob("*")):
             if path.is_file() and path.suffix in (".yml", ".yaml", ".json"):
