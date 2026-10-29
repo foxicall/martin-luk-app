@@ -267,8 +267,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       await controller.setMarket(stock.market);
       if (!mounted ||
           version != _selectionVersion ||
-          controller.market != stock.market)
+          controller.market != stock.market) {
         return;
+      }
       StockCandidate? candidate;
       for (final row
           in controller.snapshot?.candidates ?? const <StockCandidate>[]) {
@@ -285,8 +286,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ).showSnackBar(SnackBar(content: Text('已找到股票身份，評估讀取失敗：$error')));
       }
     } finally {
-      if (mounted && version == _selectionVersion)
+      if (mounted && version == _selectionVersion) {
         setState(() => _finding = false);
+      }
     }
   }
 
@@ -534,7 +536,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               coverageRemaining != null) ...[
             Text(
               _isMobileScan
-                  ? '第 ${coverageRound ?? 1} 輪${_marketShortLabel}分頁輪掃 · 本輪名單 $coverageTotal 檔'
+                  ? '第 ${coverageRound ?? 1} 輪$_marketShortLabel分頁輪掃 · 本輪名單 $coverageTotal 檔'
                   : '第 ${coverageRound ?? 1} 輪分頁掃描 · 全池 $coverageTotal 檔',
               style: Theme.of(
                 context,
@@ -639,11 +641,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               controller.backgroundScanActive &&
                       !controller.backgroundScanPaused
                   ? controller.mobileScanPaused
-                      ? '${_marketShortLabel}輪掃已手動暫停 · 下拉可繼續'
+                      ? '$_marketShortLabel輪掃已手動暫停 · 下拉可繼續'
                       : '服務約每 60 秒續掃下一頁；系統省電可能延後'
                   : _isMobileScan
                   ? controller.mobileScanPaused
-                      ? '${_marketShortLabel}輪掃已暫停 · 下拉可繼續'
+                      ? '$_marketShortLabel輪掃已暫停 · 下拉可繼續'
                       : controller.autoRefreshActive
                       ? '前台每 60 秒續掃下一頁 · 下拉可立即續掃'
                       : '自動輪掃暫停 · 下拉可處理下一頁'
@@ -717,7 +719,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         isMock
             ? '離線示範（非真實掃描）'
             : isDirect
-            ? '手機${_marketShortLabel}分批輪掃'
+            ? '手機$_marketShortLabel分批輪掃'
             : hasFullScope
             ? 'Python 全股票池輪掃（分頁）'
             : 'Python 分批掃描';
@@ -732,7 +734,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 : snapshot != null && !snapshot.isFallback
                 ? '尚未建立本輪掃描進度；目前保留先前快照（已評估 ${evaluated ?? '待取得'} 檔）。'
                     '股票字典不等於全部已評估；下拉可依目前名單初始化分頁輪掃。'
-                : '正在準備${_marketDirectoryLabel}；取得名單後依序分頁，'
+                : '正在準備$_marketDirectoryLabel；取得名單後依序分頁，'
                     '不會同時請求全市場，也不表示全部已完成評估。'
             : hasFullScope
             ? '本輪成功評估 $coverageEvaluated/$coverage 檔；'
@@ -801,8 +803,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 label: Text(
                   controller.mobileScanPaused
-                      ? '繼續${_marketShortLabel}輪掃'
-                      : '暫停${_marketShortLabel}輪掃',
+                      ? '繼續$_marketShortLabel輪掃'
+                      : '暫停$_marketShortLabel輪掃',
                 ),
               ),
             ],
@@ -1188,7 +1190,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 : controller.loading
                 ? '正在掃描候選股'
                 : _isMobileScan && controller.mobileScanPaused
-                ? '${_marketShortLabel}輪掃已暫停'
+                ? '$_marketShortLabel輪掃已暫停'
                 : controller.snapshot == null || controller.snapshot!.isFallback
                 ? '市場評估未完成，請重試'
                 : _hasMobileCoverage
@@ -1213,7 +1215,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 : controller.loading
                 ? '單次請求最多等待 10 秒；可點選右上方「停止掃描」。'
                 : _isMobileScan && controller.mobileScanPaused
-                ? '已保留本輪進度；點選「繼續${_marketShortLabel}輪掃」或下拉可繼續。'
+                ? '已保留本輪進度；點選「繼續$_marketShortLabel輪掃」或下拉可繼續。'
                 : controller.snapshot == null ||
                     controller.snapshot!.isFallback ||
                     controller.snapshot!.stale
@@ -1221,7 +1223,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 : _hasMobileCoverage
                 ? (controller.snapshot!.coverageRemainingCount ?? 0) > 0
                     ? '仍有 ${controller.snapshot!.coverageRemainingCount} 檔尚未嘗試；'
-                        '本頁沒有新候選不代表整個${_marketShortLabel}市場都沒有買點。'
+                        '本頁沒有新候選不代表整個$_marketShortLabel市場都沒有買點。'
                     : '本輪已嘗試全部名單；僅對成功取得行情的股票判斷，'
                         '失敗標的並非沒有買點。下拉可開始下一輪。'
                 : _hasIncompleteScan

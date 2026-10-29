@@ -164,8 +164,9 @@ class MobileScanCheckpoint {
     if (threshold != adrThreshold ||
         (market == StockMarket.tw && day != dayFor(now, market: market)) ||
         members.length != symbols.length ||
-        fingerprintFor(members, market: market) != fingerprint)
+        fingerprintFor(members, market: market) != fingerprint) {
       return false;
+    }
     for (var index = 0; index < symbols.length; index++) {
       if (members[index] != symbols[index]) return false;
     }

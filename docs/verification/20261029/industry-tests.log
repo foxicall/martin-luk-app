@@ -1,0 +1,6 @@
+00:00 +0: loading /workspace/martin-luk-app/test/stock_industry_service_test.dart
+00:00 +0: real bundled snapshot covers both markets and preserves Unknown
+00:00 +1: failed reads retry; concurrent successful reads share one index
+00:00 +2: startup waits for classification before creating the App
+00:01 +3: startup failure is visible and retry opens App only after success
+00:02 +4: All tests passed!

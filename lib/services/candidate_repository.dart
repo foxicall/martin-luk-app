@@ -382,7 +382,7 @@ CandidateSnapshot _parseSnapshot(
         failedSymbols.add(_boundedCandidateMessage(symbol, 40));
       }
       if (rowWarnings.length < 20) {
-        final label = symbol == null ? '第 ${index + 1} 筆候選' : symbol;
+        final label = symbol ?? '第 ${index + 1} 筆候選';
         final reason =
             error is FormatException
                 ? error.message

@@ -256,7 +256,9 @@ Future<void> _scan(MarketDataApi api, _LiveRun run,
     for (final candidate in ranked) {
       final evaluation = evaluations.firstWhere((row) => row.stock.symbol == candidate.symbol);
       if (!_qualifies(evaluation) || !candidate.isConfirmed ||
-          !candidate.hasValidStopRange) continue;
+          !candidate.hasValidStopRange) {
+        continue;
+      }
       _assertBreakoutEvidence(evaluation, candidate);
       final capital = market.defaultEquity;
       final plan = calculatePositionSize(capital: capital,
@@ -303,7 +305,9 @@ bool _qualifies(LiveEvaluation row) {
   final stop = row.stop;
   if (stop == null || row.adr < row.stock.market.defaultAdr ||
       !row.patterns.contains('EMA 9/21/50 收斂') ||
-      !row.patterns.contains('${row.triggerType} 突破')) return false;
+      !row.patterns.contains('${row.triggerType} 突破')) {
+    return false;
+  }
   final risk = (row.trigger - stop) / row.trigger * 100;
   return risk >= 1.5 && risk <= 3;
 }

@@ -1,0 +1,8 @@
+PASS codex/industry-classification-20261029 af6138770d6b8dd9c7b993acad2ac7d9bb92f69c: ancestor of integration HEAD
+PASS fix/pwa-rs-cloud-20261026 243d9ee3ce155d463c6f1630c6eb4ad2d34832cc: ancestor of integration HEAD
+PASS fix/refresh-live-gate-20261014 0e8ad18900974065fa380e4fc96007ec24566faf: ancestor of integration HEAD
+PASS fix/tpex-cloud-download-20261029 b9099b43d5e80ca1c8aa08598796eca632b24ea6: ancestor of integration HEAD
+PASS main af44d37e88b25b031b1aadf38825fbc019d14971: ancestor of integration HEAD
+PASS momentum-scan-data 88268fe8f75c47582144642246c84829092cbb86: ancestor of integration HEAD
+PASS update/hybrid-v1.3.0-mobile c2ff6938011564ce6c1d1056809952bda8552b4b: ancestor of integration HEAD
+PASS generated-data marker remains outside repository root

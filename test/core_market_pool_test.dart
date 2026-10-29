@@ -235,8 +235,9 @@ void main() {
           if (!observed.isCompleted &&
               !value.finished &&
               partial != null &&
-              partial.evaluatedCount == 1)
+              partial.evaluatedCount == 1) {
             observed.complete(partial);
+          }
         },
       );
       final early = await observed.future.timeout(const Duration(seconds: 1));

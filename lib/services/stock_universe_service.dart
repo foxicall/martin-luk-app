@@ -944,8 +944,9 @@ class StockUniverseService {
       }
       final code = _field(row, ['公司代號', 'SecuritiesCompanyCode']);
       if (!RegExp(r'^[1-9]\d{3}$').hasMatch(code) ||
-          RegExp(r'^91\d{2}$').hasMatch(code))
+          RegExp(r'^91\d{2}$').hasMatch(code)) {
         continue;
+      }
       final name = _field(row, [
         '公司簡稱',
         'CompanyAbbreviation',
@@ -972,8 +973,9 @@ class StockUniverseService {
           RegExp(
             r'存託憑證|特別股|TDR|preferred',
             caseSensitive: false,
-          ).hasMatch('$name $fullName $classification'))
+          ).hasMatch('$name $fullName $classification')) {
         continue;
+      }
       if (name.isEmpty || !seen.add(code)) {
         throw const FormatException('台股股票池含空白名稱或重複代碼。');
       }
@@ -1019,10 +1021,12 @@ class StockUniverseService {
 
   static String _errorLabel(Object error) {
     if (error is TimeoutException) return '連線逾時';
-    if (error is FormatException)
+    if (error is FormatException) {
       return '資料格式無效：${_short(error.message.toString(), 140)}';
-    if (error is http.ClientException && error.message.startsWith('HTTP '))
+    }
+    if (error is http.ClientException && error.message.startsWith('HTTP ')) {
       return _short(error.message, 180);
+    }
     return '網路或資料源不可用';
   }
 

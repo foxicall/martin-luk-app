@@ -300,8 +300,9 @@ class LiveStrategyEngine {
           openingComplete &&
           HybridProtocol.orhGapPass(gap) &&
           exceptionalVolume;
-      if (HybridProtocol.orhGapPass(gap))
+      if (HybridProtocol.orhGapPass(gap)) {
         patterns.add('開盤跳空 ${gap.toStringAsFixed(2)}%');
+      }
       if (ep) patterns.add('ORH 價格觀察（催化劑／同時段量待核實）');
       final openingHigh = first?.high;
       openingRangeLow = first?.low;

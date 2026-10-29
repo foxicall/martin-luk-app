@@ -128,8 +128,10 @@ class DirectLivePortfolioRepository implements PortfolioRepository {
             fetchedAt: delivery.fetchedAt);
           if (_closed || !run.active) return;
           quotes[symbol] = quote;
-          if (stale) errors[symbol] = '行情更新未取得可用的新報價：'
+          if (stale) {
+            errors[symbol] = '行情更新未取得可用的新報價：'
               '${_errorReason(quote.cacheWarning ?? '行情為過期快取。')}；不更新最高 R 或自動上移停損。';
+          }
           if (!stale) {
             _quoteCache[quote.key] = quote;
             await _saveQuote(quote, run);

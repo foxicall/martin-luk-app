@@ -97,7 +97,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _saving
             ? null
             : (mode) {
-              if (mode != null)
+              if (mode != null) {
                 setState(() {
                   if (market == StockMarket.tw) {
                     _twRiskMode = mode;
@@ -105,6 +105,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _usRiskMode = mode;
                   }
                 });
+              }
             },
   );
 
@@ -569,10 +570,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     _saving || _useMockData
                                         ? null
                                         : (value) {
-                                          if (value != null)
+                                          if (value != null) {
                                             setState(
                                               () => _dataProvider = value,
                                             );
+                                          }
                                         },
                               ),
                               const SizedBox(height: 8),

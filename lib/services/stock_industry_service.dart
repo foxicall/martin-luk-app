@@ -20,7 +20,11 @@ class StockIndustryService {
 
   Future<void> _load(AssetBundle bundle) async {
     try {
-      final decoded = jsonDecode(await bundle.loadString(assetPath));
+      // This service caches the parsed index; avoid caching a failed read in
+      // CachingAssetBundle so the startup retry can actually reload the asset.
+      final decoded = jsonDecode(
+        await bundle.loadString(assetPath, cache: false),
+      );
       if (decoded is! Map<String, dynamic> || decoded.isEmpty) {
         throw const FormatException('產業分類資料必須為非空物件。');
       }
@@ -29,7 +33,8 @@ class StockIndustryService {
         final row = entry.value;
         if (row is! Map<String, dynamic> ||
             !['TW', 'US'].contains(row['market']) ||
-            row['symbol'] is! String || row['sector'] is! String ||
+            row['symbol'] is! String ||
+            row['sector'] is! String ||
             (row['sector'] as String).trim().isEmpty) {
           throw FormatException('產業分類紀錄無效：${entry.key}');
         }
@@ -54,7 +59,10 @@ class StockIndustryService {
     final sector = row['sector'] as String;
     final industry = row['industry'] as String? ?? '';
     final themes = (row['themes'] as List? ?? []).join('、');
-    return [sector, if (industry.isNotEmpty && industry != sector) industry,
-      if (themes.isNotEmpty) themes].join(' · ');
+    return [
+      sector,
+      if (industry.isNotEmpty && industry != sector) industry,
+      if (themes.isNotEmpty) themes,
+    ].join(' · ');
   }
 }

@@ -1,0 +1,2 @@
+PASS: 390, 900, 1440px; App mounted; 7091-row classification fetched; no uncaught JS errors
+PASS final root-path PWA: 7091-row asset fetched; scrolled candidate cards captured; no uncaught JS errors

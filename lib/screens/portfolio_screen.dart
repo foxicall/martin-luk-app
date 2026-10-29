@@ -63,10 +63,11 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
     try {
       await action();
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('$error')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -134,8 +135,9 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                                         )
                                         .toList(),
                                 onChanged: (value) {
-                                  if (value != null)
+                                  if (value != null) {
                                     update(() => market = value);
+                                  }
                                 },
                               ),
                               const SizedBox(height: 12),
@@ -392,8 +394,9 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                                 fields[4],
                                 '已完成交易日收盤價',
                                 validator: (text) {
-                                  if (!confirmed && (text ?? '').trim().isEmpty)
+                                  if (!confirmed && (text ?? '').trim().isEmpty) {
                                     return null;
+                                  }
                                   final value = double.tryParse(text ?? '');
                                   return value == null ||
                                           !value.isFinite ||
@@ -460,8 +463,9 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                   ),
             ),
       );
-      if (result != null && mounted)
+      if (result != null && mounted) {
         await _run(() => controller.setMockPortfolioQuote(result));
+      }
     } finally {
       for (final field in fields) {
         field.dispose();
@@ -488,8 +492,9 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
             ],
           ),
     );
-    if (confirmed == true && mounted)
+    if (confirmed == true && mounted) {
       await _run(() => controller.deletePortfolioPosition(holding.id));
+    }
   }
 
   Widget _metric(String label, String value) => SizedBox(

@@ -259,14 +259,16 @@ StockMarket _market(Map<String, dynamic> json) => switch (json['market']) {
 
 String _text(Map<String, dynamic> json, String key) {
   final value = json[key];
-  if (value is! String || value.trim().isEmpty)
+  if (value is! String || value.trim().isEmpty) {
     throw FormatException('$key 必須為字串。');
+  }
   return value.trim();
 }
 
 double _number(Map<String, dynamic> json, String key) {
   final value = json[key];
-  if (value is! num || !value.toDouble().isFinite)
+  if (value is! num || !value.toDouble().isFinite) {
     throw FormatException('$key 必須為有限數字。');
+  }
   return value.toDouble();
 }

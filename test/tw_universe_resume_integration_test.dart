@@ -122,8 +122,9 @@ void main() {
       final client = MockClient((request) async {
         directoryRequests.add(request.url);
         if (request.url == StockUniverseService.twEndpoint) {
-          if (listedBlocked)
+          if (listedBlocked) {
             return http.Response('Explicit fixture HTTP 403', 403);
+          }
           return _exchangeRows(otc: false);
         }
         if (request.url == StockUniverseService.twOtcEndpoint) {

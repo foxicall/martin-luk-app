@@ -1,0 +1,29 @@
+✔ background runner traverses >120 across both markets without a browser, retries failures, and checkpoints last stock (46.254223ms)
+✔ three failed batches pause with evidence instead of pretending market completion (10.52192ms)
+✔ persisted pages are content-addressed and completed count is independent of valid count (17.545807ms)
+✔ checkpoint publishing retries a rejected push without losing the exact branch lease (164.749655ms)
+✔ classification matches market and exchange, retains Unknown and copies themes (0.333193ms)
+✔ cloud Leader Scanner receives classification without granting missing ranking evidence (0.889354ms)
+✔ cloud compact rows retain strategy version, 20/60 returns and hard checks, not entry evidence (2.665836ms)
+✔ content-addressed cloud serialization round trip supplies the full denominator and preserves ranking on reload (62.72563ms)
+✔ rank calculations do not corrupt another snapshot or mutate a caller’s metrics (24.215623ms)
+✔ legacy, missing history, mixed date and incomplete directory remain visibly distinct and cannot rank (158.259094ms)
+✔ new listings with fewer than 61 bars stay missing instead of changing the market denominator (0.844079ms)
+✔ Taiwan and US directory totals are verified independently (41.95428ms)
+✔ partial 20/60 reference ranks are labeled with unchanged full denominator and never qualify a scanner (66.717948ms)
+✔ duplicate symbols or a sample larger than the declared universe cannot produce reference ranks (37.247747ms)
+✔ official TWSE/TPEx feeds use venue suffixes and disclose unverified CFI classification (33.137971ms)
+✔ fallback rejects HTML, small or malformed payloads, duplicate codes, missing shares and mixed/stale/future dates (20.884383ms)
+✔ HTTP 522 and timeout switch once to official backups, preserving full fetched list and failure provenance (41.226799ms)
+✔ primary recovery avoids fallback; a failed fallback remains incomplete and a later call can retry (8.274867ms)
+✔ a successful company backup never qualifies full-market RS even with complete same-day returns (0.8497ms)
+✔ cloud fallback retries an interrupted body once without accepting partial bytes (6.04738ms)
+✔ cloud fallback bounds timeout retries and does not retry schema or access errors (1.453488ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 868.725301

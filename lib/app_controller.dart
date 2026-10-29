@@ -327,11 +327,12 @@ class AppController extends ChangeNotifier {
     _portfolioPositions =
         _portfolioPositions.map((holding) {
           final observation = observations[holding.id];
-          if (observation == null)
+          if (observation == null) {
             return holding.withObservation(
               0,
               holding.usesHybrid ? holding.trailingStop : holding.initialStop,
             );
+          }
           final peak = observation['peak_r']!.toDouble();
           final stop = observation['trailing_stop']!.toDouble();
           if (stop < holding.initialStop) {
@@ -788,8 +789,9 @@ class AppController extends ChangeNotifier {
         key != _scanKey() ||
         _settings.useMockData ||
         _settings.dataProvider != 'backend' ||
-        _scanOperation != null)
+        _scanOperation != null) {
       return;
+    }
     final version = _backendPollVersion;
     final delay =
         immediately
@@ -802,8 +804,9 @@ class AppController extends ChangeNotifier {
           !_backendScanWaiting ||
           version != _backendPollVersion ||
           key != _scanKey() ||
-          _scanOperation != null)
+          _scanOperation != null) {
         return;
+      }
       unawaited(refresh(forceRefresh: false, refreshQuotesOnly: true));
     });
   }
@@ -834,8 +837,9 @@ class AppController extends ChangeNotifier {
   ) {
     if (!_scanWithinDeadline(operation) ||
         progress.market != market ||
-        market != _market)
+        market != _market) {
       return;
+    }
     // Progress is presentation only. Reject inconsistent or backwards counts
     // without turning them into successful evaluations or trade signals.
     if (progress.universeCount < 0 ||
@@ -1389,8 +1393,9 @@ class AppController extends ChangeNotifier {
         _portfolioLoading ||
         _backendScanWaiting ||
         (_backendScanStatus?.isRunning ?? false) ||
-        (_backendScanStatus?.isFailed ?? false))
+        (_backendScanStatus?.isFailed ?? false)) {
       return;
+    }
     _pollBusy = true;
     final version = ++_pollVersion;
     try {
@@ -1630,8 +1635,9 @@ class AppController extends ChangeNotifier {
       final keys = <String>{};
       final ids = <String>{};
       for (final row in data['positions'] as List) {
-        if (row is! Map<String, dynamic>)
+        if (row is! Map<String, dynamic>) {
           throw const FormatException('持股資料格式無效。');
+        }
         final holding = PortfolioPosition.fromJson(row);
         if (!keys.add(holding.key) || !ids.add(holding.id)) {
           throw const FormatException('庫存含重複代碼或識別碼。');
@@ -1656,17 +1662,20 @@ class AppController extends ChangeNotifier {
       }
       final histories = data['observations'];
       if (histories != null) {
-        if (histories is! Map<String, dynamic>)
+        if (histories is! Map<String, dynamic>) {
           throw const FormatException('行情來源歷史格式無效。');
+        }
         for (final sourceEntry in histories.entries) {
-          if (sourceEntry.value is! Map<String, dynamic>)
+          if (sourceEntry.value is! Map<String, dynamic>) {
             throw const FormatException('持股觀察歷史格式無效。');
+          }
           final sourceHistory = <String, Map<String, num>>{};
           for (final holdingEntry
               in (sourceEntry.value as Map<String, dynamic>).entries) {
             final observation = holdingEntry.value;
-            if (observation is! Map<String, dynamic>)
+            if (observation is! Map<String, dynamic>) {
               throw const FormatException('持股觀察格式無效。');
+            }
             final peak = observation['peak_r'];
             final stop = observation['trailing_stop'];
             final observedAt = observation['observed_at_ms'];
@@ -1704,8 +1713,9 @@ class AppController extends ChangeNotifier {
       final overrides = data['mock_quotes'];
       if (overrides is List) {
         for (final row in overrides) {
-          if (row is! Map<String, dynamic>)
+          if (row is! Map<String, dynamic>) {
             throw const FormatException('示範行情格式無效。');
+          }
           final quote = PortfolioQuote.fromJson(row);
           _mockQuoteOverrides[quote.key] = quote;
         }
@@ -1922,8 +1932,9 @@ class AppController extends ChangeNotifier {
             }
           }
           for (final entry in snapshot.errors.entries) {
-            if (!symbols.contains(entry.key) || accepted.contains(entry.key))
+            if (!symbols.contains(entry.key) || accepted.contains(entry.key)) {
               continue;
+            }
             _portfolioErrors['${market.name}:${entry.key}'] =
                 entry.value.trim().isEmpty ? '此股票未取得可驗證行情。' : entry.value;
           }
@@ -2172,8 +2183,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> setEuphoriaPercent(double value) async {
-    if (!value.isFinite || value < 15 || value > 20)
+    if (!value.isFinite || value < 15 || value > 20) {
       throw ArgumentError('正乖離門檻必須為 15%～20%。');
+    }
     _euphoriaPercent = value;
     await _persistPortfolio();
     _notify();

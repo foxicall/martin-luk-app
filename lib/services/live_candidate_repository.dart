@@ -61,8 +61,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
        _preferences = preferences,
        _now = now ?? DateTime.now,
        _checkpointWriter = checkpointWriter {
-    if (batchSize < 1 || batchSize > 5)
+    if (batchSize < 1 || batchSize > 5) {
       throw ArgumentError.value(batchSize, 'batchSize');
+    }
     if (corePoolSize != null &&
         usPageSize != null &&
         corePoolSize != usPageSize) {
@@ -71,10 +72,12 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
     if (this.usPageSize < 1 || this.usPageSize > 30) {
       throw ArgumentError.value(this.usPageSize, 'usPageSize');
     }
-    if (twPageSize < 1 || twPageSize > 30)
+    if (twPageSize < 1 || twPageSize > 30) {
       throw ArgumentError.value(twPageSize, 'twPageSize');
-    if (interBatchDelay < Duration.zero)
+    }
+    if (interBatchDelay < Duration.zero) {
       throw ArgumentError.value(interBatchDelay, 'interBatchDelay');
+    }
   }
 
   /// The controller has a separate ten-second hard deadline. Leave a second
@@ -135,8 +138,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
     void Function(MarketScanProgress)? onProgress,
   }) {
     if (_closed) throw StateError('行情掃描服務已關閉。');
-    if (!adrThreshold.isFinite || adrThreshold < 0)
+    if (!adrThreshold.isFinite || adrThreshold < 0) {
       throw ArgumentError.value(adrThreshold);
+    }
     final key = '${market.name}:$adrThreshold';
     // Coalesce overlap from a pull gesture, timer and market tab switch.
     final pending = _pending[key];
@@ -178,8 +182,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
         _loadCheckpoint(market, threshold, run),
         maximum: const Duration(milliseconds: 500),
       );
-      if (_closed || !run.active)
+      if (_closed || !run.active) {
         throw TimeoutException('$marketLabel輪掃已取消或逾時。');
+      }
       if (checkpoint != null &&
           (checkpoint.updatedAt.isAfter(_now().toUtc()) ||
               _now().toUtc().difference(checkpoint.updatedAt) >
@@ -280,8 +285,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
           _loadBenchmark(market, force),
         ], eagerError: true),
       );
-      if (_closed || !run.active)
+      if (_closed || !run.active) {
         throw TimeoutException('$marketLabel名單或大盤取得逾時。');
+      }
       final universe = prerequisites[0] as UniverseSnapshot;
       final benchmark = prerequisites[1] as MarketChart;
       if (benchmark.isStale) {
@@ -360,8 +366,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
         final cached = builtCheckpoint;
         if (cached != null &&
             builtRevision == checkpointRevision &&
-            builtFinalPage == finalPage)
+            builtFinalPage == finalPage) {
           return cached;
+        }
         final pageCandidates =
             _engine
                 .rank(evaluations.values.toList())
@@ -713,8 +720,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
       if (value.market != market ||
           value.threshold != threshold ||
           value.updatedAt.isAfter(_now().toUtc()) ||
-          _now().toUtc().difference(value.updatedAt) > const Duration(days: 7))
+          _now().toUtc().difference(value.updatedAt) > const Duration(days: 7)) {
         return null;
+      }
       if (_closed || !run.active) return null;
       return value;
     } catch (_) {
@@ -740,8 +748,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
           !identical(
             _checkpoints['${value.market.name}:${value.threshold}'],
             value,
-          ))
+          )) {
         return false;
+      }
       final checkpointKey = _checkpointKey(value.market, value.threshold);
       final encoded = jsonEncode(value.toJson());
       left = limit - watch.elapsed;
@@ -750,8 +759,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
           !identical(
             _checkpoints['${value.market.name}:${value.threshold}'],
             value,
-          ))
+          )) {
         return false;
+      }
       final saved = await (_checkpointWriter?.call(checkpointKey, encoded) ??
               preferences.setString(checkpointKey, encoded))
           .timeout(left);
@@ -762,8 +772,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
           !identical(
             _checkpoints['${value.market.name}:${value.threshold}'],
             value,
-          ))
+          )) {
         return false;
+      }
       final thresholdKey = _activeThresholdKey(value.market);
       final thresholdText = value.threshold.toString();
       // This tiny value used to cause a second whole Android preference-file
@@ -1043,8 +1054,9 @@ class DirectLiveCandidateRepository implements ProgressiveCandidateRepository {
     CandidateSnapshot snapshot, {
     required Duration budget,
   }) async {
-    if (_closed || budget <= Duration.zero || !snapshot.candidatesAreCumulative)
+    if (_closed || budget <= Duration.zero || !snapshot.candidatesAreCumulative) {
       return;
+    }
     final key = '${market.name}:$threshold';
     final previous = _checkpoints[key];
     if (previous == null) return;

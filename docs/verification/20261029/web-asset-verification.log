@@ -1,0 +1,3 @@
+PASS build/web: base href=/martin-luk-app/; industry asset, manifest and service worker verified
+PASS build/pwa-root: base href=/; industry asset, manifest and service worker verified
+PWA root archive: /workspace/martin-luk-pwa-root.zip

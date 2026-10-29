@@ -118,7 +118,9 @@ class _IndexedStock {
     if (symbols.any((field) => field.contains(term))) return 6000;
     if (texts.any((field) => field.contains(term))) return 5000;
     if (term.length >= 3 && [...symbols, ...texts].any(
-        (field) => field.length >= 3 && term.contains(field))) return 3000;
+        (field) => field.length >= 3 && term.contains(field))) {
+      return 3000;
+    }
     if (term.length < 3 || term.length > 32) return 0;
     final bound = term.length >= 6 ? 2 : 1;
     var best = bound + 1;

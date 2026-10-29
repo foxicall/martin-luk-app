@@ -108,16 +108,18 @@ class _Scans implements ProgressiveCandidateRepository {
     final call = _Call(market, refreshQuotesOnly, onProgress);
     calls.add(call);
     call.progress(completed: 0, evaluated: 0, adr: 0, confirmed: 0);
-    if (fail)
+    if (fail) {
       return Future<CandidateSnapshot>.error(
         const RepositoryException('股票頁面行情均無法取得'),
       );
+    }
     if (deferred) return call.completion.future;
-    if (delay > Duration.zero)
+    if (delay > Duration.zero) {
       return Future<CandidateSnapshot>.delayed(
         delay,
         () => supplied ?? _snapshot(market),
       );
+    }
     return Future<CandidateSnapshot>.value(supplied ?? _snapshot(market));
   }
 }

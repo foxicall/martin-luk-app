@@ -109,7 +109,7 @@ class MarketDataApi {
   final Future<void> Function(Duration) _delay;
   final Duration requestTimeout;
   final Duration storageTimeout;
-  final _memoryCache = LinkedHashMap<String, _CachedChart>();
+  final _memoryCache = <String, _CachedChart>{};
   int _memoryCacheBytes = 0;
   final Map<String, Future<MarketChart>> _pending = {};
   DateTime? _rateLimitedUntil;
@@ -820,8 +820,9 @@ class MarketDataApi {
     _forgetMemory(key);
     if (_closed ||
         chart.bytes > maximumCacheEntryBytes ||
-        !_isRetained(chart.fetchedAt))
+        !_isRetained(chart.fetchedAt)) {
       return;
+    }
     // Both disk reads and HTTP successes use this path. In particular, an
     // offline sweep cannot bypass the old save-only 96-entry limit.
     _memoryCache[key] = chart;
@@ -967,8 +968,9 @@ class MarketDataApi {
       final row = jsonDecode(raw);
       if (row is! Map<String, dynamic> ||
           row['document'] is! Map<String, dynamic> ||
-          row['fetched_at'] is! String)
+          row['fetched_at'] is! String) {
         throw const FormatException('快取格式無效。');
+      }
       final time = DateTime.parse(row['fetched_at'] as String).toUtc();
       if (!_isRetained(time)) throw const FormatException('行情快取已超過保留期限。');
       final cache = _CachedChart(
@@ -1005,8 +1007,9 @@ class MarketDataApi {
           () =>
               _cacheWriter?.call(preferences, '$cachePrefix$key', chart.raw) ??
               preferences.setString('$cachePrefix$key', chart.raw),
-        ))
+        )) {
           return;
+        }
         // Updating the lightweight index is valid even if close() happened
         // during a native write: that write already exists on disk. It does
         // not resurrect this API's RAM cache or start another native write.
@@ -1030,8 +1033,9 @@ class MarketDataApi {
       if (_closed || preferences == null) return;
       final store = _store(preferences);
       await store.run(storageTimeout, () => _closed, (lease) async {
-        if (!await lease.write(() => preferences.remove('$cachePrefix$key')))
+        if (!await lease.write(() => preferences.remove('$cachePrefix$key'))) {
           return;
+        }
         store.accessed.remove('$cachePrefix$key');
         store.entries.remove('$cachePrefix$key');
       });
@@ -1142,7 +1146,7 @@ class _ChartDiskEntry {
 /// native callbacks cannot accumulate indefinitely behind repeated scans.
 class _ChartCacheStore {
   static const maximumPending = 8;
-  final accessed = LinkedHashMap<String, int>();
+  final accessed = <String, int>{};
   int _accessSequence = 0;
   final entries = <String, _ChartDiskEntry>{};
   bool initialized = false;
@@ -1279,8 +1283,9 @@ DateTime? _timestamp(Object? value) {
   if (number == null ||
       number <= 0 ||
       number > 8640000000000 ||
-      number != number.toInt())
+      number != number.toInt()) {
     return null;
+  }
   try {
     return DateTime.fromMillisecondsSinceEpoch(
       number.toInt() * 1000,
