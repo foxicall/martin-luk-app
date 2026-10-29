@@ -1,0 +1,96 @@
+name: Deploy PWA to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      notify_original:
+        description: Notify the configured original-site webhook after Pages deployment
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test release and webhook tooling
+        run: python3 -m unittest discover -s scripts/tests -p 'test_pwa_*.py' -v
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test --no-pub
+      - run: flutter build web --release --base-href /martin-luk-app/ --dart-define=USE_MOCK_DATA=false --no-pub
+      - name: Validate bundle and add deployed version manifest
+        run: |
+          python3 scripts/pwa_release.py package --config deployment/pages-target.json --web-dir build/web --out-dir build/pages-release
+          cp build/pages-release/pwa-release.json build/web/pwa-release.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pages-release-manifest
+          path: build/pages-release/pwa-release.json
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Pages configuration
+        uses: actions/configure-pages@v5
+      - name: Deploy Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: pages-release-manifest
+          path: build/pages-release
+      - name: Verify live revision and compiled resources
+        run: python3 scripts/pwa_release.py verify --config deployment/pages-target.json --out-dir build/pages-release
+
+  original-webhook:
+    if: github.event_name == 'workflow_dispatch' && inputs.notify_original
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Notify the explicitly configured original-site webhook
+        env:
+          ORIGINAL_PWA_WEBHOOK_URL: ${{ secrets.ORIGINAL_PWA_WEBHOOK_URL }}
+          ORIGINAL_PWA_WEBHOOK_SECRET: ${{ secrets.ORIGINAL_PWA_WEBHOOK_SECRET }}
+          PWA_DEPLOYED_URL: ${{ needs.deploy.outputs.page_url }}
+          PWA_RELEASE_COMMIT: ${{ github.sha }}
+          PWA_SOURCE_REPOSITORY: ${{ github.repository }}
+          PWA_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/pwa_webhook.py

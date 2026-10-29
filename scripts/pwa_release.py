@@ -33,17 +33,20 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def target_url(value):
+def target_url(value, base_href="/"):
     url = urllib.parse.urlsplit(value)
+    if (not re.fullmatch(r"/(?:[A-Za-z0-9_.-]+/)*", base_href) or
+            any(part in (".", "..") for part in base_href.split("/"))):
+        raise ReleaseError("Invalid deployment base href")
     if (url.scheme != "https" or not url.hostname or url.username or
-            url.password or url.query or url.fragment or url.path not in ("", "/")):
-        raise ReleaseError("Target must be an HTTPS origin without credentials, query or subpath")
+            url.password or url.query or url.fragment or (url.path or "/") != base_href):
+        raise ReleaseError("Target must be HTTPS, without credentials or query, and match base href")
     return value.rstrip("/") + "/"
 
 
 def settings(path):
     config = json.loads(Path(path).read_text())
-    config["target_url"] = target_url(config["target_url"])
+    config["target_url"] = target_url(config["target_url"], config.get("base_href", "/"))
     return config
 
 
@@ -56,7 +59,8 @@ def write_json(path, data):
 def audit(config, network=False):
     refs = []
     for name in ("render.yaml", "Dockerfile", "vercel.json", "netlify.toml",
-                 "firebase.json", "wrangler.toml", "web/CNAME", "deployment/pwa-target.json"):
+                 "firebase.json", "wrangler.toml", "web/CNAME", "deployment/pwa-target.json",
+                 "deployment/pages-target.json"):
         if (ROOT / name).is_file():
             refs.append(name)
     for directory in (ROOT / ".github/workflows", ROOT / "web"):
@@ -98,8 +102,11 @@ def package(web_dir, output, config, revision, source_asset):
     for name in CRITICAL:
         if not (web_dir / name).is_file():
             raise ReleaseError(f"Missing Web artifact: {name}")
-    if not re.search(r'<base\s+href=[\"\']/[\"\']', (web_dir / "index.html").read_text()):
-        raise ReleaseError("The existing PWA target requires base href '/' ")
+    base_href = config.get("base_href", "/")
+    target_url(config["target_url"], base_href)
+    pattern = r'<base\s+href=[\"\']' + re.escape(base_href) + r'[\"\']'
+    if not re.search(pattern, (web_dir / "index.html").read_text()):
+        raise ReleaseError(f"The deployment target requires base href {base_href!r}")
     source = Path(source_asset).read_bytes()
     if (web_dir / ASSET).read_bytes() != source:
         raise ReleaseError("Bundled classification differs from source")
@@ -120,10 +127,10 @@ def package(web_dir, output, config, revision, source_asset):
             if name != RELEASE:
                 files[name] = digest(path.read_bytes())
     manifest = {"schema": 1, "commit": revision, "target_url": config["target_url"],
-                "base_href": "/", "industry_count": len(data), "files": files}
+                "base_href": base_href, "industry_count": len(data), "files": files}
     payload = (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
     output.mkdir(parents=True, exist_ok=True)
-    archive = output / "martin-luk-pwa-root.zip"
+    archive = output / ("martin-luk-pwa-root.zip" if base_href == "/" else "martin-luk-pwa-pages.zip")
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
         for name in sorted([*files, RELEASE]):
             info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
@@ -221,7 +228,9 @@ def main():
             result = package(args.web_dir, args.out_dir, config, revision, ROOT / "assets/data/stock_industries.json")
         else:
             manifest = json.loads((args.out_dir / RELEASE).read_text())
-            result = (deploy(config, args.out_dir / "martin-luk-pwa-root.zip", manifest)
+            archive = ("martin-luk-pwa-root.zip" if config.get("base_href", "/") == "/"
+                       else "martin-luk-pwa-pages.zip")
+            result = (deploy(config, args.out_dir / archive, manifest)
                       if args.action == "deploy" else verify(config, manifest))
     except (ReleaseError, OSError, ValueError, KeyError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
         result = {"status": "blocked", "deployed": False, "error": str(error)}

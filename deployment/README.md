@@ -1,5 +1,7 @@
 # PWA 發布與線上驗證
 
+正式發布目標已另設為 GitHub Pages，流程與首次啟用步驟見 [PAGES.md](PAGES.md)。以下根路徑設定保留供原站未來接入使用。
+
 目標為 `https://martin-momentum-lab-20261021.brainysky.chatgpt.site/`，使用根路徑 `/`。`render.yaml` 是 Python API 的設定，不是此站的 PWA 部署入口。儲存庫沒有 `web/CNAME` 或此站的主機發布設定。
 
 目前正常 HEAD/GET 請求回傳 HTTP 403；先前請求曾回傳 401。這只能證明目前請求未取得網站存取權，不能識別其實際發布平台。DNS 解析的共享 CDN 位址也不提供發布權限。GitHub Pages API 回傳 404；列出 Actions secrets/variables 的 API 回傳 403，因此不能宣稱 GitHub 沒有部署憑證。未讀取任何 secret 值。
@@ -44,9 +46,9 @@ python3 scripts/pwa_release.py verify --report build/live-verification.json
 
 ## GitHub Actions
 
-`Verify Flutter and build PWA` 先執行 6 項 release 腳本測試，再執行原有 Flutter 門禁及 Web 編譯，額外提供 `martin-luk-pwa-release` 成品，含可部署 ZIP、版本 manifest、SHA256 及部署設定盤點。原有 `martin-luk-pwa` 成品保留。
+`Verify Flutter and build PWA` 先執行 release 腳本測試，再執行原有 Flutter 門禁及 Web 編譯，額外提供 `martin-luk-pwa-release` 成品，含可部署 ZIP、版本 manifest、SHA256 及部署設定盤點。原有 `martin-luk-pwa` 成品保留。
 
-目前沒有部署 job，因為平台與授權尚未確定。Actions 綠燈表示建置／打包成功，不能當作原站已更新的證據。接入正式 publisher 後，應將 `deploy` 與線上 `verify` 設為發布 job 的必要成功條件。
+原站工作流沒有部署 job，因為原站平台與授權尚未確定。該流程綠燈表示建置／打包成功，不能當作原站已更新的證據。新的 Pages 工作流另有實際 deploy job 與線上驗證；接入原站正式 publisher 後，也應將 `deploy` 與線上 `verify` 設為其發布 job 的必要成功條件。
 
 ```sh
 python3 -m unittest discover -s scripts/tests -p test_pwa_release.py -v

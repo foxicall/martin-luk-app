@@ -97,6 +97,20 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises(release.ReleaseError):
                 release.target_url(url)
 
+    def test_pages_target_allows_only_its_explicit_matching_base_path(self):
+        config = {**self.config, "target_url": "https://example.com/martin-luk-app/",
+                  "base_href": "/martin-luk-app/"}
+        (self.web / "index.html").write_text('<base href="/martin-luk-app/">')
+        result = release.package(self.web, self.out, config, "a" * 40, self.source)
+        self.assertTrue(result["archive"].endswith("martin-luk-pwa-pages.zip"))
+        manifest = json.loads((self.out / release.RELEASE).read_text())
+        self.assertEqual(manifest["base_href"], "/martin-luk-app/")
+        self.assertEqual(release.target_url(config["target_url"], config["base_href"]), config["target_url"])
+        with self.assertRaises(release.ReleaseError):
+            release.target_url(config["target_url"], "/other/")
+        with self.assertRaises(release.ReleaseError):
+            release.target_url("https://example.com/../", "/../")
+
 
 if __name__ == "__main__":
     unittest.main()
