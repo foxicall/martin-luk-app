@@ -82,7 +82,7 @@ export function currentResult(row){if(row.strategyVersion===STRATEGY_VERSION)ret
 export function snapshotCoverage(snapshot){
  const out={},directories=snapshot?.directories;
  if(!Array.isArray(directories)||!Number.isSafeInteger(snapshot.total)||directories.reduce((n,d)=>n+(Number.isSafeInteger(d.total)?d.total:0),0)!==snapshot.total)return out;
- const seen=new Set();for(const d of directories){if(!['TW','US'].includes(d.market)||seen.has(d.market)||d.complete!==true||!Number.isSafeInteger(d.total)||d.total<=0)return {};seen.add(d.market);out[d.market]={total:d.total,complete:snapshot.status==='completed'&&snapshot.processed===snapshot.total,scope:'full-market'};}
+ const seen=new Set();for(const d of directories){if(!['TW','US'].includes(d.market)||seen.has(d.market)||d.complete!==true||!Number.isSafeInteger(d.total)||d.total<=0)return {};seen.add(d.market);out[d.market]={total:d.total,complete:snapshot.status==='completed'&&snapshot.processed===snapshot.total,rankEligible:d.rankEligible!==false,scope:'full-market'};}
  return out;
 }
 export function rankReadiness(rows,coverage={}){
@@ -91,7 +91,7 @@ export function rankReadiness(rows,coverage={}){
  const dates=[...new Set(current.map(r=>r.metrics?.asOf).filter(Boolean))],unique=new Set(rows.map(r=>r.symbol)).size;
  let reason='';if(!rows.length)reason='尚無掃描結果';else if(legacy)reason=`${legacy} 檔為舊版摘要，需重新產出 20／60 日報酬`;else if(missing20||missing60||missingGain)reason=`缺 20 日報酬 ${missing20} 檔、60 日報酬 ${missing60} 檔、日漲幅 ${missingGain} 檔`;
  else if(dates.length!==1||current.some(r=>!/^\d{4}-\d{2}-\d{2}$/.test(r.metrics?.asOf||'')))reason='行情日期不一致，不能混合排名';
- else if(unique!==rows.length)reason='代碼重複，完整名單待核對';else if(!total||coverage.scope!=='full-market')reason='缺全市場名單分母';else if(coverage.complete!==true||rows.length!==total)reason=`全市場資料尚未齊備（${rows.length}／${total} 檔）`;
+ else if(unique!==rows.length)reason='代碼重複，完整名單待核對';else if(!total||coverage.scope!=='full-market')reason='缺全市場名單分母';else if(coverage.rankEligible===false)reason='官方備援名單未逐檔 CFI 核驗，RS 僅作樣本參考';else if(coverage.complete!==true||rows.length!==total)reason=`全市場資料尚未齊備（${rows.length}／${total} 檔）`;
  return {ready:!reason,reason,total,received:rows.length,legacy,missing20,missing60,missingGain,dates,eligible:current.filter(r=>[r.metrics?.rsMonth,r.metrics?.rsQuarter,r.metrics?.gain].every(finite)).length};
 }
 export function rankResults(rows,coverage={}){
@@ -99,7 +99,7 @@ export function rankResults(rows,coverage={}){
  for(const list of groups.values()){
   const sample=list.filter(r=>/^\d{4}-\d{2}-\d{2}$/.test(r.metrics.asOf||'')&&!r.raw?.error&&[r.metrics.rsMonth,r.metrics.rsQuarter].every(finite));
   if(sample.length>=2&&new Set(sample.map(r=>r.symbol)).size===sample.length&&(!coverage[list[0].market]?.total||sample.length<=coverage[list[0].market].total)){const month=new Map(sample.map(r=>r.metrics.rsMonth).sort((a,b)=>b-a).map((v,i)=>[v,i+1])),quarter=new Map(sample.map(r=>r.metrics.rsQuarter).sort((a,b)=>b-a).map((v,i)=>[v,i+1]));for(const r of sample)r.rsReference={percentile:100*(1-Math.max(month.get(r.metrics.rsMonth),quarter.get(r.metrics.rsQuarter))/sample.length),sample:sample.length,total:coverage[r.market]?.total||null,asOf:r.metrics.asOf,method:'20/60 日報酬樣本參考；並列取較差名次；不供全市場門檻驗證'};}
-  const c=coverage[list[0].market],total=c?.total;const complete=c?.complete===true&&c.scope==='full-market'&&Number.isSafeInteger(total)&&total>0&&list.length===total&&new Set(list.map(r=>r.symbol)).size===total&&list.every(r=>/^\d{4}-\d{2}-\d{2}$/.test(r.metrics.asOf||'')&&[r.metrics.rsMonth,r.metrics.rsQuarter,r.metrics.gain].every(finite));
+  const c=coverage[list[0].market],total=c?.total;const complete=c?.complete===true&&c.rankEligible!==false&&c.scope==='full-market'&&Number.isSafeInteger(total)&&total>0&&list.length===total&&new Set(list.map(r=>r.symbol)).size===total&&list.every(r=>/^\d{4}-\d{2}-\d{2}$/.test(r.metrics.asOf||'')&&[r.metrics.rsMonth,r.metrics.rsQuarter,r.metrics.gain].every(finite));
   if(!complete)continue;
   const ranks={};for(const metric of ['rsMonth','rsQuarter','gain']){const sorted=list.map(r=>r.metrics[metric]).sort((a,b)=>b-a);ranks[metric]=new Map(sorted.map((v,i)=>[v,i+1]));}
   for(const r of list){const rank=metric=>ranks[metric].get(r.metrics[metric]);const month=rank('rsMonth'),quarter=rank('rsQuarter');r.rankSample=total;r.metrics.rank20=month;r.metrics.rank60=quarter;r.metrics.percentile=100*(1-Math.max(month,quarter)/total);r.rankMethod='20/60 日報酬代理；同市場、同日期、完整名單，並列取較差名次';if(month/total<=.05&&quarter/total<=.05)r.scanners.push('leader');if(rank('gain')/total<=.03&&r.metrics.relativeVolume>1)r.scanners.push('potent');}
