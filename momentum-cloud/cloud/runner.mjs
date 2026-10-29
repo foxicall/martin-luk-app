@@ -4,13 +4,14 @@ import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {loadUniverse} from '../src/universe.js';
 import {scanMarket} from '../src/provider.js';
+import {industryMetadata} from './industries.mjs';
 import {analyze,STRATEGY_VERSION,snapshotCoverage,rankReadiness} from '../src/strategy.js';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const iso=()=>new Date().toISOString();
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
-export function compactResult(raw,listing){const r=analyze({...raw,name:listing.name||raw.name});return {strategyVersion:STRATEGY_VERSION,returnMethod:'close-return-20-60-v1',symbol:r.symbol,name:r.name,market:r.market,source:r.source,sector:listing.sector||r.sector,status:r.status,metrics:r.metrics,missing:r.missing,scanners:r.scanners,checks:r.checks,bars:[],setups:[],setup:null,largeLiquid:r.largeLiquid||false,freshIntraday:false,dailyOnly:true,evaluatedAt:raw.evaluatedAt||Date.now()/1000,raw:{error:raw.error||null,notes:raw.notes||[],quoteTime:raw.quoteTime||null}};}
+export function compactResult(raw,listing){const r=analyze({...raw,name:listing.name||raw.name});return {strategyVersion:STRATEGY_VERSION,returnMethod:'close-return-20-60-v1',symbol:r.symbol,name:r.name,market:r.market,source:r.source,...industryMetadata(r.symbol,r.market),status:r.status,metrics:r.metrics,missing:r.missing,scanners:r.scanners,checks:r.checks,bars:[],setups:[],setup:null,largeLiquid:r.largeLiquid||false,freshIntraday:false,dailyOnly:true,evaluatedAt:raw.evaluatedAt||Date.now()/1000,raw:{error:raw.error||null,notes:raw.notes||[],quoteTime:raw.quoteTime||null}};}
 export async function scanQueue(queue,{fetcher=scanMarket,onCheckpoint=async()=>{},batchSize=8,pauseMs=800,checkpointEvery=60000,clock=Date.now,stop=()=>false,seed=[]}={}){
- const results=new Map(seed.map(r=>[r.symbol,r]));let last=0,consecutiveFailures=0;
+ const results=new Map(seed.map(r=>[r.symbol,{...r,...industryMetadata(r.symbol,r.market)}]));let last=0,consecutiveFailures=0;
  const remaining=queue.filter(r=>!results.has(r.symbol));
  for(let offset=0;offset<remaining.length;){if(stop())return {results:[...results.values()],status:'interrupted'};const market=remaining[offset].market,batch=[];while(offset<remaining.length&&batch.length<batchSize&&remaining[offset].market===market)batch.push(remaining[offset++]);
   let pending=batch;for(let attempt=0;attempt<3&&pending.length;attempt++){if(attempt)await delay(pauseMs*(attempt+1));let payload;try{payload=await fetcher(pending.map(r=>r.symbol),market,{dailyOnly:true});}catch(e){payload={results:pending.map(r=>({...r,error:e.message,source:'Yahoo Finance'}))};}

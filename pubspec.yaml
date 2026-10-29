@@ -19,6 +19,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/data/stock_industries.json
     - stocks_master.json
     - stocks_master_sources.json
   fonts:

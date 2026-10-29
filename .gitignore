@@ -1,0 +1,15 @@
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+test_logs/
+android/local.properties
+android/key.properties
+android/.gradle/
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+*.jks
+*.keystore
+__pycache__/
+.pytest_cache/
+.venv/
+.env

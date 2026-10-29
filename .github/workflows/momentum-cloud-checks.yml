@@ -3,11 +3,13 @@ on:
   pull_request:
     paths:
       - 'momentum-cloud/**'
+      - 'assets/data/stock_industries.json'
       - '.github/workflows/momentum-cloud-checks.yml'
   push:
     branches: [main]
     paths:
       - 'momentum-cloud/**'
+      - 'assets/data/stock_industries.json'
       - '.github/workflows/momentum-cloud-checks.yml'
 permissions:
   contents: read

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../services/stock_industry_service.dart';
 import 'package:intl/intl.dart';
 
 import '../app_controller.dart';
@@ -1059,7 +1061,7 @@ class _RecommendationCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text(stock.name, style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 4),
-              Text(stock.sector,
+              Text(StockIndustryService.instance.label(stock.market, stock.symbol),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.onSurfaceVariant,
                       )),

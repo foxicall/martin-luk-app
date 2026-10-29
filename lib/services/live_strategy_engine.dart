@@ -4,6 +4,7 @@ import '../models/market_data.dart';
 import '../models/stock_candidate.dart';
 import '../models/stock_item.dart';
 import 'strategy_engine.dart' show PositionPlan;
+import 'stock_industry_service.dart';
 
 export 'strategy_engine.dart' show PositionPlan;
 
@@ -316,7 +317,9 @@ class LiveEvaluation {
 
   StockCandidate toCandidate({required double rsScore, required int rsRank}) =>
       StockCandidate(id: '${stock.market.name}:${stock.symbol}', symbol: stock.symbol,
-        name: stock.displayName, sector: '來源未提供產業', market: stock.market,
+        name: stock.displayName,
+        sector: StockIndustryService.instance.sector(stock.market, stock.symbol),
+        market: stock.market,
         adrPercent: adr, rsScore: rsScore, rsRank: rsRank, patterns: patterns,
         entryPrice: trigger, triggerPrice: trigger, triggerType: triggerType,
         stopPrice: stop, stopSource: stopSource, dayLow: dayLow,

@@ -4,10 +4,40 @@ import 'app_controller.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/portfolio_screen.dart';
+import 'services/stock_industry_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MartinLukApp());
+  runApp(const IndustryBootstrap());
+}
+
+class IndustryBootstrap extends StatefulWidget {
+  const IndustryBootstrap({super.key});
+
+  @override
+  State<IndustryBootstrap> createState() => _IndustryBootstrapState();
+}
+
+class _IndustryBootstrapState extends State<IndustryBootstrap> {
+  late Future<void> _loading = StockIndustryService.instance.load();
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<void>(
+    future: _loading,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.done && !snapshot.hasError) {
+        return const MartinLukApp();
+      }
+      return MaterialApp(home: Scaffold(body: Center(child: snapshot.hasError
+        ? Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('產業分類載入失敗，請重試。'),
+            TextButton(onPressed: () => setState(() {
+              _loading = StockIndustryService.instance.load();
+            }), child: const Text('重新載入')),
+          ])
+        : const Text('載入產業分類…'))));
+    },
+  );
 }
 
 class MartinLukApp extends StatefulWidget {

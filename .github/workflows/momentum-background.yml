@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/momentum-background.yml'
       - 'momentum-cloud/**'
+      - 'assets/data/stock_industries.json'
 permissions:
   contents: write
 concurrency:

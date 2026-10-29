@@ -1,0 +1,38 @@
+name: Verify Flutter and build PWA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'web/**'
+      - 'assets/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/flutter-web.yml'
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build web --release --dart-define=USE_MOCK_DATA=false
+      - name: Verify bundled industry asset
+        run: cmp assets/data/stock_industries.json build/web/assets/assets/data/stock_industries.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: martin-luk-pwa
+          path: build/web/
+          if-no-files-found: error
