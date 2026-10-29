@@ -411,7 +411,7 @@
 [MarketAPI] >>> 開始抓取: NVDA
 [MarketAPI] [REQUEST] NVDA 端點: query1.finance.yahoo.com，週期: 1d，嘗試: 1/2
 [MarketAPI] <<< 標的 NVDA 狀態碼: 429
-[MarketAPI] [ERROR] NVDA HTTP 429 失敗: 
+[MarketAPI] [ERROR] NVDA HTTP 429 失敗:
 [MarketAPI] >>> 開始抓取: NVDA
 [MarketAPI] [REQUEST] NVDA 端點: query1.finance.yahoo.com，週期: 1d，嘗試: 2/2
 [MarketAPI] <<< 標的 NVDA 狀態碼: 200
@@ -422,7 +422,7 @@
 [MarketAPI] >>> 開始抓取: NVDA
 [MarketAPI] [REQUEST] NVDA 端點: query1.finance.yahoo.com，週期: 1d，嘗試: 1/2
 [MarketAPI] <<< 標的 NVDA 狀態碼: 429
-[MarketAPI] [ERROR] NVDA HTTP 429 失敗: 
+[MarketAPI] [ERROR] NVDA HTTP 429 失敗:
 [MarketAPI] [ERROR] NVDA (1d / query1.finance.yahoo.com / http) MarketDataException: Yahoo 行情請求過於頻繁（HTTP 429），請稍後重試。
 00:16 +151 ~2: /workspace/martin-luk-app/test/live_repositories_test.dart: portfolio timed-out refresh retains stale original quote rather than empty success
 00:16 +151 ~2: /workspace/martin-luk-app/test/market_data_api_test.dart: Timeout has a retry message and no fabricated fallback
@@ -557,7 +557,7 @@
 [MarketAPI] >>> 開始抓取: NVDA
 [MarketAPI] [REQUEST] NVDA 端點: query1.finance.yahoo.com，週期: 1d，嘗試: 1/2
 [MarketAPI] <<< 標的 NVDA 狀態碼: 429
-[MarketAPI] [ERROR] NVDA HTTP 429 失敗: 
+[MarketAPI] [ERROR] NVDA HTTP 429 失敗:
 [MarketAPI] [TIMEOUT] NVDA (1d / query1.finance.yahoo.com): TimeoutException after 0:00:00.008885: Future not completed
 00:16 +158 ~2: /workspace/martin-luk-app/test/live_repositories_test.dart: portfolio timed-out refresh retains stale original quote rather than empty success
 00:16 +158 ~2: /workspace/martin-luk-app/test/market_data_api_test.dart: Benchmarks and class-share IDs are normalized for Yahoo
