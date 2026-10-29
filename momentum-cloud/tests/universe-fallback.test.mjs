@@ -35,3 +35,14 @@ test('a successful company backup never qualifies full-market RS even with compl
  assert.equal(coverage.TW.total,100);assert.equal(rankReadiness(rows,coverage.TW).ready,false);assert.match(rankReadiness(rows,coverage.TW).reason,/CFI/);
  const results=rankResults(rows,coverage);assert.ok(results.every(r=>r.rankSample===0&&r.metrics.percentile===null&&r.rsReference.total===100&&!r.scanners.includes('leader')&&!r.scanners.includes('potent')));
 });
+
+test('cloud fallback retries an interrupted body once without accepting partial bytes',async()=>{
+ const calls=new Map();const d=await readUniverse('TW',{now,fetcher:async url=>{
+  calls.set(url,(calls.get(url)||0)+1);if(url.includes('isin.'))return new Response('timeout',{status:522});
+  if(calls.get(url)===1)return {ok:true,status:200,arrayBuffer:async()=>{throw new TypeError('terminated');}};
+  return new Response(body(url.includes('tpex')));
+ }});assert.equal(d.complete,true);assert.equal(d.total,1200);assert.equal(d.rankEligible,false);assert.ok(d.sources.every(s=>s.attempts.length===2));assert.ok([...calls.entries()].every(([url,n])=>n===(url.includes('isin.')?1:2)));
+});
+test('cloud fallback bounds timeout retries and does not retry schema or access errors',async()=>{
+ for(const kind of ['timeout','schema','forbidden']){let calls=0;const d=await readUniverse('TW',{now,fetcher:async url=>{if(url.includes('isin.'))return new Response('bad',{status:522});calls++;if(kind==='timeout')throw new DOMException('timeout','TimeoutError');return new Response(kind==='schema'?'<html>bad</html>':'denied',{status:kind==='forbidden'?403:200});}});assert.equal(d.complete,false);assert.equal(d.rankEligible,false);assert.equal(calls,kind==='timeout'?4:2);}
+});

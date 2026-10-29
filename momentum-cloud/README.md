@@ -21,3 +21,12 @@ Validation: `node --test --test-isolation=none momentum-cloud/tests/*.test.mjs`
 (17 passing). On 2026-10-29 the live fallback returned 1,088 TWSE and 896 TPEx
 companies, dated 2026-10-28; this validates directory retrieval only, not complete
 market price coverage. Production schedules use main and require this PR to merge.
+
+Cloud transport follow-up: production run 40812994066 reached the official TPEx
+backup but its response body terminated / timed out on two attempts. The cloud
+runner now gives the official company-feed download 30 seconds (primary remains
+10 seconds) and retries that backup at most once for a timeout, interrupted body
+or HTTP 502/503/504/522. Schema failures and access denials are not retried. The
+maximum Taiwan directory wait is about 70 seconds, bounded independently for each
+parallel source. A separate read-only GitHub PR workflow checks actual TWSE/TPEx
+connectivity without scanning stocks or publishing data. 19 unit tests pass.

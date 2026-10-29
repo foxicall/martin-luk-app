@@ -1,0 +1,20 @@
+name: Taiwan directory connectivity
+on:
+  pull_request:
+    paths:
+      - 'momentum-cloud/src/universe.js'
+      - 'momentum-cloud/scripts/verify-tw-directory.mjs'
+      - '.github/workflows/momentum-directory-check.yml'
+permissions:
+  contents: read
+jobs:
+  directory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify real TWSE and TPEx directory retrieval without scanning or publishing
+        run: node momentum-cloud/scripts/verify-tw-directory.mjs
