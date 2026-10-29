@@ -28,6 +28,8 @@ export function parseTWDirectory(text, source){
  if(!rows.length)throw new Error('台股名錄沒有可辨識的普通股');const fileDate=text.match(/(?:更新日期|最近更新日期)[^\d]{0,30}([\d/.-]+)/)?.[1]||null;return {rows,stats,fileDate};
 }
 export const TW_DIRECTORY_TIMEOUT_MS=10000;
+// The cloud runner downloads ~1 MB from TPEx; body transfer may exceed the primary timeout.
+export const TW_COMPANY_TIMEOUT_MS=30000;
 const FALLBACK_NOTE='官方公司清單備援；依代碼與公司分類篩選，未逐檔 CFI 核驗。可掃描日線，RS 僅作樣本參考，不作全市場百分位通過依據。';
 function sourceDate(value,now){
  const m=String(value??'').match(/^(\d{3})(\d{2})(\d{2})$/);if(!m)throw new Error('官方公司清單缺少有效出表日期');
@@ -55,13 +57,19 @@ export async function readUniverse(market,{fetcher=fetch,now=Date.now()}={}){
  if(!DIRECTORY_SOURCES[market])throw new Error('不支援的市場');
  const sources=await Promise.all(DIRECTORY_SOURCES[market].map(async source=>{
   const attempts=[];for(const [index,url] of [source.url,source.fallbackUrl].filter(Boolean).entries()){
+   for(let retry=0;retry<(index>0?2:1);retry++){
+   const signal=AbortSignal.timeout(market==='TW'?(index>0?TW_COMPANY_TIMEOUT_MS:TW_DIRECTORY_TIMEOUT_MS):30000),started=Date.now();let transient=false;
    try{
-    const response=await fetcher(url,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(market==='TW'?TW_DIRECTORY_TIMEOUT_MS:30000)});
+    const response=await fetcher(url,{headers:{'User-Agent':'Mozilla/5.0'},signal});
+    transient=[502,503,504,522].includes(response.status);
     if(!response.ok)throw new Error(response.status===522?'來源連線逾時（HTTP 522）':`HTTP ${response.status}`);
     const text=new TextDecoder(market==='TW'&&index===0?'big5':'utf-8').decode(await response.arrayBuffer());
     const parsed=market!=='TW'?parseUSDirectory(text,source.id):index===0?parseTWDirectory(text,source.id):parseTWCompanyDirectory(text,source.id,{now});
     return {...source,...parsed,url,primaryUrl:source.url,fallback:index>0,attempts,rankEligible:parsed.rankEligible!==false,ok:true,fetchedAt:new Date(now).toISOString()};
-   }catch(e){attempts.push({url,error:directoryError(e)});}
+   }catch(e){const timedOut=signal.aborted||['AbortError','TimeoutError'].includes(e?.name);attempts.push({url,error:timedOut?'來源連線逾時':directoryError(e),durationMs:Date.now()-started});
+    if(retry||!(timedOut||transient||/^(terminated|fetch failed)$/.test(e?.message||'')))break;
+   }
+   }
   }
   return {...source,ok:false,rankEligible:false,attempts,error:attempts.map((a,i)=>(i?'官方備援：':'主來源：')+a.error).join('；')+'。稍後可重試，未將缺資料當作合格。',rows:[]};
  }));
