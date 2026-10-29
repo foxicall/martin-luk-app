@@ -1,0 +1,32 @@
+{
+  "provider": "TWSE / TPEx / Yahoo Finance / verified legacy cache",
+  "assembled_at": "2026-10-29T13:00:47.720205+00:00",
+  "coverage": {
+    "TW": {
+      "total": 1978,
+      "classified": 1978,
+      "missing": 0,
+      "statuses": {
+        "classified": 1978
+      },
+      "providers": {
+        "TWSE": 1085,
+        "TPEx": 892,
+        "Yahoo Finance": 1
+      }
+    },
+    "US": {
+      "total": 5113,
+      "classified": 5098,
+      "missing": 15,
+      "statuses": {
+        "classified": 5098,
+        "unknown": 15
+      },
+      "providers": {
+        "Yahoo Finance": 5113
+      }
+    }
+  },
+  "report": "metadata_snapshots/us_taxonomy_run_report.json"
+}

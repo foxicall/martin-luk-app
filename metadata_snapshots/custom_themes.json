@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "description": "人工維護的業務與概念標籤範例，非官方產業分類或投資推薦。可新增、刪除或調整；不會自動覆蓋主要板塊。",
+  "stocks": {
+    "2330": {
+      "industry": "晶圓代工",
+      "themes": [
+        "AI概念",
+        "先進製程",
+        "CoWoS"
+      ]
+    },
+    "3017": {
+      "themes": [
+        "散熱"
+      ]
+    },
+    "1519": {
+      "themes": [
+        "重電"
+      ]
+    },
+    "NVDA": {
+      "themes": [
+        "AI Chips",
+        "GPU"
+      ]
+    },
+    "TSLA": {
+      "themes": [
+        "電動車",
+        "機器人"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "match": {
+        "industry": [
+          "Semiconductors"
+        ]
+      },
+      "themes": [
+        "半導體"
+      ]
+    },
+    {
+      "match": {
+        "symbols": [
+          "NVDA",
+          "AMD",
+          "AVGO"
+        ]
+      },
+      "themes": [
+        "AI"
+      ]
+    },
+    {
+      "match": {
+        "symbols": [
+          "MSFT",
+          "AMZN",
+          "GOOG",
+          "GOOGL"
+        ]
+      },
+      "themes": [
+        "雲端運算"
+      ]
+    },
+    {
+      "match": {
+        "symbols": [
+          "6488.TWO"
+        ]
+      },
+      "themes": [
+        "半導體晶圓"
+      ]
+    }
+  ]
+}
