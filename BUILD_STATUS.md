@@ -1,3 +1,126 @@
+# 最新修正：1.6.1+14 Android 工具版本
+
+2026-10-17（台北時間）。已讀取 commit `8e18bc91838eb799329006a0230d83a36447a4dc`、run `39011383757`／job `117334467798`：全部固定 Dart 測試、真實行情／指標及美股名單實測通過，APK 已編譯 61.4 MB；後續原生測試的 Gradle 設定階段因 AGP 版本過低失敗，APK 未上傳。
+
+本次固定 Flutter 3.47.7，AGP 8.11.1／Kotlin 2.2.20／Gradle 8.14／Java 17；minSdk 提高為 23，compile36／target34 保留。移除略過版本檢查，CI 與原生測試使用同一配置。版本仍為 1.6.1+14，未改行情、輪掃、風控或持股。詳細原因與最低 Android 版本影響見 [ANDROID_TOOLCHAIN_FIX.md](ANDROID_TOOLCHAIN_FIX.md)。
+
+本機通過 25 項 Python、YAML／15 段 Bash 及 CI 63 檔預檢，確認 140 個受保護檔案和 18 個原生來源／資源未變；實際 Flutter 建置命令退出 127。本機缺 Flutter／Android SDK，新配置尚待新 commit 的 Actions 實測；前次已編譯不等於本次原生測試與手機啟動已成功。
+
+---
+
+# 最新修正：1.6.1+14 兩項行情測試資料
+
+2026-10-17（台北時間）。已讀取 commit `d8d540795478de323374069188ed46b989304e32`、run `39010655225`／job `117332338081` 完整日誌：既有 Python、風控、台美股輪掃與背景群組通過；快取群組 74 過、2 失敗，真實行情門禁與 APK／原生測試未執行。
+
+只修 `test/market_data_api_test.dart` 的指數 URI 解碼及 `test/market_data_cache_bounds_test.dart` 的快取報價時間；保留 96 筆斷言、未來報價拒絕，增加反例測試。正式 lib／Android／CI／字典／版本與失敗 commit 不變。本機 Flutter 命令退出 127，修正後尚待新提交 Actions。原因與完整覆蓋步驟見 [CACHE_TEST_FIX.md](CACHE_TEST_FIX.md)。
+
+---
+
+# 最新修正：1.6.1+14 長時間快取與啟動復原
+
+已確認舊行情磁碟快取無總量上限、離線回填 RAM 無界及輪掃重複寫入。新增 96 筆／8 MiB 編碼內容限制、共享增量 LRU、寫入排隊與逾時隔離；30 檔正常頁日誌由 13 次降為 7 次，大檢查點驗證移到 compute。升級先由原生非同步串流整理精確 Yahoo 行情 key，保留所有持股、本金及輪掃資料，歷史桌面元件透過 alias 保留。
+
+新增 10 項行情快取、3 項保存預算、4 項原生 XML 回歸測試。CI 保留真實行情／指標門禁與零推薦規則，原生測試通過才上傳 APK。舊版基線 commit `0c25530e886bd4c6bd6ed284232e6a672df10f21` 的 run `38910623652` 已成功，不能作為本次版本結果。
+
+本環境缺 Flutter／Dart／Android／Kotlin SDK；本次實際 Flutter 測試退出 127（command not found）。已完成靜態審查，尚未實際編譯新版、覆蓋安裝或重現兩天後 OOM／ANR，不能宣稱實機已修復。請不要清除資料，待 GitHub 新提交 Actions 後同簽章覆蓋安裝。詳細見 [LONG_RUN_RECOVERY.md](LONG_RUN_RECOVERY.md)。
+
+本次本機已執行並通過 25 項 Python 腳本回歸測試；YAML、15 段 Bash 語法、實際 CI 的 63 個檔案預檢與 Dart 本地 import 路徑通過。另比對 21 個策略、持股、畫面、字典與真實行情門禁檔案和遠端成功基線雜湊相同。這些不等於新增 Dart／Kotlin 測試通過。
+
+---
+
+# 最新修正：1.6.0+13 六項畫面測試
+
+2026-10-16（台北時間）。已讀取run `38908151003`／commit `5f2c597e7c41281bb9f085da9ac34c872cc0ce69`／job `116997415235`完整日誌。風控78項、網路／輪掃195項、台股備援39項、背景生命週期48項均通過；新增US與畫面群54項通過、6項失敗。真實行情與APK未執行。
+
+六項均為畫面測試定位／狀態：儲存、警語展開與重試tap座標超出800×600，US來源tile未展開，停止後舊文案斷言，以及未捲到懶載入空卡片。本次只改3個test檔，等待實際layout、確認hitTestable後真實tap；保留原儲存／快取／forceRefresh／報價新鮮度檢查，暫停與870剩餘則按正式狀態精確驗證。
+
+版本仍為1.6.0+13，正式lib、Android、資料、pubspec與CI保持該失敗commit內容。沒有縮回美股30檔，也沒有略過測試或放寬門禁。指定Flutter命令因本機缺SDK退出127，修正後仍待新提交Actions。詳見 [US_UI_TEST_FIX.md](US_UI_TEST_FIX.md)。
+
+---
+
+# 1.6.0+13 手機美股完整名單輪掃交付紀錄
+
+2026-10-16（台北時間）。美股正式直連移除固定核心30選取，改為與台股共用完整名單分批輪掃；每頁最多30、每批最多5，保留網路／全流程時限。US與TW檢查點、ADR與手動暫停分市場保存，US未完成輪跨NY日界續掃並支援DST，台股原schema/key相容。
+
+Dashboard、設定與Android通知改顯示美股真實全輪進度、本頁及下一檔；舊30檔無coverage快照明示待初始化。跨頁RS及每卡原報價時間保留，過期卡片不產新買進股數。選股與風控門檻不變。
+
+新增US repository／polling／scope測試，遷移舊核心池測試為完整輪掃契約，保留限流、期限、個股隔離及晚到回應守護。CI在真實行情門禁前執行新增群組；允許零推薦的規則保留。
+
+已讀取GitHub基線run `38896664051`／commit `4f19e9b97c1894b629e1d0a2585f022654bd0105`：前版1.5.0+12全部測試、真實行情門禁、APK編譯與上傳成功。這不能作為本版US輪掃測試結果；本環境缺少Flutter／Dart／Android SDK，本版仍須新提交Actions與手機驗收。見 [MOBILE_US_SCAN.md](MOBILE_US_SCAN.md)。
+
+本機已嘗試新版US與既有TW／生命週期群測試命令，因`flutter: command not found`退出127。已通過YAML解析、13段Bash語法、實際CI的53個必要檔案預檢與專案Dart import路徑檢查；另確認31個策略／HTTP／名單／真實行情門禁／既有生命週期／Android檔案與成功基線雜湊相同。新增與更新測試的必填fixture欄位及coverage整組有做語彙檢查，但這不等於Dart編譯。
+
+---
+
+# 1.5.0+12 生命週期測試歷史修正
+
+2026-10-16（台北時間）。已讀取 run `38877234917`（commit `9b289d0dcd532a39dd6297147db6bdd15aee2b8d`）完整日誌。背景服務測試群44項通過、2項失敗：新fixture漏填必填stale；原前台測試直接從paused跳resumed，違反Flutter listener的轉換契約。
+
+本次只修改兩個測試的完整內容，補齊stale與輪掃指紋、恢復hidden／inactive轉換及安全清理，保留原有全部斷言並新增快照有效性檢查。正式Dart／Kotlin／Manifest、pubspec與工作流均保持失敗commit內容，沒有放寬門禁。
+
+該run先前風控群78項、網路／輪掃群195項、台股備援群39項均通過；真實行情門禁與APK未執行。修正後指定Flutter命令仍因本機缺SDK退出127；尚待新提交Actions。詳見 [BACKGROUND_LIFECYCLE_TEST_FIX.md](BACKGROUND_LIFECYCLE_TEST_FIX.md)。
+
+---
+
+# 1.5.0+12 Android 前景服務交付紀錄
+
+2026-10-16（台北時間）。新增使用者明確啟動的dataSync服務、常駐通知與暫停／繼續／停止。Activity與服務沿用同一FlutterEngine／Controller，不另建掃描isolate或第二個檢查點寫入者。未啟用服務時，既有切背景暫停行為保留。
+
+原生加入前景服務與WakeLock權限、通知圖示、引擎所有權及啟動授權／取消時限；Dart加入安全平台橋接、單一poll擁有者、設定及通知進度。Mock、Python API、不支援平台不允許啟動；台股完整已取得名單續掃、美股核心池範圍不變。前台開關與明確背景服務分開。
+
+加入平台通道、無Binding建構、Controller、設定頁及主App生命週期測試，CI同時執行既有前台生命週期與庫存Controller測試。名單服務關閉例外修正及原有全部門禁保留，允許零推薦。
+
+本機已通過：YAML解析、12段Bash語法檢查、實際工作流48個必要檔案預檢、340個專案Dart import路徑、Android Manifest／通知圖示XML、服務權限及通道名稱一致性。已嘗試上述Flutter測試命令，因`flutter: command not found`退出127；靜態檢查不能替代Dart或Kotlin編譯。
+
+本環境沒有Flutter／Dart／Kotlin／Android SDK，尚不能宣稱新增測試、原生APK或鎖屏實機通過。需要新提交Actions編譯與手機驗收。Doze、廠商省電、強制停止及關機仍可能中止工作，不保證每60秒準點。操作、架構及驗證限制見 [ANDROID_BACKGROUND_SCAN.md](ANDROID_BACKGROUND_SCAN.md)。
+
+---
+
+以下為歷史交付及已讀取的GitHub結果；不當作本版新增服務的驗證結果。
+
+# 最新修正：名單服務關閉例外契約（仍為1.4.4+11）
+
+2026-10-16（台北時間）。已讀取 GitHub run `38862604909` 完整日誌：3R／5R及風控群78項通過，網路／控制器／輪掃群195項通過，台股官方備援群37項通過、2項失敗。兩項都預期關閉服務回傳StateError，實際卻收到已取消HTTP的RequestAbortedException。
+
+本次只修核心 `StockUniverseService._load` 的共用錯誤邊界：若服務已關閉，以原stack回傳StateError；一般HTTP錯誤及快取退避不變。兩項測試、全部斷言、NetworkRequest、工作流與pubspec均保持失敗commit原樣，已比對雜湊。
+
+本機指定測試因缺少Flutter退出127，修正後仍需新提交Actions驗證。上述run的真實行情與APK步驟均未執行。詳見 [UNIVERSE_CLOSE_FIX.md](UNIVERSE_CLOSE_FIX.md)。下方為之前交付紀錄，舊版「尚未執行Dart」不代表上面已取得的CI結果。
+
+---
+
+# 最新交付狀態：1.4.4+11 目標價與股數分開計算
+
+2026-10-16（台北時間）。確認原始碼會因快取或無效本金令 `PositionPlan` 為 null，而一起隱藏停損與3R／5R；截圖不足以判定1727.TW原始資料有沒有停損。
+
+本次拆出純價格 `TradeLevels`，保持原有實際停損驗證；快取顯示帶時間的舊參考目標，買進股數仍停用。缺少停損會明確說明。新增獨立手動假設試算，停損預設空白，不修改候選或部位。
+
+新增價格邏輯11項、手動元件8項測試，推薦元件由6項擴充為10項；工作流一併加入，原有真實行情與零推薦門禁保留。核心選股與0.5%／曝險上限不放寬。上一版CSV備援與台股進度保留。
+
+已嘗試 Flutter 指定測試命令，退出127（未安裝SDK），不能宣稱新版Dart測試或APK已成功。已確認的1.4.2+9 GitHub成功結果僅為基線。這次仍需新提交Actions驗證。詳細操作及限制見 [R_TARGET_DISPLAY_FIX.md](R_TARGET_DISPLAY_FIX.md)。
+
+---
+
+以下為歷史交付紀錄；以本頁上方狀態為準。
+
+# 最新交付狀態：1.4.3+10 官方台股 CSV 備援
+
+2026-10-16（台北時間）。使用者已確認手機下拉會增加到 60 或更多，因此分批續掃正常；截圖中的 TWSE 名單逾時才是本次修正範圍。
+
+- 新增官方 TWSE／TPEx CSV 備援與純 Dart 解析器。每交易所 JSON 與 CSV 共用既有網路期限，成功 JSON 不另發 CSV。
+- 嚴格驗證出表日期、編碼、CSV 結構、普通股排除與 `.TW`／`.TWO`。依官方目錄月／日頻率分別採 45／7 日 CSV 保存政策，既有 JSON／舊快取 30 天限制保留；來源日期與下載時間分列。
+- 依交易所保存來源與期限，保留本輪固定名單及輪掃進度。原有選股、報價、風控、零推薦門禁與前台排程不變。
+- 新增 parser／備援測試並加入 CI；工作流檔案存在性預檢要求新增測試一併提交。
+
+**已確認的 GitHub 基線結果：** run [38852597488](https://github.com/foxicall/martin-luk-app/actions/runs/38852597488)、commit `13e4cb1560b9f3a30bd2b720f173622c970aad25` 為 success，1.4.2+9 的台股續掃測試、真實行情門禁、Release APK 編譯及上傳均完成。先前「缺少推薦測試」已由該提交補齊；下方歷史紀錄保留供查閱。
+
+**本版限制：** 新增 CSV 版本尚未由 GitHub 執行；本環境 Flutter 命令退出 127，沒有 Dart／APK 成功結果。直接讀 CSV 的沙箱請求被阻止，只確認官方政府目錄及 CSV 端點，不宣稱原始 CSV 或手機連通性已通過。原始碼、YAML／Bash、完整清單與 ZIP 檢查不等同實機成功。
+
+使用及可直接覆蓋檔案見 [TW_OFFICIAL_CSV_FALLBACK.md](TW_OFFICIAL_CSV_FALLBACK.md) 與 `UPDATE_FILES.txt`。
+
+---
+
+以下為歷史交付紀錄；舊版限制及測試數不當成本次執行結果。
+
 # 本次交付狀態：擴充股票池與逐頁輪掃
 
 本文件取代先前混合多次交付的歷史狀態，避免把舊測試數、舊股票池或舊推薦門禁當成本版結果。

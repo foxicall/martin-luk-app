@@ -1,0 +1,32 @@
+[
+  {
+    "path": "lib/models/market_data.dart",
+    "bytes": 7094,
+    "sha256": "86c2f0f407d718d6627b2c3d3ecd78f2a933682522d97a626e476928c51d1329"
+  },
+  {
+    "path": "lib/services/live_strategy_engine.dart",
+    "bytes": 23266,
+    "sha256": "5bd898ce01bf4fc8b5e67ce916bc2200559f3e728158d758817495b720cb2a32"
+  },
+  {
+    "path": "test/integration_scan_test.dart",
+    "bytes": 19084,
+    "sha256": "10a9a84b227009b906a6070b2b0ac0687e911a075febb7e9706801abaaa603e7"
+  },
+  {
+    "path": "test/rs_alignment_test.dart",
+    "bytes": 5714,
+    "sha256": "3af7ceddda392c9f40168dac8d2ceba38309a66be2f2c56bda56d8cc0971a936"
+  },
+  {
+    "path": "test/live_strategy_engine_test.dart",
+    "bytes": 9300,
+    "sha256": "5c79ee3babf9bf7926d32c29b9469e40a2b1600daead8f4fb145999227d97498"
+  },
+  {
+    "path": "test/live_repositories_test.dart",
+    "bytes": 40880,
+    "sha256": "8cd9c290fa5723711f36dc72a7a4bb8bb9a0290caaca381a2568a0543c7d6b79"
+  }
+]

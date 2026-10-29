@@ -26,12 +26,12 @@ void main() {
     expect(small.riskAmount, 375);
     expect(small.riskAmount, lessThanOrEqualTo(small.riskBudget));
   });
-  test('1.5% and 3% boundaries are inclusive and not silently tightened', () {
+  test('manual scenarios accept observed stops through 5% without synthetic tightening', () {
     expect(calculatePositionSize(capital: 100000, entryPrice: 100,
       stopLossPrice: 98.5, isMegaCap: true).stopPercent, 1.5);
     expect(calculatePositionSize(capital: 100000, entryPrice: 100,
       stopLossPrice: 97, isMegaCap: true).stopPercent, 3);
-    for (final stop in [98.500001, 96.999999, 94.0]) {
+    for (final stop in [94.999999, 94.0]) {
       expect(() => calculatePositionSize(capital: 100000, entryPrice: 100,
         stopLossPrice: stop, isMegaCap: true), throwsArgumentError);
     }

@@ -52,7 +52,7 @@ void main() {
           'close_timestamp': '2026-10-12T20:00:00Z',
           'source': 'test API', 'is_large_liquid': false,
         }).toList(),
-      }), 200);
+      }), 200, headers: {'content-type': 'application/json; charset=utf-8'});
     });
     addTearDown(client.close);
     final repository = RealPortfolioRepository(baseUrl: 'https://example.test', client: client);
@@ -72,7 +72,7 @@ void main() {
       return http.Response(jsonEncode({
         'market': 'us', 'source': 'test API', 'generated_at': '2026-10-13T15:00:00Z',
         'errors': {'TEST50': '查無有效行情'}, 'quotes': <Object>[],
-      }), 200);
+      }), 200, headers: {'content-type': 'application/json; charset=utf-8'});
     });
     addTearDown(client.close);
     final repository = RealPortfolioRepository(baseUrl: 'https://example.test', client: client);

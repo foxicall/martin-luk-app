@@ -116,7 +116,7 @@ void main() {
     expect(migrated.usEquity, 67890.12);
     expect(migrated.twAdrThreshold, 4);
     expect(migrated.darkMode, isFalse);
-    expect(migrated.toJson()['schema_version'], 2);
+    expect(migrated.toJson()['schema_version'], 3);
     final chosenMock = migrated.copyWith(useMockData: true);
     expect(AppSettings.fromJson(chosenMock.toJson()).useMockData, isTrue);
   });
@@ -165,7 +165,7 @@ void main() {
     expect(controller.portfolioNotice, contains('示範'));
     final preferences = await SharedPreferences.getInstance();
     final persisted = jsonDecode(preferences.getString('martin_luk_settings_v1')!) as Map;
-    expect(persisted['schema_version'], 2);
+    expect(persisted['schema_version'], 3);
     expect(persisted['use_mock_data'], isFalse);
   });
 

@@ -74,10 +74,10 @@ flutter test test/live_http_smoke_test.dart --dart-define=RUN_LIVE_HTTP_TEST=tru
 測試使用實際 `http.Client`、強制刷新、空快取，且暫時解除 Flutter 測試框架的 HTTP 400 替身；TLS 憑證驗證維持啟用。遇到限流／DNS／端點異動會失敗並顯示錯誤，不能拿 fixture 或快取代替此項連網成功證據。
 
 ```bash
-flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+flutter build apk --release --dart-define=USE_MOCK_DATA=false
 ```
 
-GitHub Actions **Build Android APK with Verification Gate** 僅在上述單元測試、真實行情／計算測試與 schema 2 報告驗證全部通過後建置連網版，成功後下載 `martin-luk-app-release`，保留 7 天。`martin-luk-live-scan-evidence` 保存 `test_logs/verification.log`，失敗時也保留診斷；JSON 證據會寫入日誌。現行工作流只上傳這兩項產物。Manifest 有 INTERNET、ACCESS_NETWORK_STATE、`usesCleartextTraffic=true`；Yahoo 仍使用 HTTPS。目前簽章是既有快速測試用 debug keystore，商店發布需配置自有 release signing。`android-skip-build-dependency-validation` 是依需求加入的旗標，不取代驗證步驟。
+GitHub Actions **Build Android APK with Verification Gate** 僅在上述單元測試、真實行情／計算測試與 schema 2 報告驗證全部通過後建置連網版，成功後下載 `martin-luk-app-release`，保留 7 天。`martin-luk-live-scan-evidence` 保存 `test_logs/verification.log`，失敗時也保留診斷；JSON 證據會寫入日誌。現行工作流只上傳這兩項產物。Manifest 有 INTERNET、ACCESS_NETWORK_STATE、`usesCleartextTraffic=true`；Yahoo 仍使用 HTTPS。目前簽章是既有快速測試用 debug keystore，商店發布需配置自有 release signing。本次對齊工具版本後，已移除略過依賴檢查的旗標；原生測試通過後才上傳 APK。工具版本與 Android 6.0 最低支援見 [ANDROID_TOOLCHAIN_FIX.md](ANDROID_TOOLCHAIN_FIX.md)。
 
 本受限工作區沒有 Flutter／Dart／Android SDK，本地執行 Flutter 命令回傳 `command not found`（exit 127），沒有完成實際 APK 編譯或這次 Dart 測試。已只讀核對 GitHub [run 38662579836](https://github.com/foxicall/martin-luk-app/actions/runs/38662579836)：台北 2026-10-15 08:55、約 2661ms，22 檔評估成功、7 檔仍受遠端舊 RS 日期判斷影響，推薦為零。當時台股未開盤、美股已收盤；這份舊版失敗紀錄不能當作本次新健康門禁或 APK 已通過的證據。請完整覆蓋 `market_data.dart` 與 `live_strategy_engine.dart` 的 RS 修正，再以新的 Actions 結果確認。
 

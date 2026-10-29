@@ -24,7 +24,7 @@ def prepare(flutter_command: str, project: Path) -> None:
             executable = str(supplied.resolve())
     if executable is None:
         raise FileNotFoundError(
-            "Flutter not found. Install Flutter 3.29.3+ and add flutter/bin to PATH."
+            "Flutter not found. Install Flutter 3.47.7 and add flutter/bin to PATH."
         )
 
     destination = project / "android/gradle/wrapper/gradle-wrapper.jar"

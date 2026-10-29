@@ -1,3 +1,5 @@
+import 'hybrid_protocol.dart';
+
 /// A market's prices and account equity always use its own currency.
 enum StockMarket { tw, us }
 
@@ -36,11 +38,16 @@ class StockCandidate {
     this.stopSource = 'day_low',
     this.dayLow,
     this.entryBarLow,
-    this.ema9, this.ema21, this.ema50, this.quotePrice,
-  })  : triggerPrice = triggerPrice ?? entryPrice,
-        patterns = List<String>.unmodifiable(patterns),
-        notes = List<String>.unmodifiable(notes),
-        dailyCloses = List<double>.unmodifiable(dailyCloses) {
+    this.ema9,
+    this.ema21,
+    this.ema50,
+    this.quotePrice,
+    this.hybrid,
+    this.openingRangeLow,
+  }) : triggerPrice = triggerPrice ?? entryPrice,
+       patterns = List<String>.unmodifiable(patterns),
+       notes = List<String>.unmodifiable(notes),
+       dailyCloses = List<double>.unmodifiable(dailyCloses) {
     for (final value in [id, symbol, name, sector]) {
       if (value.trim().isEmpty) {
         throw const FormatException('股票代碼、名稱、產業與識別碼不得為空。');
@@ -55,17 +62,34 @@ class StockCandidate {
     if (!entryPrice.isFinite || entryPrice <= 0) {
       throw const FormatException('進場參考價必須大於 0。');
     }
-    if (!this.triggerPrice.isFinite || this.triggerPrice <= 0 ||
+    if (!this.triggerPrice.isFinite ||
+        this.triggerPrice <= 0 ||
         this.triggerPrice != entryPrice) {
       throw const FormatException('進場參考價必須等於精確突破觸發界線。');
     }
-    if (triggerType != null && !['PDH', 'ORH'].contains(triggerType)) {
+    if (triggerType != null &&
+        !['PDH', 'ORH', 'EMA_PULLBACK'].contains(triggerType)) {
       throw const FormatException('未知突破界線類型。');
     }
-    if (stopSource != null && !['day_low', 'entry_bar_low'].contains(stopSource)) {
+    if (stopSource != null &&
+        ![
+          'day_low',
+          'entry_bar_low',
+          'opening_range_low',
+          'exhaustion_low',
+        ].contains(stopSource)) {
       throw const FormatException('未知初始停損來源。');
     }
-    for (final value in [confirmationPrice, dayLow, entryBarLow, ema9, ema21, ema50, quotePrice]) {
+    for (final value in [
+      confirmationPrice,
+      dayLow,
+      entryBarLow,
+      openingRangeLow,
+      ema9,
+      ema21,
+      ema50,
+      quotePrice,
+    ]) {
       if (value != null && (!value.isFinite || value <= 0)) {
         throw const FormatException('確認價及實際低點必須為有限正數。');
       }
@@ -114,18 +138,44 @@ class StockCandidate {
   final double? entryBarLow;
   final double? ema9, ema21, ema50, quotePrice;
 
-  bool get isConfirmed => status == 'confirmed';
-  double? get riskPerShare => stopPrice == null ? null : entryPrice - stopPrice!;
-  bool get hasValidStopRange {
+  final HybridAssessment? hybrid;
+  final double? openingRangeLow;
+  bool get priceSignalConfirmed => status == 'confirmed';
+  bool get isConfirmed => priceSignalConfirmed && hybrid?.passed == true;
+  String get hybridSummary => hybrid?.summary ?? 'Hybrid v1.3.0 未驗證（舊版或缺資料）';
+  List<String> get hybridPending =>
+      hybrid?.pending ?? ['缺少 v1.3.0 市場、結構及訂單流驗證'];
+  double? get riskPerShare =>
+      stopPrice == null ? null : entryPrice - stopPrice!;
+  bool get hasValidStopRange => isConfirmed && hasValidPriceStop;
+  bool get hasValidPriceStop {
     final percent = stopPercent;
-    if (!isConfirmed || percent == null || percent <= 0) return false;
-    return stopSource == 'entry_bar_low'
-        ? percent >= 1.5 - 1e-10 && percent <= 3 + 1e-10
-        : stopSource == 'day_low' && percent <= 5 + 1e-10;
+    if (!priceSignalConfirmed || percent == null || percent <= 0) return false;
+    if (percent > 5 + 1e-10) return false;
+    if (hybrid?.version != HybridProtocol.version) {
+      return stopSource == 'entry_bar_low'
+          ? percent >= 1.5 && percent <= 3 && entryBarLow == stopPrice &&
+              dayLow != null && (entryPrice - dayLow!) / entryPrice > .05
+          : stopSource == 'day_low' && (dayLow == null || dayLow == stopPrice);
+    }
+    return switch (triggerType) {
+      'PDH' =>
+        stopSource == 'day_low'
+            ? percent <= 3.5 + 1e-10 && (dayLow == null || dayLow == stopPrice)
+            : stopSource == 'entry_bar_low' &&
+                entryBarLow == stopPrice &&
+                dayLow != null &&
+                dayLow! < stopPrice! &&
+                HybridProtocol.needsPdhAlternate(entryPrice, dayLow!),
+      'ORH' =>
+        stopSource == 'opening_range_low' && openingRangeLow == stopPrice,
+      'EMA_PULLBACK' => stopSource == 'exhaustion_low',
+      _ => false,
+    };
   }
-  double? get stopPercent => stopPrice == null
-      ? null
-      : (entryPrice - stopPrice!) / entryPrice * 100;
+
+  double? get stopPercent =>
+      stopPrice == null ? null : (entryPrice - stopPrice!) / entryPrice * 100;
 
   factory StockCandidate.fromJson(Map<String, dynamic> json) {
     final marketText = _string(json, 'market');
@@ -144,7 +194,10 @@ class StockCandidate {
       throw const FormatException('is_large_liquid 必須為布林值。');
     }
     return StockCandidate(
-      id: json.containsKey('id') ? _string(json, 'id') : '${market.name}:$symbol',
+      id:
+          json.containsKey('id')
+              ? _string(json, 'id')
+              : '${market.name}:$symbol',
       symbol: symbol,
       name: _string(json, 'name'),
       sector: _string(json, 'sector'),
@@ -154,57 +207,87 @@ class StockCandidate {
       rsRank: rankValue,
       patterns: _strings(json, 'patterns'),
       entryPrice: _number(json, 'entry_price'),
-      stopPrice: json['stop_price'] == null ? null : _number(json, 'stop_price'),
+      stopPrice:
+          json['stop_price'] == null ? null : _number(json, 'stop_price'),
       isLargeLiquid: largeValue,
       status: _string(json, 'status'),
-      dataTimestamp: parseApiTimestamp(json['data_timestamp'], 'data_timestamp'),
-      signalTimestamp: json['signal_timestamp'] == null
-          ? null
-          : parseApiTimestamp(json['signal_timestamp'], 'signal_timestamp'),
+      dataTimestamp: parseApiTimestamp(
+        json['data_timestamp'],
+        'data_timestamp',
+      ),
+      signalTimestamp:
+          json['signal_timestamp'] == null
+              ? null
+              : parseApiTimestamp(json['signal_timestamp'], 'signal_timestamp'),
       notes: _strings(json, 'notes'),
       dailyCloses: _prices(json),
-      triggerPrice: json['trigger_price'] == null ? null : _number(json, 'trigger_price'),
-      triggerType: json['trigger_type'] == null ? null : _string(json, 'trigger_type'),
-      confirmationPrice: json['confirmation_price'] == null ? null : _number(json, 'confirmation_price'),
-      stopSource: json.containsKey('stop_source')
-          ? (json['stop_source'] == null ? null : _string(json, 'stop_source'))
-          : 'day_low',
+      triggerPrice:
+          json['trigger_price'] == null ? null : _number(json, 'trigger_price'),
+      triggerType:
+          json['trigger_type'] == null ? null : _string(json, 'trigger_type'),
+      confirmationPrice:
+          json['confirmation_price'] == null
+              ? null
+              : _number(json, 'confirmation_price'),
+      stopSource:
+          json.containsKey('stop_source')
+              ? (json['stop_source'] == null
+                  ? null
+                  : _string(json, 'stop_source'))
+              : 'day_low',
       dayLow: json['day_low'] == null ? null : _number(json, 'day_low'),
-      entryBarLow: json['entry_bar_low'] == null ? null : _number(json, 'entry_bar_low'),
+      entryBarLow:
+          json['entry_bar_low'] == null ? null : _number(json, 'entry_bar_low'),
       ema9: json['ema9'] == null ? null : _number(json, 'ema9'),
       ema21: json['ema21'] == null ? null : _number(json, 'ema21'),
       ema50: json['ema50'] == null ? null : _number(json, 'ema50'),
-      quotePrice: json['quote_price'] == null ? null : _number(json, 'quote_price'),
+      quotePrice:
+          json['quote_price'] == null ? null : _number(json, 'quote_price'),
+      openingRangeLow:
+          json['opening_range_low'] == null
+              ? null
+              : _number(json, 'opening_range_low'),
+      hybrid:
+          json['hybrid'] is Map<String, dynamic>
+              ? HybridAssessment.fromJson(
+                json['hybrid'] as Map<String, dynamic>,
+              )
+              : null,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'market': market.name,
-        'symbol': symbol,
-        'name': name,
-        'sector': sector,
-        'adr_percent': adrPercent,
-        'rs_score': rsScore,
-        'rs_rank': rsRank,
-        'patterns': patterns,
-        'entry_price': entryPrice,
-        'stop_price': stopPrice,
-        'is_large_liquid': isLargeLiquid,
-        'status': status,
-        'data_timestamp': dataTimestamp.toUtc().toIso8601String(),
-        'signal_timestamp': signalTimestamp?.toUtc().toIso8601String(),
-        'notes': notes,
-        'daily_closes': dailyCloses,
-        'trigger_price': triggerPrice,
-        'trigger_type': triggerType,
-        'confirmation_price': confirmationPrice,
-        'stop_source': stopSource,
-        'day_low': dayLow,
-        'entry_bar_low': entryBarLow,
-        'risk_per_share': riskPerShare,
-        'ema9': ema9, 'ema21': ema21, 'ema50': ema50, 'quote_price': quotePrice,
-      };
+    'id': id,
+    'market': market.name,
+    'symbol': symbol,
+    'name': name,
+    'sector': sector,
+    'adr_percent': adrPercent,
+    'rs_score': rsScore,
+    'rs_rank': rsRank,
+    'patterns': patterns,
+    'entry_price': entryPrice,
+    'stop_price': stopPrice,
+    'is_large_liquid': isLargeLiquid,
+    'status': status,
+    'hybrid': hybrid?.toJson(),
+    'opening_range_low': openingRangeLow,
+    'data_timestamp': dataTimestamp.toUtc().toIso8601String(),
+    'signal_timestamp': signalTimestamp?.toUtc().toIso8601String(),
+    'notes': notes,
+    'daily_closes': dailyCloses,
+    'trigger_price': triggerPrice,
+    'trigger_type': triggerType,
+    'confirmation_price': confirmationPrice,
+    'stop_source': stopSource,
+    'day_low': dayLow,
+    'entry_bar_low': entryBarLow,
+    'risk_per_share': riskPerShare,
+    'ema9': ema9,
+    'ema21': ema21,
+    'ema50': ema50,
+    'quote_price': quotePrice,
+  };
 }
 
 String _string(Map<String, dynamic> json, String key) {
@@ -260,9 +343,14 @@ DateTime parseApiTimestamp(dynamic value, String field) {
   final minute = int.parse(parts[5]!);
   final second = int.parse(parts[6]!);
   final offset = parts[7]!.replaceAll(':', '');
-  if (year < 1 || month < 1 || month > 12 || day < 1 ||
+  if (year < 1 ||
+      month < 1 ||
+      month > 12 ||
+      day < 1 ||
       day > DateTime.utc(year, month + 1, 0).day ||
-      hour > 23 || minute > 59 || second > 59 ||
+      hour > 23 ||
+      minute > 59 ||
+      second > 59 ||
       (offset != 'Z' &&
           (int.parse(offset.substring(1, 3)) > 23 ||
               int.parse(offset.substring(3, 5)) > 59))) {

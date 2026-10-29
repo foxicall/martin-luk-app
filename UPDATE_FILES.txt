@@ -1,27 +1,38 @@
-2026-10-16 / App 1.4.2+9 / GitHub 推薦測試與畫面缺檔補齊包
-依 GitHub commit 79ea8cc338504ca6eac5448cb91470b7002f0723 的實際檔案樹比對。
-每個檔案均為完整內容，依原路徑覆蓋分支 fix/refresh-live-gate-20261014，不要只上傳ZIP。
-確切失敗為 test/recommendation_trade_levels_test.dart: Does not exist，非該測試的語法錯誤。
-此包包含缺少的完整六項測試，以及尚未同步的計算機/HTML/檢查程式與隱藏配置。
-原有測試和斷言均保留，正式App版本仍為1.4.2+9，保留台股完整名單分批續掃修正。
-CI增加檔案存在及非空預檢，缺少任一引用測試時明列路徑並停止，不會製造空測試或跳過。
-步驟見 RESTORE_RECOMMENDATION_FILES.md；版本不確定時使用完整專案包。
-本環境沒有Flutter SDK，尚無修正後的Dart測試或APK成功證據，需以新提交Actions確認。
+2026-10-17 Asia/Taipei / App仍為1.6.1+14 / Android建置工具相容修正
+GitHub失敗基線commit: 8e18bc91838eb799329006a0230d83a36447a4dc
+失敗run: 39011383757 / job: 117334467798
+目標分支: fix/refresh-live-gate-20261014
+Drive存放: Martin_Luk_App / folder 1Nu2lpsfv-Z0ib1pRZQalVl_DZOEhdSBq
+
+核心四檔必須一併覆蓋：android/settings.gradle、android/gradle/wrapper/gradle-wrapper.properties、
+android/app/build.gradle、.github/workflows/build_apk.yml。
+固定Flutter3.47.7 stable / AGP8.11.1 / Kotlin2.2.20 / Gradle8.14 / JDK17。
+minSdk提高23，最低Android6.0；compile36/target34不變。
+Release與原生測試不略過版本檢查；CI僅驗證Wrapper，不臨時改寫來源。
+實際基線Dart/真實行情門禁/Release編譯已成功，其後native設定階段失敗，APK尚未上傳。
+全部交易邏輯、行情、輪掃、持股與門禁測試保留，未略過任何測試。
+其餘為建置指南、完整性檢查、缺SDK提示及GitHub尚缺的隱藏專案配置。
+解壓後依原路徑覆蓋，不只上傳ZIP、不多套一層目錄；提交新commit觸發Actions。
+本機25項Python/配置靜態檢查通過，Flutter建置命令退出127，新配置仍待新CI。
+APK須同簽章才可覆蓋安裝；若不同先保留舊App，不解除安裝或清除資料。
+詳細證據與版本影響見 ANDROID_TOOLCHAIN_FIX.md。
 
 .dockerignore
 .github/workflows/build_apk.yml
 .gitignore
 .metadata
+ANDROID_TOOLCHAIN_FIX.md
+BUILD_ANDROID.md
 BUILD_STATUS.md
 FILE_MANIFEST.json
 GITHUB_MANUAL_UPDATE.md
-RECOMMENDATION_LEVELS.md
-RESTORE_RECOMMENDATION_FILES.md
+LONG_RUN_RECOVERY.md
+PRODUCTION_GUIDE.md
+README.md
+README_HOW_TO_BUILD.md
 UPDATE_FILES.txt
-lib/screens/calculator_screen.dart
-preview/index.html
-preview/standalone_preview.html
-scripts/check_preview_ui.cjs
-scripts/check_standalone_preview.cjs
-standalone_preview.html
-test/recommendation_trade_levels_test.dart
+android/app/build.gradle
+android/gradle/wrapper/gradle-wrapper.properties
+android/settings.gradle
+scripts/prepare_android.py
+scripts/verify_deliverable.py
