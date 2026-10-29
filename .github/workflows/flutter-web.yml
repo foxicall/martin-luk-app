@@ -9,6 +9,9 @@ on:
       - 'assets/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
+      - 'scripts/pwa_release.py'
+      - 'scripts/tests/test_pwa_release.py'
+      - 'deployment/**'
       - '.github/workflows/flutter-web.yml'
   pull_request:
   workflow_dispatch:
@@ -20,6 +23,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Test release packaging and deployment verification
+        run: python3 -m unittest discover -s scripts/tests -p test_pwa_release.py -v
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.29.3'
@@ -31,8 +36,17 @@ jobs:
       - run: flutter build web --release --dart-define=USE_MOCK_DATA=false
       - name: Verify bundled industry asset
         run: cmp assets/data/stock_industries.json build/web/assets/assets/data/stock_industries.json
+      - name: Package root-path release with hashes and commit manifest
+        run: python3 scripts/pwa_release.py package --web-dir build/web
+      - name: Record configured deployment target
+        run: python3 scripts/pwa_release.py audit --report build/pwa-release/deployment-audit.json
       - uses: actions/upload-artifact@v4
         with:
           name: martin-luk-pwa
           path: build/web/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: martin-luk-pwa-release
+          path: build/pwa-release/
           if-no-files-found: error
