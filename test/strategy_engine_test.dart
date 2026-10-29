@@ -1,3 +1,4 @@
+import 'hybrid_protocol_test.dart' show verifiedFixture;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:martin_luk_app/models/stock_candidate.dart';
 import 'package:martin_luk_app/services/strategy_engine.dart';
@@ -13,7 +14,7 @@ StockCandidate candidate({
   double? entryBarLow,
 }) =>
     StockCandidate(
-      id: 'test',
+      id: 'test', hybrid: verifiedFixture(), triggerType: 'PDH',
       symbol: 'TEST',
       name: '測試股票',
       sector: '測試',
@@ -45,7 +46,7 @@ void main() {
       expect(plan.stopPercent, 2);
       expect(plan.capPercent, 35);
       expect(plan.targets, {3: 106, 5: 110, 10: 120});
-      expect(plan.trimShares, 30);
+      expect(plan.trimShares, 38);
       expect(plan.targetPrice(3), 106);
       expect(() => plan.targetPrice(4), throwsArgumentError);
     });
@@ -80,25 +81,25 @@ void main() {
       expect(plan.shares, 175);
     });
 
-    test('uses an observed day-low stop up to 5% without fabricating a tighter stop', () {
+    test('uses an observed day-low stop up to 3.5% without fabricating a tighter stop', () {
       expect(StrategyEngine.calculate(candidate(stop: 99), 100000).stopPercent, 1);
-      expect(StrategyEngine.calculate(candidate(stop: 95), 100000).stopPercent, 5);
-      expect(() => StrategyEngine.calculate(candidate(stop: 94.99999), 100000), throwsArgumentError);
+      expect(StrategyEngine.calculate(candidate(stop: 96.5), 100000).stopPercent, 3.5);
+      expect(() => StrategyEngine.calculate(candidate(stop: 96.49999), 100000), throwsArgumentError);
     });
 
-    test('wide day stops require actual minute-bar evidence within 1.5 to 3 percent', () {
+    test('PDH beyond 3.5% requires a valid higher 5-minute low', () {
       final plan = StrategyEngine.calculate(candidate(stop: 98,
           stopSource: 'entry_bar_low', dayLow: 90, entryBarLow: 98), 100000);
       expect(plan.stopPercent, 2);
       expect(plan.shares, 250);
       expect(() => StrategyEngine.calculate(candidate(stop: 98,
           stopSource: 'entry_bar_low', dayLow: 90), 100000), throwsArgumentError);
-      for (final stop in [98.51, 96.99]) {
+      for (final stop in [94.99, 94.0]) {
         expect(() => StrategyEngine.calculate(candidate(stop: stop,
             stopSource: 'entry_bar_low', dayLow: 90, entryBarLow: stop), 100000), throwsArgumentError);
       }
       expect(() => StrategyEngine.calculate(candidate(stop: 98,
-          stopSource: 'entry_bar_low', dayLow: 95, entryBarLow: 98), 100000), throwsArgumentError);
+          stopSource: 'entry_bar_low', dayLow: 96.5, entryBarLow: 98), 100000), throwsArgumentError);
     });
 
     test('day-low provenance cannot be silently replaced with a fabricated stop', () {
@@ -127,10 +128,10 @@ void main() {
       expect(() => StrategyEngine.calculate(candidate(), 100000, lotSize: 1000), throwsArgumentError);
     });
 
-    test('small holdings do not claim an impossible 10%–15% trim', () {
+    test('small holdings round the original-share 15% plan explicitly', () {
       final small = StrategyEngine.calculate(candidate(), 3200);
       expect(small.shares, 8);
-      expect(small.trimShares, 0);
+      expect(small.trimShares, 1);
       final possible = StrategyEngine.calculate(candidate(), 3600);
       expect(possible.shares, 9);
       expect(possible.trimShares, 1);

@@ -38,6 +38,27 @@ EXCLUDED_FILE_PATTERNS = (
     "apply_market_scan_fix.py", "apply_market_scan_timeout_fix.py",
 )
 REQUIRED_FILES = (
+    "ANDROID_TOOLCHAIN_FIX.md",
+    "LONG_RUN_RECOVERY.md", "test/market_data_cache_bounds_test.dart",
+    "test/mobile_scan_storage_budget_test.dart",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/MartinLukApplication.kt",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/CacheRecoveryActivity.kt",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/FlutterHostActivity.kt",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheRecovery.kt",
+    "android/app/src/test/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheXmlTest.kt",
+    "MOBILE_US_SCAN.md", "test/mobile_us_rolling_repository_test.dart",
+    "test/mobile_us_polling_test.dart", "test/mobile_us_scope_test.dart",
+    "ANDROID_BACKGROUND_SCAN.md", "lib/services/background_scan_service.dart",
+    "test/background_scan_uninitialized_test.dart",
+    "test/background_scan_service_test.dart", "test/background_scan_controller_test.dart",
+    "test/background_scan_settings_test.dart", "test/background_scan_app_lifecycle_test.dart",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanServiceBridge.kt",
+    "android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanForegroundService.kt",
+    "android/app/src/main/res/drawable/ic_stat_scan.xml",
+    "R_TARGET_DISPLAY_FIX.md", "lib/widgets/manual_trade_levels.dart",
+    "test/trade_levels_test.dart", "test/manual_trade_levels_test.dart",
+    "TW_OFFICIAL_CSV_FALLBACK.md", "lib/services/tw_issuer_csv.dart",
+    "test/tw_issuer_csv_test.dart", "test/tw_official_fallback_test.dart",
     "TW_SCAN_STABILITY_FIX.md", "test/tw_universe_stability_test.dart",
     "test/tw_universe_resume_integration_test.dart",
     "RECOMMENDATION_LEVELS.md", "test/recommendation_trade_levels_test.dart",
@@ -275,7 +296,7 @@ def validate_contents(files: dict[str, bytes]) -> None:
         "actions/setup-java@v4", "distribution: temurin", "java-version: '17'",
         "subosito/flutter-action@v2", "channel: stable",
         "flutter pub get", "flutter test", "flutter build apk --release",
-        "USE_MOCK_DATA=false", "--android-skip-build-dependency-validation",
+        "USE_MOCK_DATA=false", "flutter-version: '3.47.7'",
         "martin-luk-app-release", "actions/upload-artifact@v4",
         "**/build/app/outputs/flutter-apk/*.apk", "retention-days: 7",
         "martin-luk-live-scan-evidence", "**/test_logs/verification.log", "if: always()",
@@ -286,11 +307,28 @@ def validate_contents(files: dict[str, bytes]) -> None:
         "test/expanded_symbol_test.dart", "test/rolling_scan_snapshot_test.dart",
         "python3 -m unittest discover -s backend/tests -v",
         "test/backend_snapshot_repository_test.dart test/backend_scan_controller_test.dart",
+        "test/tw_issuer_csv_test.dart test/tw_official_fallback_test.dart",
+        "test/trade_levels_test.dart test/manual_trade_levels_test.dart",
+        "test/background_scan_uninitialized_test.dart test/background_scan_service_test.dart",
+        "test/mobile_us_rolling_repository_test.dart test/mobile_us_polling_test.dart test/mobile_us_scope_test.dart",
+        "test/market_data_cache_bounds_test.dart test/mobile_scan_storage_budget_test.dart",
+        ":app:testReleaseUnitTest", "steps.native-recovery-test.outcome == 'success'",
     ):
         require(marker in workflow, f"Actions 工作流缺少：{marker}")
     android_app = files["android/app/build.gradle"].decode("utf-8")
     require(bool(re.search(r"\bcompileSdk\s*=\s*36\b", android_app)),
             "Android compileSdk 必須符合 shared_preferences_android 的 API 36 要求")
+    require(bool(re.search(r"\bminSdk\s*=\s*23\b", android_app)),
+            "Flutter 3.47.7 要求 Android minSdk 23")
+    settings = files["android/settings.gradle"].decode("utf-8")
+    require("id 'com.android.application' version '8.11.1'" in settings
+            and "id 'org.jetbrains.kotlin.android' version '2.2.20'" in settings,
+            "AGP／Kotlin 版本未符合 Flutter 3.47.7 的要求")
+    wrapper = files["android/gradle/wrapper/gradle-wrapper.properties"].decode("utf-8")
+    require("gradle-8.14-all.zip" in wrapper, "Gradle Wrapper 必須一併更新為 8.14")
+    require("--android-skip-build-dependency-validation" not in workflow
+            and "skipDependencyChecks" not in workflow,
+            "正式建置與原生測試應實際通過版本驗證，不應略過")
     require("android-actions/setup-android" not in workflow and "sdkmanager" not in workflow,
             "Actions 不應再次依賴額外 Android SDK 安裝步驟")
     require("apply_market_scan" not in workflow and "market-scan-updated-source.zip" not in workflow,
@@ -311,6 +349,55 @@ def validate_contents(files: dict[str, bytes]) -> None:
     json.loads(files["web/manifest.json"])
     android = files["android/app/src/main/AndroidManifest.xml"].decode("utf-8")
     require("android.permission.INTERNET" in android, "Android 缺少網路權限")
+    ns = "{http://schemas.android.com/apk/res/android}"
+    manifest = ET.fromstring(android)
+    application = manifest.find("application")
+    require(application is not None and application.get(ns + "name") == ".MartinLukApplication",
+            "Android 啟動必須先經過非同步行情快取復原")
+    activities = {entry.get(ns + "name"): entry for entry in application.findall("activity")}
+    for activity_name in (".CacheRecoveryActivity", ".FlutterHostActivity"):
+        require(activity_name in activities
+                and activities[activity_name].get(ns + "exported") == "false",
+                f"Android 缺少非公開復原／Flutter 入口：{activity_name}")
+    aliases = application.findall("activity-alias")
+    require(len(aliases) == 1 and aliases[0].get(ns + "name") == ".MainActivity"
+            and aliases[0].get(ns + "targetActivity") == ".CacheRecoveryActivity"
+            and aliases[0].get(ns + "exported") == "true",
+            "舊桌面 MainActivity 元件必須透過 alias 先進入復原畫面")
+    require(list(application).index(activities[".CacheRecoveryActivity"])
+            < list(application).index(aliases[0]), "alias 的 target Activity 必須先宣告")
+    launcher_entries = [entry for entry in list(activities.values()) + aliases
+                        if any(category.get(ns + "name") == "android.intent.category.LAUNCHER"
+                               for category in entry.findall("intent-filter/category"))]
+    require(launcher_entries == aliases, "只能有唯一的復原 launcher alias")
+    kotlin_root = "android/app/src/main/kotlin/com/martinluk/martin_luk_app/"
+    recovery_source = files[kotlin_root + "LegacyQuoteCacheRecovery.kt"].decode("utf-8")
+    api_source = files["lib/services/market_data_api.dart"].decode("utf-8")
+    require("market-data-yahoo-v1:" in api_source
+            and '"flutter.market-data-yahoo-v1:"' in recovery_source
+            and '"market-data-yahoo-v1:"' in recovery_source
+            and "noBackupFilesDir" in recovery_source,
+            "行情復原命名空間或不可備份標記缺失")
+    require("FlutterHostActivity::class.java" in files[kotlin_root + "CacheRecoveryActivity.kt"].decode("utf-8")
+            and "CacheRecoveryActivity::class.java" in files[kotlin_root + "ScanForegroundService.kt"].decode("utf-8"),
+            "原生入口未先復原，或存在 alias 導航循環")
+    require("junit:junit:4.13.2" in android_app and "net.sf.kxml:kxml2:2.3.0" in android_app,
+            "原生復原 JVM 測試依賴缺失")
+    permissions = {entry.get(ns + "name") for entry in manifest.findall("uses-permission")}
+    require({"android.permission.FOREGROUND_SERVICE",
+             "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+             "android.permission.WAKE_LOCK", "android.permission.POST_NOTIFICATIONS"}
+            <= permissions, "Android 背景輪掃缺少前景服務／通知／喚醒權限")
+    services = [entry for entry in manifest.findall("application/service")
+                if (entry.get(ns + "name") or "").endswith(".ScanForegroundService")]
+    require(len(services) == 1 and services[0].get(ns + "exported") == "false"
+            and services[0].get(ns + "foregroundServiceType") == "dataSync",
+            "Android 必須宣告唯一、非匯出的 dataSync 輪掃服務")
+    channel_name = "martin_luk/background_scan"
+    require(channel_name in files["lib/services/background_scan_service.dart"].decode("utf-8")
+            and channel_name in files[
+                "android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanServiceBridge.kt"
+            ].decode("utf-8"), "Android／Dart 背景服務通道名稱不一致")
 
 
 def make_manifest(files: dict[str, bytes]) -> dict[str, Any]:

@@ -1,3 +1,120 @@
+# 最新覆蓋：1.6.1+14 Android 工具版本對齊
+
+下載 `martin_luk_android_toolchain_fix_updates_20261017.zip`，依 `UPDATE_FILES.txt` 覆蓋至 `fix/refresh-live-gate-20261014`。核心四檔為 `android/settings.gradle`、`android/gradle/wrapper/gradle-wrapper.properties`、`android/app/build.gradle` 與 `.github/workflows/build_apk.yml`，必須一起更新。完整專案為 `martin_luk_android_toolchain_fix_20261017.zip`，兩包均放在指定 `Martin_Luk_App` Google Drive 資料夾。
+
+提交新 commit 後再看 Actions。Flutter 固定 3.47.7，AGP 8.11.1、Kotlin 2.2.20、Wrapper 8.14；minSdk 23（Android 6.0 以上）。APK 及原生測試都要通過版本檢查，不略過任何門禁。詳細原因、實際舊 CI 成功／失敗位置及新配置尚待執行的限制見 [ANDROID_TOOLCHAIN_FIX.md](ANDROID_TOOLCHAIN_FIX.md)。
+
+待原生測試成功並上傳 APK 後，使用相同簽章覆蓋安裝；不要解除安裝或清除資料。
+
+以下為歷史紀錄，以上方包名為準。
+
+---
+
+# 最新覆蓋：1.6.1+14 兩項行情測試修正
+
+下載 `martin_luk_cache_test_fix_updates_20261017.zip`，解壓後依原路徑覆蓋 `test/market_data_api_test.dart`、`test/market_data_cache_bounds_test.dart` 到 `fix/refresh-live-gate-20261014` 分支。其餘指南、逐檔清單與隱藏配置可一起上傳；完整專案為 `martin_luk_cache_test_fix_20261017.zip`。
+
+提交新 commit 後再看 Actions，重跑原失敗 commit 不會載入修正。版本仍為 1.6.1+14；正式行情、快取限制與 Android 啟動復原不變。全部門禁成功後才下載該提交的新 APK，同簽章覆蓋安裝，不清除資料。精確失敗原因與未能本機執行 Flutter 的限制見 [CACHE_TEST_FIX.md](CACHE_TEST_FIX.md)。
+
+以下為歷史紀錄，以上方包名為準。
+
+---
+
+# 最新覆蓋：1.6.1+14 長時間卡死與啟動修正
+
+下載 `martin_luk_long_run_recovery_updates_20261016.zip`，解壓後依 `UPDATE_FILES.txt` 將所有完整檔案覆蓋至 `fix/refresh-live-gate-20261014`。包含 Dart API／輪掃儲存、新 Kotlin 復原入口／Host、MainActivity、Manifest、Gradle、測試及 workflow；不能只貼 Dart。完整專案為 `martin_luk_long_run_recovery_20261016.zip`。
+
+提交新 commit，確認版本 `1.6.1+14`；Actions 需通過固定測試、真實行情與計算、APK 建置及原生保留資料測試後才上傳 `martin-luk-app-release`。若任一步失敗，下載 `martin-luk-live-scan-evidence`，不要略過門禁。
+
+手機先強制停止舊 App，再以同簽章 APK **覆蓋安裝**；不要解除安裝或清除資料。第一次開啟顯示原生行情整理畫面，完成才進 Flutter，持股、本金與保存進度保留。若簽章不同，先保留舊 App。操作及目前未能本機編譯／實機驗證的限制見 [LONG_RUN_RECOVERY.md](LONG_RUN_RECOVERY.md)。
+
+以下為歷史紀錄，以上方版本與包名為準。
+
+---
+
+# 最新覆蓋：1.6.0+13 畫面測試修正
+
+下載 `martin_luk_ui_test_fix_updates_20261016.zip`，解壓後完整覆蓋3個檔案：`test/market_scan_progress_test.dart`、`test/mobile_us_scope_test.dart`、`test/production_ui_test.dart`。分支為`fix/refresh-live-gate-20261014`，需提交新commit觸發Actions。
+
+版本仍為1.6.0+13，美股完整名單輪掃與正式程式不改；本次只修捲動／點擊layout及新暫停狀態斷言。其餘更新清單可一起覆蓋；完整專案為 `martin_luk_ui_test_fix_20261016.zip`。錯誤證據、保留的斷言與未能本機執行Flutter的限制見 [US_UI_TEST_FIX.md](US_UI_TEST_FIX.md)。
+
+---
+
+# 1.6.0+13 美股完整名單手機輪掃
+
+下載 `martin_luk_mobile_us_updates_20261016.zip`，解壓後依`UPDATE_FILES.txt`將完整檔案覆蓋`fix/refresh-live-gate-20261014`分支，再提交新commit。完整專案為`martin_luk_mobile_us_20261016.zip`。
+
+本版修改美股資料層、跨市場檢查點、控制器與進度UI；務必包含三個新增`mobile_us_*_test.dart`、所有更新的既有測試、工作流及`pubspec.yaml`。不能只改畫面上的30或5118。兩市場皆按實際取得的完整名單分批續掃，非一次併發數千檔。
+
+版本應為1.6.0+13。Actions通過固定測試與真實行情門禁後才建置APK；安裝後正式直連切美股下拉，查看30→60→90與剩餘數。背景更新需明確手動啟動Android服務。來源缺漏、API限流及省電限制保留，不能宣稱完整同步行情。
+
+詳細操作、跨日／保存政策與實際驗證狀態見 [MOBILE_US_SCAN.md](MOBILE_US_SCAN.md)。本機沒有Flutter，新增Dart／APK仍待新提交CI。
+
+---
+
+# 前次覆蓋：背景服務生命週期測試修正
+
+版本仍為 **1.5.0+12**。下載 `martin_luk_background_lifecycle_fix_updates_20261016.zip` 解壓後，將 `test/background_scan_app_lifecycle_test.dart` 與 `test/production_lifecycle_test.dart` 完整覆蓋到 `fix/refresh-live-gate-20261014` 分支，再提交新commit觸發Actions。原有全部斷言、正式程式與門禁保留。
+
+更新包另外包含本次指南、狀態與完整性清單；完整專案為 `martin_luk_background_lifecycle_fix_20261016.zip`。這次不需要重複更新原生服務檔。原因、實際CI證據及本機缺SDK的限制見 [BACKGROUND_LIFECYCLE_TEST_FIX.md](BACKGROUND_LIFECYCLE_TEST_FIX.md)。
+
+---
+
+# GitHub 網頁覆蓋：1.5.0+12 Android 背景輪掃
+
+下載 `martin_luk_background_service_updates_20261016.zip`，解壓後依 `UPDATE_FILES.txt` 將完整檔案覆蓋到 `fix/refresh-live-gate-20261014` 分支。需要完整專案時使用 `martin_luk_background_service_20261016.zip`。
+
+這次包含原生 Android 服務，**不能只覆蓋 Dart**。務必上傳兩個新 Kotlin 檔、修改後 MainActivity／Manifest、`ic_stat_scan.xml`、Dart通道／控制器／設定頁、全部新測試與 `.github/workflows/build_apk.yml`。版本為1.5.0+12；先前名單關閉例外修正保留。
+
+提交新commit後等Actions通過所有固定測試與真實行情門禁，再下載 `martin-luk-app-release` 安裝。新功能不會自動啟動；安裝後請到設定手動啟動背景服務並允許通知。詳見 [ANDROID_BACKGROUND_SCAN.md](ANDROID_BACKGROUND_SCAN.md)。
+
+尚無本環境的Flutter／Kotlin／APK成功結果，ZIP或靜態檢查不代表實機已通過。保留舊輪掃進度，不必清除App資料。
+
+---
+
+以下為歷史更新紀錄，以本頁上方版本與包名為準。
+
+# 本次最小覆蓋：名單服務關閉例外
+
+版本仍為 **1.4.4+11**。這次核心只需覆蓋 `lib/services/stock_universe_service.dart` 的完整檔案，讓關閉後的JSON／CSV取消一致回傳StateError。兩個測試、工作流及所有門禁不改動。
+
+下載 `martin_luk_universe_close_fix_updates_20261016.zip` 解壓後依路徑覆蓋，或使用單獨下載的完整Dart檔貼到上述GitHub路徑。分支為 `fix/refresh-live-gate-20261014`。必須提交新commit再看Actions；重跑舊提交不會帶入修正。
+
+本包也包含本次指南及更新狀態／清單，核心修改及驗證限制見 [UNIVERSE_CLOSE_FIX.md](UNIVERSE_CLOSE_FIX.md)。不要刪除失敗測試或改為接受任意例外。下方為前次功能更新說明。
+
+---
+
+# GitHub 網頁覆蓋：1.4.4+11 目標價顯示修正
+
+請使用 `martin_luk_r_targets_updates_20261016.zip`，解壓後依 `UPDATE_FILES.txt` 原路徑覆蓋 `fix/refresh-live-gate-20261014` 分支。此包包含目前 GitHub 基線缺少的上一版官方 CSV 備援，不需另外依序疊加舊更新包。完整專案為 `martin_luk_r_targets_20261016.zip`。
+
+務必一併上傳 `lib/widgets/manual_trade_levels.dart`、兩項新測試檔、更新後推薦測試及 `.github/workflows/build_apk.yml`；版本為 **1.4.4+11**。不要只上傳 ZIP，保留相對路徑與隱藏目錄，不多套一層資料夾。
+
+看最後一次提交的 Actions，真實行情門禁成功後才建置，完成後下載 `martin-luk-app-release` 安裝。有效的舊停損／R價位會標明歷史參考；缺少停損可展開手動試算，輸入不會變成自動買點。詳見 [R_TARGET_DISPLAY_FIX.md](R_TARGET_DISPLAY_FIX.md)。本環境沒有 Flutter，新增測試與APK尚待新提交驗證。
+
+---
+
+以下為歷史版本說明，以本頁上方的版本與更新包為準。
+
+# GitHub 網頁覆蓋：1.4.3+10 官方台股名單備援
+
+本次使用 `martin_luk_tw_official_csv_updates_20261016.zip`，依解壓後 `UPDATE_FILES.txt` 原路徑覆蓋。若不確定舊檔是否完整，改用 `martin_luk_tw_official_csv_20261016.zip` 合併完整專案。
+
+1. 開啟 `foxicall/martin-luk-app`，切換 **fix/refresh-live-gate-20261014**。
+2. **Add file → Upload files**：上傳解壓後檔案與資料夾，放在原有 `pubspec.yaml` 所在根目錄；不是上傳 ZIP，也不是多包一層目錄。
+3. 保留 `.github/` 隱藏目錄。新版工作流、新 parser 與兩個新測試必須一起上傳，版本為 **1.4.3+10**。清單內其他不同步檔案也一併覆蓋。
+4. 最後一次提交會觸發 Actions。必須看新提交結果；重跑舊提交不會使用新原始碼。手動 Run workflow 按鈕需工作流存在於預設分支。
+5. 成功後下載 **martin-luk-app-release**，解壓並安裝 APK；**martin-luk-live-scan-evidence** 保存測試紀錄。
+6. 關閉 Mock、選手機直接連線，開啟前台自動更新。不要清資料或重設輪掃；目前進度保留，下一輪需要載入名單時會使用新增的官方備援。
+
+這張圖已確認下拉會從 30 增到 60 或更多，並非續掃卡住。新增 CSV 備援處理的是 TWSE 官方名單逾時；完整行為、日期政策與驗證限制見 [TW_OFFICIAL_CSV_FALLBACK.md](TW_OFFICIAL_CSV_FALLBACK.md)。
+
+基線 1.4.2+9 已在 GitHub run `38852597488` 通過測試、真實行情門禁與 APK 建置；新增 1.4.3+10 仍須由本次新提交驗證，本機沒有 Flutter SDK。沒有代為 Push、部署 API 或跳過門禁。
+
+---
+
+以下為先前交付的歷史說明；以本頁上方版本與更新包為準。
+
 # GitHub 網頁完整覆蓋：1.4.0+7 手機台股輪掃
 
 若 Actions 顯示 `recommendation_trade_levels_test.dart: Does not exist`，使用 **`martin_luk_restore_recommendation_files_20261016.zip`** 一次補齊；此包依 GitHub 實際缺漏比對，包含測試與不同步的計算機／預覽更新。步驟見 [RESTORE_RECOMMENDATION_FILES.md](RESTORE_RECOMMENDATION_FILES.md)。版本仍為 1.4.2+9。

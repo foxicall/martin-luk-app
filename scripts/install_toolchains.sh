@@ -41,7 +41,7 @@ Path(sys.argv[2]).write_text(release["sha256"])
 PY
   curl --fail --location --retry 3 \
     --output "$toolchain_dir/downloads/flutter_linux_3.29.3-stable.tar.xz" \
-    https://storage.googleapis.com/flutter_infra_release/flutter/3.29.3/flutter_linux_3.29.3-stable.tar.xz
+    https://storage.googleapis.com/flutter_infra_release/flutter/stable/linux/flutter_linux_3.29.3-stable.tar.xz
   python3 - "$toolchain_dir/downloads/flutter_linux_3.29.3-stable.tar.xz" \
     "$toolchain_dir/downloads/flutter.sha256" <<'PY'
 import hashlib

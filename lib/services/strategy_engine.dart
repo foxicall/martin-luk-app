@@ -1,3 +1,4 @@
+import '../models/hybrid_protocol.dart';
 import '../models/stock_candidate.dart';
 
 /// The risk budget describes loss at the stop, before fees and gap/slippage.
@@ -13,6 +14,8 @@ class PositionPlan {
     required this.capPercent,
     required Map<int, double> targets,
     required this.trimShares,
+    required this.breakEvenTrigger,
+    required this.riskFraction,
   }) : targets = Map<int, double>.unmodifiable(targets);
 
   final int shares;
@@ -25,6 +28,28 @@ class PositionPlan {
   final double capPercent;
   final Map<int, double> targets;
   final int trimShares;
+  final double breakEvenTrigger, riskFraction;
+  int get remainingShares => shares - 2 * trimShares;
+
+  double targetPrice(int r) {
+    final value = targets[r];
+    if (value == null) throw ArgumentError('僅支援 3R、5R、10R 目標價。');
+    return value;
+  }
+}
+
+class TradeLevels {
+  TradeLevels._({
+    required this.riskPerShare,
+    required this.stopPercent,
+    required this.breakEvenTrigger,
+    required Map<int, double> targets,
+  }) : targets = Map<int, double>.unmodifiable(targets);
+
+  final double riskPerShare;
+  final double stopPercent;
+  final double breakEvenTrigger;
+  final Map<int, double> targets;
 
   double targetPrice(int r) {
     final value = targets[r];
@@ -36,26 +61,97 @@ class PositionPlan {
 /// Shared, deterministic long-only sizing for offline data and API results.
 ///
 /// Decimal inputs use exact rational arithmetic until display conversion. This
-/// avoids an extra share at a risk/cap boundary. An observed day-low stop may
-/// be up to 5%; only an alternate minute-bar stop must be 1.5%–3%.
+/// avoids an extra share at risk, cash and exposure boundaries. Pattern-specific
+/// stop validation occurs before sizing; prices are never synthesized.
 class StrategyEngine {
+  /// Price-only observation; never proves Hybrid entry eligibility.
+  static TradeLevels calculateTradeLevels(StockCandidate candidate) {
+    if (!candidate.hasValidPriceStop) {
+      throw ArgumentError('突破與實際停損尚未確認，不能建立觀察價位。');
+    }
+    return calculateHypotheticalLevels(entryPrice: candidate.entryPrice,
+        stopPrice: candidate.stopPrice!);
+  }
+
+  static TradeLevels calculateHypotheticalLevels({
+    required double entryPrice,
+    required double stopPrice,
+  }) {
+    if (!entryPrice.isFinite || entryPrice <= 0 || !stopPrice.isFinite ||
+        stopPrice <= 0 || stopPrice >= entryPrice) {
+      throw ArgumentError('假設停損須為有限正數，且低於假設買價。');
+    }
+    final entry = _Rational.fromDouble(entryPrice);
+    final stop = _Rational.fromDouble(stopPrice);
+    final difference = entry - stop;
+    final fraction = difference / entry;
+    return TradeLevels._(
+      riskPerShare: difference.toDouble(),
+      stopPercent: (fraction * _Rational.integer(100)).toDouble(),
+      breakEvenTrigger: (entry + difference * _Rational.parse('1.5')).toDouble(),
+      targets: {
+        for (final r in [3, 5, 10])
+          r: (entry + difference * _Rational.integer(r)).toDouble(),
+      },
+    );
+  }
+
+
   static PositionPlan calculate(
     StockCandidate candidate,
     double equity, {
     int lotSize = 1,
+    RiskMode riskMode = RiskMode.normal,
+    double? availableCash,
+    double feeBudget = 0,
   }) {
-    if (!equity.isFinite || equity <= 0) {
-      throw ArgumentError.value(equity, 'equity', '帳戶淨值必須為有限正數。');
+    if (!candidate.hasValidStopRange) {
+      throw ArgumentError('Hybrid 市場、結構、訂單流或實際停損尚未驗證；僅供觀察。');
     }
-    if (lotSize <= 0) {
-      throw ArgumentError.value(lotSize, 'lotSize', '交易單位必須為正整數。');
-    }
-    if (!candidate.isConfirmed || candidate.stopPrice == null) {
-      throw ArgumentError('觀察名單尚未確認突破與停損，不能計算建議買進股數。');
-    }
+    return calculatePrices(
+      entryPrice: candidate.entryPrice,
+      stopPrice: candidate.stopPrice!,
+      equity: equity,
+      isLargeLiquid: candidate.isLargeLiquid,
+      lotSize: lotSize,
+      riskMode: riskMode,
+      availableCash: availableCash,
+      feeBudget: feeBudget,
+    );
+  }
 
-    final entry = _Rational.fromDouble(candidate.entryPrice);
-    final stop = _Rational.fromDouble(candidate.stopPrice!);
+  /// Explicit price scenario; this arithmetic is not evidence of an entry.
+  static PositionPlan calculatePrices({
+    required double entryPrice,
+    required double stopPrice,
+    required double equity,
+    required bool isLargeLiquid,
+    int lotSize = 1,
+    RiskMode riskMode = RiskMode.normal,
+    double? availableCash,
+    double feeBudget = 0,
+  }) {
+    if (!equity.isFinite ||
+        equity <= 0 ||
+        lotSize <= 0 ||
+        !entryPrice.isFinite ||
+        !stopPrice.isFinite ||
+        entryPrice <= 0 ||
+        stopPrice <= 0 ||
+        stopPrice >= entryPrice ||
+        !feeBudget.isFinite ||
+        feeBudget < 0 ||
+        (availableCash != null &&
+            (!availableCash.isFinite || availableCash < 0))) {
+      throw ArgumentError('帳戶淨值、現金、交易單位、費用或實際價格無效。');
+    }
+    if (riskMode.fraction == null) {
+      throw ArgumentError(
+        riskMode == RiskMode.paused ? '暫停新倉。' : '請先確認帳戶正常／回撤狀態。',
+      );
+    }
+    final entry = _Rational.fromDouble(entryPrice);
+    final stop = _Rational.fromDouble(stopPrice);
     final balance = _Rational.fromDouble(equity);
     final one = _Rational.integer(1);
     final difference = entry - stop;
@@ -64,28 +160,21 @@ class StrategyEngine {
       throw ArgumentError('停損必須大於 0 且低於進場價。');
     }
     final fraction = difference / entry;
-    if (candidate.stopSource == 'entry_bar_low') {
-      if (fraction.compareTo(_Rational.parse('0.015')) < 0 ||
-          fraction.compareTo(_Rational.parse('0.03')) > 0 ||
-          candidate.entryBarLow != candidate.stopPrice || candidate.dayLow == null) {
-        throw ArgumentError('替代停損須為實際分鐘 K 低點，且距離在 1.5%–3%。');
-      }
-      final dayLow = _Rational.fromDouble(candidate.dayLow!);
-      if ((entry - dayLow).compareTo(entry * _Rational.parse('0.05')) <= 0 ||
-          dayLow.compareTo(stop) > 0) {
-        throw ArgumentError('僅當當日低點風險超過 5% 時採用分鐘 K 低點。');
-      }
-    } else if (candidate.stopSource != 'day_low' ||
-        fraction.compareTo(_Rational.parse('0.05')) > 0 ||
-        (candidate.dayLow != null && candidate.dayLow != candidate.stopPrice)) {
-      throw ArgumentError('初始停損須為當日實際低點，距離不得超過 5%。');
+    if (fraction.compareTo(_Rational.parse('0.05')) > 0) {
+      throw ArgumentError('初始停損超過5%；請取得有效較近結構，不合成停損。');
     }
-
-    final cap = _Rational.parse(candidate.isLargeLiquid ? '0.35' : '0.25');
-    final budget = balance * _Rational.parse('0.005');
-    final riskShares = (budget / difference).floor();
+    final cap = _Rational.parse(isLargeLiquid ? '0.35' : '0.25');
+    final budget = balance * _Rational.fromDouble(riskMode.fraction!);
+    final costs = _Rational.fromDouble(feeBudget);
+    final cash = _Rational.fromDouble(availableCash ?? equity);
+    if (budget.compareTo(costs) <= 0 || cash.compareTo(costs) <= 0) {
+      throw ArgumentError('費用預留後無可用風險或現金。');
+    }
+    final riskShares = ((budget - costs) / difference).floor();
     final capShares = (balance * cap / entry).floor();
-    final possible = riskShares < capShares ? riskShares : capShares;
+    final cashShares = ((cash - costs) / entry).floor();
+    final capped = riskShares < capShares ? riskShares : capShares;
+    final possible = capped < cashShares ? capped : cashShares;
     final lot = BigInt.from(lotSize);
     final rounded = (possible ~/ lot) * lot;
     // All results must fit a Dart VM/web integer exactly before conversion.
@@ -100,16 +189,13 @@ class StrategyEngine {
     final amount = quantity * entry;
     final risk = quantity * difference;
     final desiredTrim =
-        ((quantity * _Rational.parse('0.12')).floor() ~/ lot) * lot;
-    final trimRatio = desiredTrim == BigInt.zero
-        ? _Rational.integer(0)
-        : _Rational(desiredTrim, BigInt.one) / quantity;
-    final trimShares = trimRatio.compareTo(_Rational.parse('0.10')) >= 0 &&
-            trimRatio.compareTo(_Rational.parse('0.15')) <= 0
-        ? desiredTrim.toInt()
-        : 0;
+        ((quantity * _Rational.parse('0.15') + _Rational.parse('0.5'))
+                .floor() ~/
+            lot) *
+        lot;
+    final trimShares = desiredTrim.toInt().clamp(0, shares ~/ 2);
 
-    if (risk.compareTo(budget) > 0 ||
+    if ((risk + costs).compareTo(budget) > 0 ||
         amount.compareTo(balance * cap) > 0 ||
         fraction.compareTo(one) >= 0) {
       throw StateError('倉位計算未通過風險上限檢查。');
@@ -119,7 +205,7 @@ class StrategyEngine {
       amount: amount.toDouble(),
       positionPercent: (amount / balance * _Rational.integer(100)).toDouble(),
       riskBudget: budget.toDouble(),
-      riskAmount: risk.toDouble(),
+      riskAmount: (risk + costs).toDouble(),
       riskPerShare: difference.toDouble(),
       stopPercent: (fraction * _Rational.integer(100)).toDouble(),
       capPercent: (cap * _Rational.integer(100)).toDouble(),
@@ -128,6 +214,9 @@ class StrategyEngine {
           r: (entry + difference * _Rational.integer(r)).toDouble(),
       },
       trimShares: trimShares,
+      breakEvenTrigger:
+          (entry + difference * _Rational.parse('1.5')).toDouble(),
+      riskFraction: riskMode.fraction!,
     );
   }
 }
@@ -148,7 +237,8 @@ class _Rational {
   final BigInt numerator;
   final BigInt denominator;
 
-  factory _Rational.integer(int value) => _Rational(BigInt.from(value), BigInt.one);
+  factory _Rational.integer(int value) =>
+      _Rational(BigInt.from(value), BigInt.one);
   factory _Rational.fromDouble(double value) {
     if (!value.isFinite) throw ArgumentError('數值必須為有限數字。');
     return _Rational.parse(value.toString());
@@ -167,11 +257,13 @@ class _Rational {
   }
 
   _Rational operator +(_Rational other) => _Rational(
-      numerator * other.denominator + other.numerator * denominator,
-      denominator * other.denominator);
+    numerator * other.denominator + other.numerator * denominator,
+    denominator * other.denominator,
+  );
   _Rational operator -(_Rational other) => _Rational(
-      numerator * other.denominator - other.numerator * denominator,
-      denominator * other.denominator);
+    numerator * other.denominator - other.numerator * denominator,
+    denominator * other.denominator,
+  );
   _Rational operator *(_Rational other) =>
       _Rational(numerator * other.numerator, denominator * other.denominator);
   _Rational operator /(_Rational other) =>
@@ -180,7 +272,8 @@ class _Rational {
       (numerator * other.denominator).compareTo(other.numerator * denominator);
   BigInt floor() {
     final quotient = numerator ~/ denominator;
-    return numerator.isNegative && numerator.remainder(denominator) != BigInt.zero
+    return numerator.isNegative &&
+            numerator.remainder(denominator) != BigInt.zero
         ? quotient - BigInt.one
         : quotient;
   }
@@ -188,11 +281,13 @@ class _Rational {
   double toDouble() {
     if (numerator == BigInt.zero) return 0;
     // Scientific notation retains small values without infinity / infinity.
-    final exponent = numerator.abs().toString().length - denominator.toString().length;
+    final exponent =
+        numerator.abs().toString().length - denominator.toString().length;
     final scale = 18 - exponent;
-    final scaled = scale >= 0
-        ? (numerator * BigInt.from(10).pow(scale)) ~/ denominator
-        : numerator ~/ (denominator * BigInt.from(10).pow(-scale));
+    final scaled =
+        scale >= 0
+            ? (numerator * BigInt.from(10).pow(scale)) ~/ denominator
+            : numerator ~/ (denominator * BigInt.from(10).pow(-scale));
     final result = double.parse('${scaled}e${-scale}');
     if (!result.isFinite || result == 0) {
       throw ArgumentError('計算結果超出可顯示範圍。');

@@ -1,3 +1,4 @@
+import 'hybrid_protocol.dart';
 import 'stock_candidate.dart';
 
 /// Long-only holding. Initial risk remains fixed even after a stop is raised.
@@ -14,14 +15,33 @@ class PortfolioPosition {
     double? trailingStop,
     this.trailingEma = 9,
     this.mainUptrend = false,
-  }) : trailingStop = trailingStop ?? initialStop {
-    if (id.trim().isEmpty || symbol.trim().isEmpty ||
-        !(market == StockMarket.tw ? RegExp(r'^\d{4}\.(?:TW|TWO)$') :
-            RegExp(r'^[A-Z][A-Z0-9-]{0,14}$')).hasMatch(symbol) ||
-        !entryPrice.isFinite || entryPrice <= 0 || shares <= 0 || shares > 9007199254740991 ||
-        !initialStop.isFinite || initialStop <= 0 || initialStop >= entryPrice ||
-        !peakR.isFinite || peakR < 0 || !this.trailingStop.isFinite ||
-        this.trailingStop < initialStop || ![9, 21, 50].contains(trailingEma)) {
+    this.strategyVersion = 'legacy',
+    int? originalShares,
+    this.sold3R = false,
+    this.sold5R = false,
+  }) : trailingStop = trailingStop ?? initialStop,
+       originalShares = originalShares ?? shares {
+    if (id.trim().isEmpty ||
+        symbol.trim().isEmpty ||
+        !(market == StockMarket.tw
+                ? RegExp(r'^\d{4}\.(?:TW|TWO)$')
+                : RegExp(r'^[A-Z][A-Z0-9-]{0,14}$'))
+            .hasMatch(symbol) ||
+        !entryPrice.isFinite ||
+        entryPrice <= 0 ||
+        shares <= 0 ||
+        shares > 9007199254740991 ||
+        !initialStop.isFinite ||
+        initialStop <= 0 ||
+        initialStop >= entryPrice ||
+        !peakR.isFinite ||
+        peakR < 0 ||
+        !this.trailingStop.isFinite ||
+        this.trailingStop < initialStop ||
+        this.originalShares < shares ||
+        this.originalShares > 9007199254740991 ||
+        !(strategyVersion == HybridProtocol.version ? [9, 21] : [9, 21, 50])
+            .contains(trailingEma)) {
       throw const FormatException('持股價格、股數、初始停損或代碼格式無效。');
     }
   }
@@ -37,21 +57,49 @@ class PortfolioPosition {
   final double trailingStop;
   final int trailingEma;
   final bool mainUptrend;
+  final String strategyVersion;
+  final int originalShares;
+  final bool sold3R, sold5R;
+  bool get usesHybrid => strategyVersion == HybridProtocol.version;
 
   String get key => '${market.name}:$symbol';
   double get riskPerShare => entryPrice - initialStop;
 
   PortfolioPosition withObservation(double peak, double stop) =>
-      PortfolioPosition(id: id, symbol: symbol, market: market, name: name,
-        entryPrice: entryPrice, shares: shares, initialStop: initialStop,
-        peakR: peak, trailingStop: stop, trailingEma: trailingEma,
-        mainUptrend: mainUptrend);
+      PortfolioPosition(
+        id: id,
+        symbol: symbol,
+        market: market,
+        name: name,
+        entryPrice: entryPrice,
+        shares: shares,
+        initialStop: initialStop,
+        peakR: peak,
+        trailingStop: stop,
+        trailingEma: trailingEma,
+        mainUptrend: mainUptrend,
+        strategyVersion: strategyVersion,
+        originalShares: originalShares,
+        sold3R: sold3R,
+        sold5R: sold5R,
+      );
 
   Map<String, dynamic> toJson() => {
-    'id': id, 'symbol': symbol, 'name': name, 'market': market.name,
-    'entry_price': entryPrice, 'shares': shares, 'initial_stop': initialStop,
-    'peak_r': peakR, 'trailing_stop': trailingStop,
-    'trailing_ema': trailingEma, 'main_uptrend': mainUptrend,
+    'id': id,
+    'symbol': symbol,
+    'name': name,
+    'market': market.name,
+    'entry_price': entryPrice,
+    'shares': shares,
+    'initial_stop': initialStop,
+    'peak_r': peakR,
+    'trailing_stop': trailingStop,
+    'trailing_ema': trailingEma,
+    'main_uptrend': mainUptrend,
+    'strategy_version': strategyVersion,
+    'original_shares': originalShares,
+    'sold_3r': sold3R,
+    'sold_5r': sold5R,
   };
 
   factory PortfolioPosition.fromJson(Map<String, dynamic> json) {
@@ -62,13 +110,28 @@ class PortfolioPosition {
       throw const FormatException('股數、EMA 或主升段設定格式無效。');
     }
     return PortfolioPosition(
-      id: _text(json, 'id'), symbol: _text(json, 'symbol'),
+      id: _text(json, 'id'),
+      symbol: _text(json, 'symbol'),
       name: json['name'] is String ? json['name'] as String : '',
-      market: _market(json), entryPrice: _number(json, 'entry_price'),
-      shares: shares, initialStop: _number(json, 'initial_stop'),
+      market: _market(json),
+      entryPrice: _number(json, 'entry_price'),
+      shares: shares,
+      initialStop: _number(json, 'initial_stop'),
       peakR: json['peak_r'] == null ? 0 : _number(json, 'peak_r'),
-      trailingStop: json['trailing_stop'] == null ? null : _number(json, 'trailing_stop'),
-      trailingEma: ema, mainUptrend: uptrend,
+      trailingStop:
+          json['trailing_stop'] == null ? null : _number(json, 'trailing_stop'),
+      trailingEma: ema,
+      mainUptrend: uptrend,
+      strategyVersion:
+          json['strategy_version'] is String
+              ? json['strategy_version'] as String
+              : 'legacy',
+      originalShares:
+          json['original_shares'] is int
+              ? json['original_shares'] as int
+              : shares,
+      sold3R: json['sold_3r'] == true,
+      sold5R: json['sold_5r'] == true,
     );
   }
 }
@@ -76,16 +139,30 @@ class PortfolioPosition {
 /// Daily EMA and finalized close are kept distinct from the intraday quote.
 class PortfolioQuote {
   PortfolioQuote({
-    required this.symbol, required this.name, required this.market,
-    required this.currentPrice, required this.ema9, required this.ema21,
-    required this.ema50, required this.lastClose, required this.closeConfirmed,
-    required this.quoteTimestamp, required this.closeTimestamp,
-    required this.source, required this.isLargeLiquid,
-    this.isCached = false, this.isStale = false, this.cacheWarning, this.fetchedAt,
+    required this.symbol,
+    required this.name,
+    required this.market,
+    required this.currentPrice,
+    required this.ema9,
+    required this.ema21,
+    required this.ema50,
+    required this.lastClose,
+    required this.closeConfirmed,
+    required this.quoteTimestamp,
+    required this.closeTimestamp,
+    required this.source,
+    required this.isLargeLiquid,
+    this.isCached = false,
+    this.isStale = false,
+    this.cacheWarning,
+    this.fetchedAt,
   }) {
-    if (!(market == StockMarket.tw ? RegExp(r'^\d{4}\.(?:TW|TWO)$') :
-            RegExp(r'^[A-Z][A-Z0-9-]{0,14}$')).hasMatch(symbol) ||
-        name.trim().isEmpty || source.trim().isEmpty ||
+    if (!(market == StockMarket.tw
+                ? RegExp(r'^\d{4}\.(?:TW|TWO)$')
+                : RegExp(r'^[A-Z][A-Z0-9-]{0,14}$'))
+            .hasMatch(symbol) ||
+        name.trim().isEmpty ||
+        source.trim().isEmpty ||
         [currentPrice, ema9, ema21, ema50].any((n) => !n.isFinite || n <= 0) ||
         (lastClose != null && (!lastClose!.isFinite || lastClose! <= 0)) ||
         (closeConfirmed && (lastClose == null || closeTimestamp == null)) ||
@@ -114,13 +191,22 @@ class PortfolioQuote {
   String get key => '${market.name}:$symbol';
 
   Map<String, dynamic> toJson() => {
-    'symbol': symbol, 'name': name, 'market': market.name,
-    'current_price': currentPrice, 'ema9': ema9, 'ema21': ema21, 'ema50': ema50,
-    'last_close': lastClose, 'close_confirmed': closeConfirmed,
+    'symbol': symbol,
+    'name': name,
+    'market': market.name,
+    'current_price': currentPrice,
+    'ema9': ema9,
+    'ema21': ema21,
+    'ema50': ema50,
+    'last_close': lastClose,
+    'close_confirmed': closeConfirmed,
     'quote_timestamp': quoteTimestamp.toUtc().toIso8601String(),
     'close_timestamp': closeTimestamp?.toUtc().toIso8601String(),
-    'source': source, 'is_large_liquid': isLargeLiquid,
-    'is_cached': isCached, 'is_stale': isStale, 'cache_warning': cacheWarning,
+    'source': source,
+    'is_large_liquid': isLargeLiquid,
+    'is_cached': isCached,
+    'is_stale': isStale,
+    'cache_warning': cacheWarning,
     'fetched_at': fetchedAt?.toUtc().toIso8601String(),
   };
 
@@ -131,35 +217,56 @@ class PortfolioQuote {
       throw const FormatException('行情旗標必须為布林值。');
     }
     return PortfolioQuote(
-      symbol: _text(json, 'symbol'), name: _text(json, 'name'), market: _market(json),
-      currentPrice: _number(json, 'current_price'), ema9: _number(json, 'ema9'),
-      ema21: _number(json, 'ema21'), ema50: _number(json, 'ema50'),
-      lastClose: json['last_close'] == null ? null : _number(json, 'last_close'),
+      symbol: _text(json, 'symbol'),
+      name: _text(json, 'name'),
+      market: _market(json),
+      currentPrice: _number(json, 'current_price'),
+      ema9: _number(json, 'ema9'),
+      ema21: _number(json, 'ema21'),
+      ema50: _number(json, 'ema50'),
+      lastClose:
+          json['last_close'] == null ? null : _number(json, 'last_close'),
       closeConfirmed: confirmed,
-      quoteTimestamp: parseApiTimestamp(json['quote_timestamp'], 'quote_timestamp'),
-      closeTimestamp: json['close_timestamp'] == null ? null :
-          parseApiTimestamp(json['close_timestamp'], 'close_timestamp'),
-      source: _text(json, 'source'), isLargeLiquid: large,
-      isCached: json['is_cached'] == true, isStale: json['is_stale'] == true,
-      cacheWarning: json['cache_warning'] is String ? json['cache_warning'] as String : null,
-      fetchedAt: json['fetched_at'] == null ? null : parseApiTimestamp(json['fetched_at'], 'fetched_at'),
+      quoteTimestamp: parseApiTimestamp(
+        json['quote_timestamp'],
+        'quote_timestamp',
+      ),
+      closeTimestamp:
+          json['close_timestamp'] == null
+              ? null
+              : parseApiTimestamp(json['close_timestamp'], 'close_timestamp'),
+      source: _text(json, 'source'),
+      isLargeLiquid: large,
+      isCached: json['is_cached'] == true,
+      isStale: json['is_stale'] == true,
+      cacheWarning:
+          json['cache_warning'] is String
+              ? json['cache_warning'] as String
+              : null,
+      fetchedAt:
+          json['fetched_at'] == null
+              ? null
+              : parseApiTimestamp(json['fetched_at'], 'fetched_at'),
     );
   }
 }
 
 StockMarket _market(Map<String, dynamic> json) => switch (json['market']) {
-  'tw' => StockMarket.tw, 'us' => StockMarket.us,
+  'tw' => StockMarket.tw,
+  'us' => StockMarket.us,
   _ => throw const FormatException('市場必須為 tw 或 us。'),
 };
 
 String _text(Map<String, dynamic> json, String key) {
   final value = json[key];
-  if (value is! String || value.trim().isEmpty) throw FormatException('$key 必須為字串。');
+  if (value is! String || value.trim().isEmpty)
+    throw FormatException('$key 必須為字串。');
   return value.trim();
 }
 
 double _number(Map<String, dynamic> json, String key) {
   final value = json[key];
-  if (value is! num || !value.toDouble().isFinite) throw FormatException('$key 必須為有限數字。');
+  if (value is! num || !value.toDouble().isFinite)
+    throw FormatException('$key 必須為有限數字。');
   return value.toDouble();
 }

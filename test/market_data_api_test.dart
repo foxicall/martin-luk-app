@@ -535,21 +535,30 @@ void main() {
   });
 
   test('Benchmarks and class-share IDs are normalized for Yahoo', () async {
-    final paths = <String>[];
+    final requestedSymbols = <String>[];
     final api = MarketDataApi(now: () => now, client: MockClient((request) async {
-      paths.add(request.url.path);
-      final tw = request.url.path.endsWith('^TWII');
+      // Uri.path may contain %5E for '^'. pathSegments decodes the ticker,
+      // so transport escaping cannot select the wrong market fixture.
+      final symbol = request.url.pathSegments.last;
+      requestedSymbols.add(symbol);
+      final tw = symbol == '^TWII';
       final data = _document(tw ? StockMarket.tw : StockMarket.us);
-      _meta(data)['symbol'] = tw ? '^TWII' : '^GSPC';
+      _meta(data)['symbol'] = symbol;
       return http.Response(jsonEncode(data), 200);
     }));
-    await api.fetchBenchmark(StockMarket.tw);
-    await api.fetchBenchmark(StockMarket.us);
-    expect(paths, contains('/v8/finance/chart/^TWII'));
-    expect(paths, contains('/v8/finance/chart/^GSPC'));
+    addTearDown(api.close);
+    final taiwan = await api.fetchBenchmark(StockMarket.tw);
+    final usa = await api.fetchBenchmark(StockMarket.us);
+    final classShare = await api.fetchDaily('brk.b', StockMarket.us);
+    expect(requestedSymbols, ['^TWII', '^GSPC', 'BRK-B']);
+    expect(taiwan.symbol, '^TWII');
+    expect(taiwan.currency, 'TWD');
+    expect(usa.symbol, '^GSPC');
+    expect(usa.currency, 'USD');
+    expect(classShare.symbol, 'BRK-B');
+    expect(classShare.currency, 'USD');
     expect(canonicalSymbol('brk.b', StockMarket.us), 'BRK-B');
     expect(() => canonicalSymbol('2330.TW', StockMarket.us), throwsFormatException);
-    api.close();
   });
 
   test('Regular-session filter excludes premarket from opening-range candles', () async {

@@ -3,6 +3,7 @@ name: Build Android APK with Verification Gate
 'on':
   push:
     branches: [main, master, fix/refresh-live-gate-20261014]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -58,6 +59,17 @@ jobs:
           required = {
               'pubspec.yaml', 'lib/main.dart', 'lib/app_controller.dart',
               'lib/screens/dashboard_screen.dart', 'lib/screens/calculator_screen.dart',
+              'lib/services/background_scan_service.dart',
+              'android/app/src/main/AndroidManifest.xml',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/MainActivity.kt',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanServiceBridge.kt',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/ScanForegroundService.kt',
+              'android/app/src/main/res/drawable/ic_stat_scan.xml',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/MartinLukApplication.kt',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/CacheRecoveryActivity.kt',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/FlutterHostActivity.kt',
+              'android/app/src/main/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheRecovery.kt',
+              'android/app/src/test/kotlin/com/martinluk/martin_luk_app/LegacyQuoteCacheXmlTest.kt',
           }
           required.update(re.findall(r'\btest/[A-Za-z0-9_/-]+\.dart\b', workflow))
           missing = sorted(path for path in required
@@ -79,9 +91,10 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.7'
           cache: true
 
-      - name: 升級 Gradle Wrapper 至 8.14
+      - name: 確認 Gradle Wrapper 為 8.14
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
         shell: bash
         run: |
@@ -92,11 +105,8 @@ jobs:
             exit 1
           fi
           if ! grep -Eq '^distributionUrl=.*gradle-8\.14-(all|bin)\.zip$' "$WRAPPER_FILE"; then
-            if grep -Eq '^distributionSha256Sum=' "$WRAPPER_FILE"; then
-              echo '::error::Wrapper 有 SHA256 校驗值，升級 Gradle 時須一併更新對應校驗值。'
-              exit 1
-            fi
-            sed -i -E 's#(gradle-)[0-9.]+-(all|bin)\.zip#\18.14-\2.zip#' "$WRAPPER_FILE"
+            echo '::error::請將 gradle-wrapper.properties 一併更新為 Gradle 8.14；CI 不會改寫原始碼。'
+            exit 1
           fi
           grep -E '^distributionUrl=.*gradle-8\.14-(all|bin)\.zip$' "$WRAPPER_FILE" | tee -a test_logs/verification.log
 
@@ -129,15 +139,38 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v 2>&1 | tee -a test_logs/verification.log
-          flutter test test/rs_alignment_test.dart test/live_strategy_engine_test.dart test/live_risk_helpers_test.dart test/recommendation_trade_levels_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+          flutter analyze --no-fatal-infos 2>&1 | tee -a test_logs/verification.log
+          flutter test test/hybrid_protocol_test.dart test/strategy_engine_test.dart test/exit_advisory_engine_test.dart test/capital_market_test.dart test/portfolio_controller_test.dart test/production_controller_test.dart --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+          flutter test test/rs_alignment_test.dart test/live_strategy_engine_test.dart test/live_risk_helpers_test.dart test/strategy_engine_test.dart test/trade_levels_test.dart test/manual_trade_levels_test.dart test/recommendation_trade_levels_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
           flutter test test/us_stock_directory_test.dart test/us_universe_fallback_test.dart test/network_request_test.dart test/expanded_symbol_test.dart test/rolling_scan_snapshot_test.dart test/stock_universe_service_test.dart test/backend_snapshot_repository_test.dart test/backend_scan_controller_test.dart test/candidate_repository_test.dart test/backend_transport_timeout_test.dart test/backend_connection_service_test.dart test/backend_setup_settings_test.dart test/dashboard_scope_test.dart test/mobile_tw_rolling_repository_test.dart test/mobile_tw_polling_test.dart test/core_market_pool_test.dart test/live_repositories_test.dart --dart-define=USE_MOCK_DATA=false --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
-      - name: 驗證台股名單穩定及跨重啟續掃
+      - name: 驗證台股官方備援、名單穩定及跨重啟續掃
         working-directory: ${{ steps.locate-project.outputs.project_dir }}
         shell: bash
         run: |
           set -euo pipefail
-          flutter test test/tw_universe_stability_test.dart test/tw_universe_resume_integration_test.dart --dart-define=USE_MOCK_DATA=false --timeout=60s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+          flutter test test/tw_issuer_csv_test.dart test/tw_official_fallback_test.dart test/tw_universe_stability_test.dart test/tw_universe_resume_integration_test.dart --dart-define=USE_MOCK_DATA=false --timeout=60s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+
+      - name: 驗證 Android 背景服務與前台生命週期
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter test test/background_scan_uninitialized_test.dart test/background_scan_service_test.dart test/background_scan_controller_test.dart test/background_scan_settings_test.dart test/background_scan_app_lifecycle_test.dart test/production_lifecycle_test.dart test/portfolio_controller_test.dart --dart-define=USE_MOCK_DATA=false --timeout=90s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+
+      - name: 驗證美股完整名單分批輪掃、跨重啟與畫面進度
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter test test/mobile_us_rolling_repository_test.dart test/mobile_us_polling_test.dart test/mobile_us_scope_test.dart test/market_scan_progress_test.dart test/production_ui_test.dart --dart-define=USE_MOCK_DATA=false --timeout=90s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
+
+      - name: 驗證長時間行情快取上限與輪掃存檔負荷
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter test test/market_data_cache_bounds_test.dart test/mobile_scan_storage_budget_test.dart test/market_data_api_test.dart test/market_transport_regression_test.dart test/refresh_recovery_test.dart --dart-define=USE_MOCK_DATA=false --timeout=90s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
       - name: 執行真實行情與指標門禁測試（允許零推薦）
         id: run-gate-test
@@ -155,6 +188,21 @@ jobs:
           python3 scripts/validate_live_scan_evidence.py build/live-scan-evidence.json 2>&1 | tee -a test_logs/verification.log
           flutter test test/us_universe_http_smoke_test.dart --dart-define=RUN_LIVE_UNIVERSE_TEST=true --dart-define=USE_MOCK_DATA=false --timeout=30s --reporter=expanded 2>&1 | tee -a test_logs/verification.log
 
+      - name: 編譯正式版 Release APK
+        if: ${{ success() && steps.run-gate-test.outcome == 'success' }}
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        run: flutter build apk --release --dart-define=USE_MOCK_DATA=false
+
+      - name: 驗證原生啟動復原保留帳戶與持股
+        id: native-recovery-test
+        if: ${{ success() && steps.run-gate-test.outcome == 'success' }}
+        working-directory: ${{ steps.locate-project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd android
+          bash ./gradlew :app:testReleaseUnitTest --no-daemon --console=plain 2>&1 | tee -a ../test_logs/verification.log
+
       - name: 保存實測紀錄
         if: always()
         uses: actions/upload-artifact@v4
@@ -164,12 +212,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: 編譯正式版 Release APK
-        if: ${{ success() && steps.run-gate-test.outcome == 'success' }}
-        working-directory: ${{ steps.locate-project.outputs.project_dir }}
-        run: flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
-
       - name: 上傳 APK 成品
+        if: ${{ success() && steps.native-recovery-test.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: martin-luk-app-release

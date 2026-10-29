@@ -1,6 +1,6 @@
 # Android 建置與簽署
 
-推薦固定 Flutter 3.29.3 / Dart 3.7，避免工具版本漂移。此 App 使用 AGP 8.9.1、Gradle 8.11.1、Kotlin 2.0.21、Java 17、compileSdk 36、Build Tools 36.0.0、**targetSdk 34**、**minSdk 21**，Core Library Desugaring 2.1.4。`shared_preferences_android` 要求編譯 SDK 36；這項變更不會提高手機最低支援版本。AGP 8.9.1 是 [Android API 36 的最低支援版本](https://developer.android.com/build#api-level-support)，其 [Gradle 版本要求為 8.11.1、JDK 為 17](https://developer.android.com/build/releases/past-releases/agp-8-9-0-release-notes#compatibility)。
+固定 Flutter **3.47.7（stable）**，與 CI 相同。使用 AGP **8.11.1**、Gradle **8.14**、Kotlin **2.2.20**、Java **17**、compileSdk **36**、Build Tools **36.0.0**、targetSdk **34**、minSdk **23（Android 6.0）**，Core Library Desugaring 2.1.4。Wrapper 與來源一起提交，CI 不改寫版本；本機與 CI 都不略過依賴檢查。此次工具升級原因、官方相容依據及仍待新 Actions 的限制見 [ANDROID_TOOLCHAIN_FIX.md](ANDROID_TOOLCHAIN_FIX.md)。
 
 ## 準備工具
 
@@ -30,13 +30,13 @@ dart format lib test
 python3 scripts/prepare_android.py
 flutter analyze
 flutter test
-flutter build apk --release --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+flutter build apk --release --dart-define=USE_MOCK_DATA=false
 ```
 
 ARM／x86 分 ABI：
 
 ```bash
-flutter build apk --release --split-per-abi --dart-define=USE_MOCK_DATA=false --android-skip-build-dependency-validation
+flutter build apk --release --split-per-abi --dart-define=USE_MOCK_DATA=false
 ```
 
 以上指令預設直接向 Yahoo Finance 取得台美股行情，在手機上計算指標，不需要自架 Python 後端。未指定旗標時 `USE_MOCK_DATA` 也預設為 `false`。無法連線時顯示失敗及重試提示；有上次正式行情快取時顯示其時間與快取狀態，不自動改載假資料。
@@ -46,8 +46,7 @@ flutter build apk --release --split-per-abi --dart-define=USE_MOCK_DATA=false --
 ```bash
 flutter build apk --release \
   --dart-define=USE_MOCK_DATA=false \
-  --dart-define=API_BASE_URL=https://你的掃描服務.example \
-  --android-skip-build-dependency-validation
+  --dart-define=API_BASE_URL=https://你的掃描服務.example
 ```
 
 輸出路徑 `build/app/outputs/flutter-apk/`。可安裝合併版：
@@ -65,7 +64,7 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 
 Flutter／Android 建置工具自動產生並使用 Debug Keystore。可安裝 APK 需要簽署，因此「使用 Debug Keystore」是測試簽署，不是無簽名打包。專案 Release 在沒有 `android/key.properties` 時使用 Debug 簽署，方便側載測試；正式發布需配置自己的 Release Keystore。
 
-需要保留離線展示版本時，明確使用 `--dart-define=USE_MOCK_DATA=true`，或於設定中開啟示範模式。GitHub 工作流不使用此旗標。新增版本代碼為 `1.3.0+4`，以相同金鑰簽署時可更新先前 APK；舊示範偏好會遷移到正式直連模式，帳戶本金與自行新增的持股保留。
+需要保留離線展示版本時，明確使用 `--dart-define=USE_MOCK_DATA=true`，或於設定中開啟示範模式。GitHub 工作流不使用此旗標。目前版本代碼為 `1.6.1+14`，以相同金鑰簽署時可更新先前 APK；舊示範偏好會遷移到正式直連模式，帳戶本金與自行新增的持股保留。
 
 ## 正式 Release Keystore
 
@@ -85,7 +84,7 @@ keyAlias=martin-release
 keyPassword=你的金鑰密碼
 ```
 
-該檔與私鑰已列入 `.gitignore`，不可與公開原始碼一起分享。Android 的同一 applicationId 更新需使用同一簽署金鑰；從 Debug 簽署切成正式簽署時，測試機可能需先解除安裝舊版。
+該檔與私鑰已列入 `.gitignore`，不可與公開原始碼一起分享。Android 的同一 applicationId 更新需使用同一簽署金鑰；若簽章不符，先保留舊 App 與資料，使用原金鑰建置；不要直接解除安裝造成資料遺失。
 
 ## 網路與通知配置
 

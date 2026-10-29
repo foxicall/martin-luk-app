@@ -1,3 +1,5 @@
+import 'hybrid_protocol_test.dart' show verifiedFixture;
+import 'package:martin_luk_app/models/hybrid_protocol.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'support/mock_preferences.dart';
@@ -9,7 +11,7 @@ import 'package:martin_luk_app/screens/calculator_screen.dart';
 import 'package:martin_luk_app/screens/settings_screen.dart';
 import 'package:martin_luk_app/services/strategy_engine.dart';
 
-StockCandidate _candidate(StockMarket market) => StockCandidate(
+StockCandidate _candidate(StockMarket market) => StockCandidate(hybrid: verifiedFixture(),
       id: '${market.name}:capital-test',
       symbol: market == StockMarket.tw ? '2330.TW' : 'NVDA',
       name: 'Capital test',
@@ -71,12 +73,14 @@ void main() {
     expect(usField.decoration!.helperText, contains('US\$250.00 USD'));
 
     await tester.ensureVisible(us);
+    await tester.pumpAndSettle();
     await tester.enterText(us, '75000.25');
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(us).decoration!.helperText,
         contains('US\$375.00 USD'));
     final save = find.text('儲存設定並更新');
     await tester.ensureVisible(save);
+    await tester.pumpAndSettle();
     await tester.tap(save);
     await tester.pumpAndSettle();
     expect(controller.equityFor(StockMarket.us), 75000.25);
@@ -97,7 +101,7 @@ void main() {
     const screenKey = ValueKey('same-calculator-state');
     final edits = <double>[];
     await tester.pumpWidget(MaterialApp(
-      home: CalculatorScreen(
+      home: CalculatorScreen(riskMode: RiskMode.normal,
         key: screenKey,
         candidate: _candidate(StockMarket.us),
         initialEquity: 50000,
@@ -114,7 +118,7 @@ void main() {
     expect(find.text('請輸入大於 0 的有效帳戶淨值'), findsWidgets);
 
     await tester.pumpWidget(MaterialApp(
-      home: CalculatorScreen(
+      home: CalculatorScreen(riskMode: RiskMode.normal,
         key: screenKey,
         candidate: _candidate(StockMarket.tw),
         initialEquity: 1000000.75,
@@ -131,8 +135,11 @@ void main() {
     expect(twField.decoration!.helperText, contains('NT\$5,000.00 TWD'));
     expect(find.text('請輸入大於 0 的有效帳戶淨值'), findsNothing);
     expect(find.text('US\$250.00 USD'), findsNothing);
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('calculator-cash'))).controller!.text, isEmpty);
+    expect(edits, isEmpty);
+    await tester.enterText(find.byKey(const ValueKey('calculator-cash')), '1000000.75');
+    await tester.pumpAndSettle();
     expect(find.text('2,500 股'), findsOneWidget);
-    expect(edits, isEmpty); // Seeding the next market is not a user edit.
     expect(tester.takeException(), isNull);
   });
 
@@ -142,7 +149,7 @@ void main() {
     final stock = _candidate(StockMarket.us);
     Future<void> show(double equity) async {
       await tester.pumpWidget(MaterialApp(
-        home: CalculatorScreen(
+        home: CalculatorScreen(riskMode: RiskMode.normal,
           key: screenKey,
           candidate: stock,
           initialEquity: equity,
@@ -152,6 +159,8 @@ void main() {
     }
 
     await show(50000.75);
+    await tester.enterText(find.byKey(const ValueKey('calculator-cash')), '50000.75');
+    await tester.pumpAndSettle();
     final field = find.byKey(const ValueKey('calculator-capital-us'));
     expect(tester.widget<TextField>(field).controller!.text, '50000.75');
     await show(90000.75);
@@ -174,6 +183,9 @@ void main() {
     // viewport. Scroll until they exist before asking Flutter to reveal them.
     await tester.scrollUntilVisible(taiwanStock, 200,
         scrollable: find.byType(Scrollable).first);
+    await Scrollable.ensureVisible(tester.element(taiwanStock), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.pumpAndSettle();
     await tester.tap(taiwanStock);
     await tester.pumpAndSettle();
     final twField = find.byKey(const ValueKey('calculator-capital-tw'));
@@ -187,17 +199,21 @@ void main() {
     await tester.pumpAndSettle();
     final usTab = find.text('美股三大交易所 · US');
     await tester.ensureVisible(usTab);
+    await tester.pumpAndSettle();
     await tester.tap(usTab);
     await tester.pumpAndSettle();
     final usStock = find.text('NVDA');
     await tester.scrollUntilVisible(usStock, 200,
         scrollable: find.byType(Scrollable).first);
+    await Scrollable.ensureVisible(tester.element(usStock), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.pumpAndSettle();
     await tester.tap(usStock);
     await tester.pumpAndSettle();
     final usField = find.byKey(const ValueKey('calculator-capital-us'));
     expect(tester.widget<TextField>(usField).controller!.text, '50000');
     expect(tester.widget<TextField>(usField).decoration!.helperText,
-        contains('US\$250.00 USD'));
+        contains('帳戶狀態未確認'));
     await tester.enterText(usField, '60000.5');
     await tester.pumpAndSettle();
     expect(controller.equityFor(StockMarket.us), 60000.5);
