@@ -40,7 +40,9 @@ jobs:
             git -C "$SCAN_DATA_DIR" switch --orphan momentum-scan-data
             printf 'public-market-data-only\n' > "$SCAN_DATA_DIR/.momentum-generated"
           fi
+      - name: Verify Volume Breakout background pipeline
+        run: node --test momentum-cloud/cloud/volume-runner.test.mjs
       - name: Scan all US and Taiwan stocks and publish progress
         env:
           SCAN_DATA_DIR: ${{ runner.temp }}/momentum-scan-data
-        run: node momentum-cloud/cloud/runner.mjs
+        run: node momentum-cloud/cloud/volume-runner.mjs
