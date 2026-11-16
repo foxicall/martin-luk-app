@@ -41,7 +41,7 @@ jobs:
             printf 'public-market-data-only\n' > "$SCAN_DATA_DIR/.momentum-generated"
           fi
       - name: Verify Volume Breakout background pipeline
-        run: node --test momentum-cloud/cloud/volume-runner.test.mjs
+        run: node --test momentum-cloud/cloud/volume-*.test.mjs
       - name: Scan all US and Taiwan stocks and publish progress
         env:
           SCAN_DATA_DIR: ${{ runner.temp }}/momentum-scan-data
