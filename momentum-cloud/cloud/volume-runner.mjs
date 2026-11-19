@@ -7,6 +7,7 @@ import {readUniverse} from '../volume/universe.js';
 import {fetchVBAssessment} from '../volume/volume-data.js';
 import {fetchVBScope,vbScopeFor} from '../volume/volume-scope.js';
 import {VB_VERSION,evaluateVolumeBreakout} from '../volume/volume-breakout.js';
+import {dataDiagnosis,summarizeDataQuality} from '../volume/data-quality.js';
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const iso=()=>new Date().toISOString();
@@ -36,10 +37,32 @@ export async function scanVolumeQueue(queue,{evaluate=fetchVBAssessment,onCheckp
   }));
   failedBatches=batch.every(r=>results.get(r.symbol).error)?failedBatches+1:0;
   const complete=i+batchSize>=remaining.length,paused=failedBatches>=3;
-  if(clock()-last>=checkpointEvery||complete||paused){await onCheckpoint([...results.values()],complete?'completed':paused?'paused':'running');last=clock();}
+  if(clock()-last>=checkpointEvery||complete||paused){await onCheckpoint([...results.values()],paused?'paused':'running',{phase:'scanning'});last=clock();}
   if(paused&&!complete)return {results:[...results.values()],status:'paused'};
   if(!complete&&pauseMs)await wait(pauseMs);
  }
+ // A successful HTTP response may still contain transient null closes. Repair those
+ // once after the first sweep, when the provider has had time to settle its bars.
+ // Short IPO histories and stale/illiquid listings are not repeatedly downloaded.
+ const repair=queue.filter(r=>dataDiagnosis(results.get(r.symbol))?.retryable);
+ let attempted=0,recovered=0;
+ await onCheckpoint([...results.values()],'running',{phase:'repairing',total:repair.length,attempted,recovered});
+ for(let i=0;i<repair.length;i+=batchSize){
+  if(stop())return {results:[...results.values()],status:'interrupted'};
+  const batch=repair.slice(i,i+batchSize);
+  await Promise.all(batch.map(async r=>{
+   const prior=results.get(r.symbol);attempted++;
+   try{
+    const value={...await evaluate(r.symbol,r.market,vbScopeFor(scope,r.symbol,r.market),{forceHistory:true}),name:r.name};
+    if(value.strategyVersion!==VB_VERSION||value.symbol!==r.symbol||value.market!==r.market)throw Error('策略或股票識別不符');
+    const restored=!dataDiagnosis(value);if(restored)recovered++;
+    results.set(r.symbol,{...value,historyRecovery:{...value.historyRecovery,recovered:restored||value.historyRecovery?.recovered===true,repairPass:1}});
+   }catch{results.set(r.symbol,{...prior,historyRecovery:{...prior.historyRecovery,repairPass:1,repairError:'補抓暫未成功；保留本輪已取得資料'}});}
+  }));
+  if(clock()-last>=checkpointEvery||i+batchSize>=repair.length){await onCheckpoint([...results.values()],'running',{phase:'repairing',total:repair.length,attempted,recovered});last=clock();}
+  if(pauseMs&&i+batchSize<repair.length)await wait(pauseMs);
+ }
+ await onCheckpoint([...results.values()],'completed',{phase:'completed',total:repair.length,attempted,recovered});
  return {results:[...results.values()],status:'completed'};
 }
 export async function writeVolumeSnapshot(directory,manifest,results){
@@ -49,7 +72,7 @@ export async function writeVolumeSnapshot(directory,manifest,results){
   await writeFile(resolve(directory,path),data);pages.push({path,sha256:digest,count:Math.min(250,results.length-i)});
  }
  const failed=results.filter(r=>r.error).length,missing=results.filter(r=>!r.error&&r.status==='insufficient_data').length;
- const next={...manifest,version:2,strategyVersion:VB_VERSION,updatedAt:iso(),processed:results.length,failed,missing,valid:results.length-failed-missing,breakouts:results.filter(r=>!r.error&&r.technicalBreakout).length,remaining:Math.max(0,manifest.total-results.length),pages};
+ const next={...manifest,version:2,strategyVersion:VB_VERSION,updatedAt:iso(),processed:results.length,failed,missing,valid:results.length-failed-missing,dataQuality:summarizeDataQuality(results),breakouts:results.filter(r=>!r.error&&r.technicalBreakout).length,remaining:Math.max(0,manifest.total-results.length),pages};
  await writeFile(resolve(directory,'volume-latest.json'),JSON.stringify(next));return next;
 }
 function git(directory,args){const r=spawnSync('git',['-C',directory,...args],{encoding:'utf8',maxBuffer:2e6,timeout:60000});if(r.status!==0)throw Error(`Git ${args[0]} failed (${r.status}); checkpoint preserved locally`);return r.stdout.trim();}
@@ -89,7 +112,7 @@ async function main(){
   if(previous?.strategyVersion===VB_VERSION&&previous.fingerprint===manifest.fingerprint&&previous.sourceCommit===manifest.sourceCommit&&previous.startedAt.slice(0,10)===manifest.startedAt.slice(0,10)&&['paused','running','interrupted'].includes(previous.status))results=oldRows.filter(r=>!r.error);
   const scope=await fetchVBScope().catch(()=>null);
   await writeVolumeSnapshot(directory,manifest,results);await publish();
-  const outcome=await scanVolumeQueue(universe.rows,{seed:results,scope,stop:()=>stopping||Date.now()>deadline,onCheckpoint:async(rows,status)=>{results=rows;manifest.status=status;const m=await writeVolumeSnapshot(directory,manifest,results);await publish();console.log(JSON.stringify({status,processed:m.processed,total:m.total,valid:m.valid,missing:m.missing,failed:m.failed,updatedAt:m.updatedAt}));}});
+  const outcome=await scanVolumeQueue(universe.rows,{seed:results,scope,stop:()=>stopping||Date.now()>deadline,onCheckpoint:async(rows,status,recovery)=>{results=rows;manifest.status=status;manifest.recovery=recovery;const m=await writeVolumeSnapshot(directory,manifest,results);await publish();console.log(JSON.stringify({status,processed:m.processed,total:m.total,valid:m.valid,missing:m.missing,failed:m.failed,recovery,dataQuality:m.dataQuality,updatedAt:m.updatedAt}));}});
   results=outcome.results;manifest.status=outcome.status;manifest.completedAt=outcome.status==='completed'?iso():null;
   await writeVolumeSnapshot(directory,manifest,results);await publish();if(outcome.status!=='completed')process.exitCode=1;
  }catch(e){manifest.status='failed';manifest.error='雲端本輪中斷，已保留成功結果；請查看執行紀錄';try{await writeVolumeSnapshot(directory,manifest,results);await publish();}catch{}throw e;}
