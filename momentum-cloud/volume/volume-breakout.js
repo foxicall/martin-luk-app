@@ -1,6 +1,6 @@
 /** Single strategy: exact four entry predicates in the user's uploaded document. */
 export const VB_VERSION='volume-breakout-1.0.0';
-export const APP_VERSION='6.0.5';
+export const APP_VERSION='6.0.21';
 export const VB_RULES=Object.freeze({baseDays:30,maxBasePct:20,volumeDays:20,minVolumeRatio:1.5,maxChasePct:5,hardStopPct:7,emaExitDays:21});
 export const VB_STATES=Object.freeze({pending:'尚未評估',insufficient_data:'資料不足',no_base:'未成型',breakdown:'跌破基底',consolidation:'基底整理中',low_volume:'突破量能不足',extended:'超過追價上限',breakout:'放量突破'});
 const vbFinite=n=>typeof n==='number'&&Number.isFinite(n);

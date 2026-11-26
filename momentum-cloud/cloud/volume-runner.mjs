@@ -4,10 +4,10 @@ import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {readUniverse} from '../volume/universe.js';
-import {fetchVBAssessment} from '../volume/volume-data.js';
+import {fetchVBAssessment,VB_DATA_VERSION} from '../volume/volume-data.js';
 import {fetchVBScope,vbScopeFor} from '../volume/volume-scope.js';
 import {VB_VERSION,evaluateVolumeBreakout} from '../volume/volume-breakout.js';
-import {dataDiagnosis,summarizeDataQuality} from '../volume/data-quality.js';
+import {dataDiagnosis,summarizeDataQuality,confirmedHistory} from '../volume/data-quality.js';
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const iso=()=>new Date().toISOString();
@@ -44,9 +44,11 @@ export async function scanVolumeQueue(queue,{evaluate=fetchVBAssessment,onCheckp
  // A successful HTTP response may still contain transient null closes. Repair those
  // once after the first sweep, when the provider has had time to settle its bars.
  // Short IPO histories and stale/illiquid listings are not repeatedly downloaded.
- const repair=queue.filter(r=>dataDiagnosis(results.get(r.symbol))?.retryable);
+ const deferred=queue.filter(r=>{const value=results.get(r.symbol);return confirmedHistory(value)&&new Set((value.historyRecovery?.attempts||[]).filter(a=>a.state==='latest_session_pending'&&a.latestDate===value.dataQuality.latestDate).map(a=>a.host)).size>=2;});
+ const deferredSymbols=new Set(deferred.map(r=>r.symbol));
+ const repair=queue.filter(r=>dataDiagnosis(results.get(r.symbol))?.retryable&&!deferredSymbols.has(r.symbol));
  let attempted=0,recovered=0;
- await onCheckpoint([...results.values()],'running',{phase:'repairing',total:repair.length,attempted,recovered});
+ await onCheckpoint([...results.values()],'running',{phase:'repairing',total:repair.length,attempted,recovered,deferredLatest:deferred.length});
  for(let i=0;i<repair.length;i+=batchSize){
   if(stop())return {results:[...results.values()],status:'interrupted'};
   const batch=repair.slice(i,i+batchSize);
@@ -59,10 +61,10 @@ export async function scanVolumeQueue(queue,{evaluate=fetchVBAssessment,onCheckp
     results.set(r.symbol,{...value,historyRecovery:{...value.historyRecovery,recovered:restored||value.historyRecovery?.recovered===true,repairPass:1}});
    }catch{results.set(r.symbol,{...prior,historyRecovery:{...prior.historyRecovery,repairPass:1,repairError:'補抓暫未成功；保留本輪已取得資料'}});}
   }));
-  if(clock()-last>=checkpointEvery||i+batchSize>=repair.length){await onCheckpoint([...results.values()],'running',{phase:'repairing',total:repair.length,attempted,recovered});last=clock();}
+  if(clock()-last>=checkpointEvery||i+batchSize>=repair.length){await onCheckpoint([...results.values()],'running',{phase:'repairing',total:repair.length,attempted,recovered,deferredLatest:deferred.length});last=clock();}
   if(pauseMs&&i+batchSize<repair.length)await wait(pauseMs);
  }
- await onCheckpoint([...results.values()],'completed',{phase:'completed',total:repair.length,attempted,recovered});
+ await onCheckpoint([...results.values()],'completed',{phase:'completed',total:repair.length,attempted,recovered,deferredLatest:deferred.length});
  return {results:[...results.values()],status:'completed'};
 }
 export async function writeVolumeSnapshot(directory,manifest,results){
@@ -72,7 +74,7 @@ export async function writeVolumeSnapshot(directory,manifest,results){
   await writeFile(resolve(directory,path),data);pages.push({path,sha256:digest,count:Math.min(250,results.length-i)});
  }
  const failed=results.filter(r=>r.error).length,missing=results.filter(r=>!r.error&&r.status==='insufficient_data').length;
- const next={...manifest,version:2,strategyVersion:VB_VERSION,updatedAt:iso(),processed:results.length,failed,missing,valid:results.length-failed-missing,dataQuality:summarizeDataQuality(results),breakouts:results.filter(r=>!r.error&&r.technicalBreakout).length,remaining:Math.max(0,manifest.total-results.length),pages};
+ const next={...manifest,version:2,strategyVersion:VB_VERSION,dataVersion:VB_DATA_VERSION,updatedAt:iso(),processed:results.length,failed,missing,valid:results.length-failed-missing,dataQuality:summarizeDataQuality(results),breakouts:results.filter(r=>!r.error&&r.technicalBreakout).length,remaining:Math.max(0,manifest.total-results.length),pages};
  await writeFile(resolve(directory,'volume-latest.json'),JSON.stringify(next));return next;
 }
 function git(directory,args){const r=spawnSync('git',['-C',directory,...args],{encoding:'utf8',maxBuffer:2e6,timeout:60000});if(r.status!==0)throw Error(`Git ${args[0]} failed (${r.status}); checkpoint preserved locally`);return r.stdout.trim();}

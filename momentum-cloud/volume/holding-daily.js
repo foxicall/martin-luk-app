@@ -7,6 +7,11 @@ export function buildHoldingDaily(data,daily,quote,{now=Date.now()/1000}={}){
  const bars=daily.bars||[],last=bars.at(-1);if(last)base.date=last.date;
  const validDates=bars.length>=21&&bars.every((b,i)=>b.completed===true&&Number.isFinite(b.time)&&b.time>0&&typeof b.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(b.date)&&(!i||b.time>bars[i-1].time&&b.date>bars[i-1].date&&b.time-bars[i-1].time<=14*86400));
  if(!validDates)return base;
+ // Preserve the last genuinely complete price history. A missing latest row does
+ // not erase older confirmed evidence; it also never extends it with a quote.
+ const firstGap=bars.findIndex(b=>!Number.isFinite(b.close)||b.close<=0),prefix=firstGap<0?bars:bars.slice(0,firstGap),priorEMA=vbEMA(prefix.map(b=>b.close));
+ if(priorEMA!==null)base.lastConfirmed={date:prefix.at(-1).date,close:prefix.at(-1).close,ema21:priorEMA,bars:prefix.length,basis:'adjusted-daily'};
+ base.recovery={checkedAt:quote.fetchedAt,attempts:data._historyRecovery?.attempts?.length||1,recovered:data._historyRecovery?.recovered===true};
  const adjusted=bars.map(b=>b.close),ema=vbEMA(adjusted);
  if(daily.adjusted&&ema!==null&&!daily.issues.length)return {...base,confirmed:true,basis:'adjusted-daily',close:last.close,ema21:ema,bars:bars.length,seedDate:bars[0].date,reason:'使用完整還原收盤日線計算 21EMA'};
  // Only replace a missing terminal raw close, never fill gaps, change old bars,

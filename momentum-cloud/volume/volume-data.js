@@ -2,26 +2,27 @@ import {buildHoldingDaily} from './holding-daily.js';
 import {marketSession,sessionLocal,parseSessionTWCalendar} from './market-session.js';
 import {evaluateVolumeBreakout} from './volume-breakout.js';
 const VB_CACHE=new Map(),VB_PENDING=new Map();
+export const VB_DATA_VERSION='daily-evidence-20261126';
 export async function vbCached(key,seconds,loader){
  const old=VB_CACHE.get(key);if(old&&Date.now()-old.at<(typeof seconds==='function'?seconds(old.data):seconds)*1000)return old.data;
  if(VB_PENDING.has(key))return VB_PENDING.get(key);
  const task=(async()=>{const data=await loader();if(VB_CACHE.size>150)VB_CACHE.delete(VB_CACHE.keys().next().value);VB_CACHE.set(key,{at:Date.now(),data});return data;})();VB_PENDING.set(key,task);
  try{return await task;}finally{VB_PENDING.delete(key);}
 }
-export async function vbYahoo(symbol,{fetcher=(...args)=>fetch(...args),range='6mo',market=/[.](TW|TWO)$/.test(symbol)?'TW':'US',now=()=>Date.now()/1000}={}){
+export async function vbYahoo(symbol,{fetcher=(...args)=>fetch(...args),range='6mo',market=symbol==='^TWII'||/[.](TW|TWO)$/.test(symbol)?'TW':'US',now=()=>Date.now()/1000,force=false}={}){
  const attempts=[],blocked=new Set();let best=null,bestQuality=null,latestQuoteDate='';
  // Inspect full bodies, not just HTTP 200. Never splice OHLC or adjustment factors across responses.
  const requests=[['query1.finance.yahoo.com',range],['query2.finance.yahoo.com',range],['query2.finance.yahoo.com','1y']];
  for(const [i,[host,period]] of requests.entries()){
   if(i===2&&(!bestQuality?.retryable||blocked.has(host)||range==='1y'))break;
   try{
-   const response=await fetcher(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${period}&includePrePost=false&events=div%2Csplits&includeAdjustedClose=true`,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(8000)});
+   const response=await fetcher(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${period}&includePrePost=false&events=div%2Csplits&includeAdjustedClose=true${force?'&_='+Math.floor(now()):''}`,{headers:{'User-Agent':'Mozilla/5.0',...(force?{'Cache-Control':'no-cache','Pragma':'no-cache'}:{})},signal:AbortSignal.timeout(8000)});
    if(!response.ok){if(response.status===429)blocked.add(host);attempts.push({host,range:period,state:'http_error',status:response.status});continue;}
    const j=await response.json(),data=j?.chart?.result?.[0];
    if(j.chart?.error||data?.meta?.symbol!==symbol||data.meta.currency!==(market==='TW'?'TWD':'USD')||!Array.isArray(data.timestamp))throw Error('invalid chart identity');
    const received=now();vbQuote(data,symbol,market,received);const q=vbHistoryQuality(data,market,received),quoteDate=Number.isFinite(data.meta.regularMarketTime)?vbDate(data.meta.regularMarketTime,market):'';
    latestQuoteDate=quoteDate>latestQuoteDate?quoteDate:latestQuoteDate;
-   attempts.push({host,range:period,state:q.complete?'complete':q.code,availableBars:q.availableBars,missingFields:q.missingFields});
+   attempts.push({host,range:period,state:q.complete?'complete':q.code,availableBars:q.availableBars,latestDate:q.latestDate,missingFields:q.missingFields});
    const bestDate=best? vbDate(best.meta.regularMarketTime,market):'';
    if(!best||quoteDate>bestDate||quoteDate===bestDate&&(q.complete&&!bestQuality.complete||q.complete===bestQuality.complete&&q.validBars>bestQuality.validBars)){best={...data,_vbFetchedAt:received};bestQuality=q;}
    if(q.complete&&quoteDate===latestQuoteDate||!q.retryable&&i===0)break;
@@ -71,13 +72,27 @@ export function vbHistoryQuality(data,market,now=Date.now()/1000){
  }
  const complete=r.status!=='insufficient_data';let code='complete',retryable=false;
  if(!complete){if(r.missing.some(s=>s.includes('最後成交超過')))code='stale_quote';else if(missingFields.size||!daily.bars.length||r.missing.some(s=>/缺少最後已完成|未提供日線/.test(s))){code='daily_fields';retryable=true;}else if(daily.bars.length<31)code='short_history';else code='history_gap';}
- return {complete,code,retryable,availableBars:daily.bars.length,validBars:daily.bars.filter(b=>['open','high','low','close','volume'].every(k=>Number.isFinite(b[k]))).length,missingFields:[...missingFields],latestDate:daily.bars.at(-1)?.date||null};
+ const invalid=daily.bars.filter(b=>!vbCompleteBar(b)),last=daily.bars.at(-1),history=code==='daily_fields'?vbLastCompleteAssessment(daily):null;
+ // A provider's terminal null close is different from damaged/absent history.
+ // Keep the current signal blocked; only the dated, contiguous history is usable.
+ const latestSessionPending=!!history&&history.bars===daily.bars.length-1&&invalid.length===1&&invalid[0]===last&&last.date===vbDate(data.meta.regularMarketTime,market)&&last.time-daily.bars.at(-2).time<=7*86400&&missingFields.size>0&&[...missingFields].every(f=>['close','adjclose'].includes(f));
+ if(latestSessionPending)code='latest_session_pending';
+ return {complete,code,retryable,latestSessionPending,confirmedThrough:latestSessionPending?history.date:null,availableBars:daily.bars.length,validBars:daily.bars.filter(vbCompleteBar).length,missingFields:[...missingFields],missingDates:invalid.map(b=>b.date).filter(Boolean),latestDate:last?.date||null};
+}
+function vbCompleteBar(b){return b?.completed===true&&Number.isFinite(b.time)&&b.time>0&&/^\d{4}-\d{2}-\d{2}$/.test(b.date)&&['open','high','low','close'].every(k=>Number.isFinite(b[k])&&b[k]>0)&&Number.isFinite(b.volume)&&b.volume>=0&&b.low<=Math.min(b.open,b.close)&&b.high>=Math.max(b.open,b.close)&&b.low<=b.high;}
+// An incomplete latest session must not erase verified history or become a buy.
+// Stop at the first invalid row; never skip a gap to assemble a historical signal.
+export function vbLastCompleteAssessment(daily,{symbol,market,fetchedAt}={}){
+ const prefix=[];for(const b of daily.bars||[]){const previous=prefix.at(-1);if(!vbCompleteBar(b)||previous&&(b.time<=previous.time||b.date<=previous.date||b.time-previous.time>14*86400))break;prefix.push(b);}
+ if(prefix.length<31||prefix.length===daily.bars.length&&!daily.issues?.length)return null;
+ const assessment=evaluateVolumeBreakout(prefix,{symbol,market,adjusted:true,fetchedAt});if(!assessment.metrics)return null;
+ return {symbol,market,date:prefix.at(-1).date,bars:prefix.length,fetchedAt,basis:'adjusted-daily',historical:true,technicalBreakout:false,eligible:false,observedStatus:assessment.status,metrics:assessment.metrics,checks:assessment.checks};
 }
 export function vbHistoryTTL(data){const q=vbHistoryQuality(data,/[.](TW|TWO)$/.test(data.meta?.symbol)?'TW':'US');return q.retryable||q.missingFields.length?30:300;}
-export async function vbHistory(symbol,{force=false}={}){if(force)VB_CACHE.delete('history:'+symbol);return vbCached('history:'+symbol,vbHistoryTTL,()=>vbYahoo(symbol));}
+export async function vbHistory(symbol,{force=false}={}){const key='history:'+symbol;if(force){const pending=VB_PENDING.get(key);if(pending)try{await pending;}catch{/* A failed earlier request must not cancel an explicit retry. */}VB_CACHE.delete(key);}return vbCached(key,vbHistoryTTL,()=>vbYahoo(symbol,{force}));}
 export async function vbSessionCalendar(market){if(market!=='TW')return null;try{return await vbCached('tw-session-calendar',3600,async()=>{const r=await fetch('https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule',{signal:AbortSignal.timeout(6000)});if(!r.ok)throw new Error('calendar unavailable');return parseSessionTWCalendar(await r.json());});}catch{return null;}}
 export async function fetchVBQuote(symbol,market){const [data,marketCalendar]=await Promise.all([vbHistory(symbol),vbSessionCalendar(market)]);return vbQuote({...data,marketCalendar},symbol,market);}
 export async function fetchVBAssessment(symbol,market,scope=null,{forceHistory=false}={}){
  const [data,marketCalendar,resolvedScope]=await Promise.all([vbHistory(symbol,{force:forceHistory}),vbSessionCalendar(market),scope]),daily=vbDaily({...data,marketCalendar},market),quote=vbQuote({...data,marketCalendar},symbol,market);
- return {...evaluateVolumeBreakout(daily.bars,{symbol,market,scope:resolvedScope,adjusted:daily.adjusted,issues:daily.issues,source:quote.source,fetchedAt:quote.fetchedAt}),quote,dataQuality:vbHistoryQuality({...data,marketCalendar},market),historyRecovery:data._historyRecovery||null,holdingDaily:buildHoldingDaily(data,daily,quote),omittedOpenBars:daily.omitted};
+ return {...evaluateVolumeBreakout(daily.bars,{symbol,market,scope:resolvedScope,adjusted:daily.adjusted,issues:daily.issues,source:quote.source,fetchedAt:quote.fetchedAt}),dataVersion:VB_DATA_VERSION,quote,dataQuality:vbHistoryQuality({...data,marketCalendar},market),historyRecovery:data._historyRecovery||null,lastCompleteAssessment:vbLastCompleteAssessment(daily,{symbol,market,fetchedAt:quote.fetchedAt}),holdingDaily:buildHoldingDaily(data,daily,quote),omittedOpenBars:daily.omitted};
 }
